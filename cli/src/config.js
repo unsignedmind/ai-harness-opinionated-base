@@ -3,7 +3,7 @@ import path from 'node:path';
 
 export const SPECS_DIR = 'specs';
 export const CONFIG_FILE = 'config.json';
-export const TEMPLATE_CONFIG_PATH = '.claude/skills/n_os/templates/config.json';
+export const TEMPLATE_CONFIG_PATH = '.claude/skills/nos/templates/config.json';
 export const DEFAULT_CONFIG = Object.freeze({
   'id-counters': Object.freeze({ domain: 1, phase: 1, step: 1 }),
 });

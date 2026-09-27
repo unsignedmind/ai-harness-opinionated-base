@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { asList, resolveDomain, PLAN_FILE } from './plan.js';
 
-export const STATUS_FILE_PATH = '.claude/skills/n_os/templates/status.xml';
+export const STATUS_FILE_PATH = '.claude/skills/nos/templates/status.xml';
 const CATEGORIES = { plan: 'plans', phase: 'phases', step: 'steps' };
 
 export function readValidStatuses(root) {

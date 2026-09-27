@@ -1,5 +1,5 @@
 // Minimal markdown renderer for idea.md and step specs. Escapes first, so raw HTML never renders.
-// Ported from moodo-poc/specs/ui, plus `( )` / `(x)` checkboxes from the n_os step-spec template.
+// Ported from moodo-poc/specs/ui, plus `( )` / `(x)` checkboxes from the nos step-spec template.
 
 export const esc = (s: unknown): string =>
   String(s ?? "").replace(

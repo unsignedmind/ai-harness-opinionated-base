@@ -6,7 +6,7 @@ import { createPlan } from './plan.js';
 import { setStatus } from './status.js';
 import { updatePlan } from './update-plan.js';
 
-export const USAGE = `nos - file manager for the n_os harness
+export const USAGE = `nos - file manager for the nos harness
 
 Usage: nos <command> [options]
 
@@ -29,7 +29,7 @@ const CREATE_DOMAIN_HELP = `Usage: nos create-domain --idea <file|-> --slug <slu
 Create a new domain for an idea.
 
   1. Creates specs/ and specs/config.json if missing (config.json is copied from
-     .claude/skills/n_os/templates/config.json when present)
+     .claude/skills/nos/templates/config.json when present)
   2. Takes the next domain id from specs/config.json and increases the counter
   3. Creates specs/domain-<id>-<slug>/ and saves the idea as idea.md in it
 
@@ -142,7 +142,7 @@ Change a status in specs/<domain>/plan.json.
   --step <id>             sets the status of that step (ids are unique, --phase is optional;
                           when given, the step must belong to that phase)
 
-The status must be listed in .claude/skills/n_os/templates/status.xml:
+The status must be listed in .claude/skills/nos/templates/status.xml:
 <plans> for the plan, <phases> for phases, <steps> for steps.
 Only the "status" field is changed; the rest of plan.json is kept as-is.
 
