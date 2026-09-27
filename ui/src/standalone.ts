@@ -1,4 +1,4 @@
-// Entry of the standalone viewer (.claude/skills/n_os/ui/index.html, opened straight from disk). Built into
+// Entry of the standalone viewer (.claude/skills/nos/ui/index.html, opened straight from disk). Built into
 // bundle/viewer.js as a classic script, because file:// pages cannot load ES modules. Data comes
 // from a folder the user picks; the handle is remembered so a revisit is one click.
 import { mountApp } from "./app";

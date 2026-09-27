@@ -207,7 +207,7 @@ test('bin/nos.js runs as an executable', (t) => {
 
 test('set-status changes a step status and prints the change', (t) => {
   const root = makeTempRoot(t);
-  writeFile(root, '.claude/skills/n_os/templates/status.xml', STATUS_XML);
+  writeFile(root, '.claude/skills/nos/templates/status.xml', STATUS_XML);
   invoke(['create-domain', '--idea', '-', '--slug', 'auth'], { cwd: root, stdin: '# Auth' });
   invoke(['create-plan', '--domain', 'domain-1-auth', '--plan', '-'], { cwd: root, stdin: JSON.stringify(PLAN) });
 
@@ -230,7 +230,7 @@ test('set-status changes a step status and prints the change', (t) => {
 
 test('set-status reports an invalid status as a failed operation', (t) => {
   const root = makeTempRoot(t);
-  writeFile(root, '.claude/skills/n_os/templates/status.xml', STATUS_XML);
+  writeFile(root, '.claude/skills/nos/templates/status.xml', STATUS_XML);
   invoke(['create-domain', '--idea', '-', '--slug', 'auth'], { cwd: root, stdin: '# Auth' });
   invoke(['create-plan', '--domain', 'domain-1-auth', '--plan', '-'], { cwd: root, stdin: JSON.stringify(PLAN) });
 

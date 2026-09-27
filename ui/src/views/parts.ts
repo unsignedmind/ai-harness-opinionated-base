@@ -12,7 +12,7 @@ import {
 export const pill = (st: Status) =>
   `<span class="pill ${st.key}${st.flagged ? " flagged" : ""}"${
     st.flagged
-      ? ' title="not an n_os status — see .claude/skills/n_os/templates/status.xml"'
+      ? ' title="not an nos status — see .claude/skills/nos/templates/status.xml"'
       : ""
   }>${esc(st.label)}${st.flagged ? " ⚠" : ""}</span>`;
 

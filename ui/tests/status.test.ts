@@ -8,7 +8,7 @@ import {
   statusLabel,
 } from "../src/status";
 
-test("every n_os status maps to its own key without a flag", () => {
+test("every nos status maps to its own key without a flag", () => {
   for (const s of [
     "open",
     "in-specification",
@@ -53,7 +53,7 @@ test("an empty or missing value is flagged other with a dash label", () => {
   });
 });
 
-test("status order follows the n_os lifecycle, off-spec buckets last", () => {
+test("status order follows the nos lifecycle, off-spec buckets last", () => {
   expect(STATUS_ORDER).toStrictEqual([
     "open",
     "in-specification",

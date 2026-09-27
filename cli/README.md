@@ -1,6 +1,6 @@
 # nos-cli
 
-File manager CLI for the n_os harness. `nos` manages the `specs/` folder of a project: it hands out ids from a counter, creates domain and phase folders, and lays out empty spec files for each step of a plan.
+File manager CLI for the nos harness. `nos` manages the `specs/` folder of a project: it hands out ids from a counter, creates domain and phase folders, and lays out empty spec files for each step of a plan.
 
 It uses no dependencies and needs Node.js 20 or newer.
 
@@ -49,7 +49,7 @@ General rules:
 nos create-domain --idea <file|-> --slug <slug> [--root <dir>]
 ```
 
-1. Creates `specs/` and `specs/config.json` if they are missing. If `.claude/skills/n_os/templates/config.json` exists, `config.json` is copied from it.
+1. Creates `specs/` and `specs/config.json` if they are missing. If `.claude/skills/nos/templates/config.json` exists, `config.json` is copied from it.
 2. Takes the next domain id from `specs/config.json` and increments the counter.
 3. Creates `specs/domain-<id>-<slug>/` and saves the idea in it as `idea.md`.
 
@@ -145,7 +145,7 @@ nos set-status --domain <domain-<id>-<slug>> [--phase <id>] [--step <id>] --stat
 | `--phase <id>`            | that phase                                                |
 | `--step <id>`             | that step (`--phase` is optional, but must match if given) |
 
-The status is checked against `.claude/skills/n_os/templates/status.xml` in the project: `<plans>` for the plan, `<phases>` for phases, `<steps>` for steps. An invalid status fails with the list of valid ones, and `plan.json` is left untouched. Only the `status` field is changed. Phase and step ids are read from each step's `spec-file` path.
+The status is checked against `.claude/skills/nos/templates/status.xml` in the project: `<plans>` for the plan, `<phases>` for phases, `<steps>` for steps. An invalid status fails with the list of valid ones, and `plan.json` is left untouched. Only the `status` field is changed. Phase and step ids are read from each step's `spec-file` path.
 
 ```sh
 $ nos set-status --domain domain-1-user-auth --step 1 --status in-review

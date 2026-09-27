@@ -1,4 +1,4 @@
-// Statuses from `.claude/skills/n_os/templates/status.xml`. Plans use open/in-progress/on-hold/done,
+// Statuses from `.claude/skills/nos/templates/status.xml`. Plans use open/in-progress/on-hold/done,
 // phases their lifecycle, steps the same plus in-specification/specified. Anything else is sorted
 // into `other` and flagged.
 export const STATUS_ORDER = [
