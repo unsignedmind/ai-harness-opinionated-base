@@ -3,12 +3,16 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
+import { serveSpecs } from "./src/serve-specs.ts";
+
 export default defineConfig({
+  // specs/ sits at the repo root, outside the viewer's root
+  plugins: [
+    serveSpecs(fileURLToPath(new URL("../../../../specs", import.meta.url))),
+  ],
   server: {
     port: 5180,
     open: "/dev.html",
-    // the viewer reads specs/domain-*/ at the repo root, outside its root
-    fs: { allow: [fileURLToPath(new URL("../../../..", import.meta.url))] },
   },
   test: {
     environment: "jsdom",

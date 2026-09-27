@@ -85,7 +85,7 @@ export function renderMd(md: string | null | undefined): string {
       let items = "";
       while (i < lines.length && (m = CHECK.exec(lines[i]))) {
         const done = m[1] !== " ";
-        items += `<li class="check${done ? " done" : ""}"><span class="box">${done ? "✓" : ""}</span>${inline(m[2])}</li>`;
+        items += `<li class="check${done ? " done" : ""}"><span class="box">${done ? "✓" : ""}</span><span class="txt">${inline(m[2])}</span></li>`;
         i++;
       }
       out += `<ul class="checks">${items}</ul>`;
