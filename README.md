@@ -100,7 +100,7 @@ Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
    Then: `Create a plan now?` → `YES`.
 2. **PLAN**: the planner splits the idea into phases and steps and saves `plan.json`. Every step gets an empty spec file.
    Then: `Run it now?` → `YES`.
-   > The plan agent will judge on its own where human intervention is required. It configures this in the plan.json. By changing the boolean values you can overrule that.
+   > The plan agent will judge on its own where human intervention is required and where a review is not needed (pure documentation). It configures this in the plan.json. By changing the boolean values you can overrule that.
 3. **RUN**: choose a mode:
    ```
    How should the plan run?
@@ -137,6 +137,8 @@ After each task the menu comes back. Every change is proposed first and committe
 | After a step or phase is reviewed | continues | stops, waits for your go |
 | Develop or review is blocked | stops | stops |
 | `human-validation-needed: true` | stops at reviewed | stops at reviewed |
+| `review-needed: false` | skips the review, implemented → done | skips the review, implemented → done |
+| both of the above | stops at implemented | stops at implemented |
 
 You can switch modes at every stop.
 
@@ -148,14 +150,14 @@ nos tells you what it stopped at, its status and why. For human validation it ex
 How do you want to continue?
 A - Continue with the next step of the cycle [GO]
 B - Switch to the other mode and continue [MANUAL]
-C - Give feedback on what is wrong [REJECT]      (only when something is specified or reviewed)
+C - Give feedback on what is wrong [REJECT]      (only when something is specified or reviewed, or implemented without review)
 D - Pause the plan [PAUSE]
 ```
 
 - **GO**: continue.
 - **AUTO/MANUAL**: switch the mode and continue.
 - **REJECT (specified step)**: the step goes back to `in-specification`. Specify reworks the description and ACs with your feedback.
-- **REJECT (reviewed step)**: the step goes back to `in-specification` with your feedback. Specify updates the ACs if needed, then develop and both reviews run again.
+- **REJECT (reviewed step, or implemented step without review)**: the step goes back to `in-specification` with your feedback. Specify updates the ACs if needed, then develop runs again, and both reviews too when `review-needed` is `true`.
 - **REJECT (phase)**: the planner adds a new **fix phase** directly after it, made from your feedback. The fix phase runs the full cycle and always asks you to validate it.
 - **PAUSE**: the plan becomes `on-hold`. Start it again later with RUN.
 
@@ -166,6 +168,10 @@ Usage limit, closed terminal, shutdown: nothing is lost. Start `/nos` → `RUN` 
 ### Controlling human validation
 
 In `plan.json`, every phase and step has `"human-validation-needed"`. When it is `true`, nos always stops at `reviewed` for you, in any mode. You can edit this in the plan before or during a run. Fix phases always have it set.
+
+### Controlling reviews
+
+In `plan.json`, every phase and step has `"review-needed"` (missing counts as `true`). When it is `false`, nos skips both reviews and moves it from `implemented` straight to `done`. If human validation is needed too, nos stops at `implemented` instead and derives the verification steps from the ACs. The planner sets it to `false` for pure documentation steps, and for phases that are only documentation and human verification (then the phase and all its steps). You can edit this in the plan before or during a run.
 
 ### Where to look
 
@@ -249,6 +255,7 @@ open ──► in-progress ──► implemented ──► in-review ──► r
                                          park: blocked
 ```
 
+- `review-needed: false` (step or phase): `implemented ──► done`. No review, and the human-validation park moves to `implemented`.
 - Step: `in-specification` runs specify, `in-progress` runs develop.
 - Phase: `in-progress` runs the step cycle for every step that is not done. The phase review starts only after all steps are done.
 - There is no review of the whole plan. The phase reviews already cover how steps fit together.
@@ -264,7 +271,7 @@ Every cycle starts with `<entry>resume</entry>`, and every cycle step has `resum
 | `in-specification` | specify again (step only) |
 | `specified` | the MANUAL park, then develop (step only) |
 | `in-progress` | develop again (step), or the step loop (phase) |
-| `implemented` | the MANUAL park, then review |
+| `implemented` | the MANUAL park, then review (or `done` when `review-needed: false`) |
 | `in-review` | both reviews again |
 | `reviewed` | the parks, then `done` |
 | `done` | skipped |
@@ -278,8 +285,8 @@ Asks you focused questions until the idea is ready for planning. It generates a 
 ### abilities/plan.md: implementation architect and planner 🏗️
 
 Reads `docs/architecture.md` if it exists and respects its structure and rules. Two actions:
-- **create**: needs the domain and its `idea.md`. Splits the idea into phases and steps that respect the existing architecture, following `templates/plan.json`. All statuses are `open`, and every phase and step gets a slug. Saves with `nos create-plan`, which creates phase folders and empty step spec files and fills `spec-file`.
-- **extend**: used after a phase is rejected. Inserts a fix phase directly after the rejected one, with the issues split into steps and `human-validation-needed: true`. Saves with `nos update-plan`.
+- **create**: needs the domain and its `idea.md`. Splits the idea into phases and steps that respect the existing architecture, following `templates/plan.json`. All statuses are `open`, and every phase and step gets a slug. Pure documentation steps, and phases that are only documentation and human verification (with all their steps), get `review-needed: false`. Saves with `nos create-plan`, which creates phase folders and empty step spec files and fills `spec-file`.
+- **extend**: used after a phase is rejected. Inserts a fix phase directly after the rejected one, with the issues split into steps and `human-validation-needed: true`, and `review-needed` set by the same rules as create. Saves with `nos update-plan`.
 
 ### abilities/develop.md: developer 🪛
 
@@ -342,7 +349,7 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
 ### Templates
 
 - **config.json**: initial id counters for domain, phase and step. `nos` copies it to `specs/config.json`. Ids are global across all domains.
-- **plan.json**: plan structure. It has a name, status, labels and phases. Phases have a name, status, intent, `human-validation-needed`, a description and steps. Steps have an intent, status, `human-validation-needed`, a description and `spec-file`, and every phase and step also has a slug. `spec-file` is filled by `nos`.
+- **plan.json**: plan structure. It has a name, status, labels and phases. Phases have a name, status, intent, `human-validation-needed`, `review-needed`, a description and steps. Steps have an intent, status, `human-validation-needed`, `review-needed`, a description and `spec-file`, and every phase and step also has a slug. `spec-file` is filled by `nos`.
 - **status.xml**: valid statuses. `nos set-status` rejects anything else.
   - Plans: `open`, `in-progress`, `on-hold`, `done`.
   - Phases: `open`, `in-progress`, `implemented`, `in-review`, `reviewed`, `done`.

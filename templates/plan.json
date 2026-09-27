@@ -7,11 +7,13 @@
     "status": "",
     "intent": "",
     "human-validation-needed": false,
+    "review-needed": true,
     "description": "",
     "steps": {
       "intent": "",
       "status": "",
       "human-validation-needed": false,
+      "review-needed": true,
       "description": "",
       "spec-file": ""
     }

@@ -4,6 +4,7 @@
     <rule>If a subagent returns questions for the user, ask the user and send the answers back to the same subagent via SendMessage</rule>
     <rule>Report to the user concisely in simple language. The user may not know the code or the feature</rule>
     <rule>Every question with choices, also relayed from subagents: one choice per line, "<letter> - <choice text> [<key>]". Letters A, B, C… in choice order. The user answers with letter or key</rule>
+    <rule>"review-needed" missing in plan.json → true</rule>
 </rules>
 
 <start>
@@ -94,6 +95,8 @@
     <step2 resume-at="implemented">
         <status target="phase" from="in-progress" to="implemented"/>
         <park mode="manual"/>
+        <park mode="auto,manual" when="review-needed false and human-validation-needed"/>
+        <do when="review-needed false">Go to step5. Skip the review</do>
     </step2>
     <step3 resume-at="in-review">
         <status target="phase" from="implemented" to="in-review"/>
@@ -107,7 +110,7 @@
         <park mode="auto,manual" when="human-validation-needed"/>
     </step4>
     <step5>
-        <status target="phase" from="reviewed" to="done"/>
+        <status target="phase" from="reviewed|implemented" to="done"/>
     </step5>
 </cycle>
 
@@ -129,6 +132,8 @@
     <step4 resume-at="implemented">
         <status target="step" from="in-progress" to="implemented"/>
         <park mode="manual"/>
+        <park mode="auto,manual" when="review-needed false and human-validation-needed"/>
+        <do when="review-needed false">Go to step7. Skip the review</do>
     </step4>
     <step5 resume-at="in-review">
         <status target="step" from="implemented" to="in-review"/>
@@ -142,12 +147,12 @@
         <park mode="auto,manual" when="human-validation-needed"/>
     </step6>
     <step7>
-        <status target="step" from="reviewed" to="done"/>
+        <status target="step" from="reviewed|implemented" to="done"/>
     </step7>
 </cycle>
 
 <park>
-    <step1>Stop. Report target, status and reason. Specified → summarize the description and ACs in simple words. Human validation → explain in simple steps how the user verifies</step1>
+    <step1>Stop. Report target, status and reason. Specified → summarize the description and ACs in simple words. Human validation → explain in simple steps how the user verifies. No review ran → derive the steps from the ACs of the step or of the phase's steps</step1>
     <step2>
         <question>How do you want to continue?
             <choice key="GO">Continue with the next step of the cycle</choice>
@@ -156,12 +161,12 @@
                 <status target="step" from="specified" to="in-specification"/>
                 <do>Repeat cycle "step" from step1 action with the feedback</do>
             </choice>
-            <choice key="REJECT" when="parked step is reviewed">Give feedback on what is wrong
-                <status target="step" from="reviewed" to="in-specification"/>
+            <choice key="REJECT" when="parked step is reviewed, or implemented with review-needed false">Give feedback on what is wrong
+                <status target="step" from="reviewed|implemented" to="in-specification"/>
                 <do>Repeat cycle "step" from step1 action with the feedback. Pass it to specify and develop</do>
             </choice>
-            <choice key="REJECT" when="parked phase is reviewed">Give feedback on what is wrong
-                <status target="phase" from="reviewed" to="done"/>
+            <choice key="REJECT" when="parked phase is reviewed, or implemented with review-needed false">Give feedback on what is wrong
+                <status target="phase" from="reviewed|implemented" to="done"/>
                 <do>Turn the feedback into clear issues. Run ability "plan" (action extend) with domain, phase id and issues. Continue the run</do>
             </choice>
             <choice key="PAUSE">Pause the plan
