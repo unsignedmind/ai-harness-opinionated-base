@@ -4,7 +4,8 @@ nos turns Claude Code into a small development team. You describe an idea. nos t
 
 The main session is the **orchestrator**. It never writes code itself. It starts a fresh subagent for every job (idea, plan, develop, review, architect), keeps track of progress in `specs/`, and reports to you in simple language.
 
-> **This is a blueprint, not a product.** It shows one way to build a harness. Use it as is, take pieces from it, or rebuild it for your own team and project. Part 3 explains the ideas behind it, and Part 4 shows how to change it.
+> **This is a blueprint, not a finished product for every type of project.** It shows one way to build a harness. Use it as is, take pieces from it, or rebuild it for your own team and project. Part 3 explains the ideas behind it, and Part 4 shows how to change it.
+
 > **My suggestion. Fork this and clone into your `skills` folder. If your skills are not git ignored then clone and copy contents into your skill folder.** 
 
 **Contents**
@@ -48,6 +49,7 @@ open ──► in-specification ──► specified ──► in-progress ──
 - Pick this apart. Copy only what you need. Just get an inspiration on build your own completely.
 - Disclaimer: This harness blueprint was build on a frontend project. The already backed in quality tools for the dev and review agents use `npm xxx`.
 - The good thing is you can just ask an AI to change that. This harness matured enough to let an AI do changes without breaking it easily. I hope so at least :)
+- You don't use Node.js? Well then let the AI port the CLI to python or else
 
 ## Part 1: How to use it
 
