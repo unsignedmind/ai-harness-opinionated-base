@@ -100,6 +100,7 @@ Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
    Then: `Create a plan now?` → `YES`.
 2. **PLAN**: the planner splits the idea into phases and steps and saves `plan.json`. Every step gets an empty spec file.
    Then: `Run it now?` → `YES`.
+   > The plan agent will judge on its own where human intervention is required. It configures this in the plan.json. By changing the boolean values you can overrule that.
 3. **RUN**: choose a mode:
    ```
    How should the plan run?
