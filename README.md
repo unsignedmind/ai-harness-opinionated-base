@@ -8,6 +8,7 @@ The main session is the **orchestrator**. It never writes code itself. It starts
 > **My suggestion. Fork this and clone into your `skills` folder. If your skills are not git ignored then clone and copy contents into your skill folder.** 
 
 **Contents**
+- Part 0: The idea -> Read First
 - Part 1: How to use it
 - Part 2: What everything does
 - Part 3: Understanding harnesses (for newcomers)
@@ -18,14 +19,51 @@ The main session is the **orchestrator**. It never writes code itself. It starts
 
 ---
 
+## Part 0: The idea
+
+### The flow
+- The idea of this harness is to only have one skill the user needs to actively initiate
+- You start with an idea
+- The agents create a plan by splitting the idea into manageable pieces (phases and steps)
+```
+idea    ──►    plan    ──►    phases    ──►    steps
+ida agent      plan agent                      (implementation artifacts)
+
+Phases and steps are inspired by implementation plans from the Claude plan mode when it is prompted to split the work
+```
+- Then the user has the choice to develop fully autonomously or if needed manually control each step
+- Even though manual is an option the goal is to improve the harness to a point you trust the harness to build features over-night autonomously
+- For every step in every phase the following cycle is executed
+```
+open ──► in-specification ──► specified ──► in-progress ──► implemented ──► in-review ──► reviewed ──► done
+         specify                            develop                         review agents                                                                    
+```
+- the specs ui is an addition to the orchestrator chat allowing the user to browse and track the current progress
+- this process is made for larger implementation. for quick fixes this is overkill. since this is a blueprint feel free to add you own quick-dev flow
+
+### Customizable
+- This readme explains how this harness works and what parts there are
+- It shows that there can't be one harness to rule them all
+- Different types of tests are also part of a harness technically but are completely based on you project code
+- Pick this apart. Copy only what you need. Just get an inspiration on build your own completely.
+- Disclaimer: This harness blueprint was build on a frontend project. The already backed in quality tools for the dev and review agents use `npm xxx`.
+- The good thing is you can just ask an AI to change that. This harness matured enough to let an AI do changes without breaking it easily. I hope so at least :)
+
 ## Part 1: How to use it
 
 ### Prerequisites
 
-- Build and tested with Claude. 
 - `nos` CLI (Node.js 20+) | Creates `specs/` folders and ids and changes statuses.
 - Install: `cd .claude/skills/nos/cli && npm install && npm link` (see Part 6)
+
+If you're running this in a web frontend project 
 - Test suite, linter, formatter in the project | Develop and both reviewers agents run all three (e.g. `npm test`, `npm run lint`, `npm run format:check`)
+
+If you're running this in a web frontend project
+- Start Claude in .claude/skills/nos
+- Tell the AI what kind of project this is and let it identify the Test suite, linter, formatter in the project
+- Tell it to make sure the harness uses these instead of the default ones
+> e.g. "This is a backend project. Please identify what commands are used for the test suite, linter, formatter. Make sure the harness uses these instead of the default ones"
 
 ### Start
 
