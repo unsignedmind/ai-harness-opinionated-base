@@ -23,33 +23,33 @@ The main session is the **orchestrator**. It never writes code itself. It starts
 ## Part 0: The idea
 
 ### The flow
-- The idea of this harness is to only have one skill the user needs to actively initiate
-- You start with an idea
-- The agents create a plan by splitting the idea into manageable pieces (phases and steps)
+- The idea behind this harness is that the user only needs to actively initiate one skill.
+- You start with an idea.
+- The agents then create a plan by breaking the idea down into manageable pieces, such as phases and steps.
 ```
 idea    ──►    plan    ──►    phases    ──►    steps
-ida agent      plan agent                      (implementation artifacts)
+idea agent      plan agent                      (implementation artifacts)
 
 Phases and steps are inspired by implementation plans from the Claude plan mode when it is prompted to split the work
 ```
-- Then the user has the choice to develop fully autonomously or if needed manually control each step
-- Even though manual is an option the goal is to improve the harness to a point you trust the harness to build features over-night autonomously
-- For every step in every phase the following cycle is executed
+- Then, the user can choose to develop the harness fully autonomously, or manually control each step if needed.
+- Even though manual control is an option, the goal is to improve the harness to the point where you can trust it to autonomously build features overnight.
+- For every step in every phase, the following cycle is executed:
 ```
 open ──► in-specification ──► specified ──► in-progress ──► implemented ──► in-review ──► reviewed ──► done
          specify                            develop                         review agents                                                                    
 ```
-- the specs ui is an addition to the orchestrator chat allowing the user to browse and track the current progress
-- this process is made for larger implementation. for quick fixes this is overkill. since this is a blueprint feel free to add you own quick-dev flow
+- The Specs UI is an addition to the Orchestrator Chat, allowing users to browse and track their current progress.
+- This process is designed for larger implementations; for quick fixes, it is overkill. Since this is a blueprint, feel free to add your own quick-dev flow.
 
 ### Customizable
-- This readme explains how this harness works and what parts there are
-- It shows that there can't be one harness to rule them all
-- Different types of tests are also part of a harness technically but are completely based on you project code
-- Pick this apart. Copy only what you need. Just get an inspiration on build your own completely.
-- Disclaimer: This harness blueprint was build on a frontend project. The already backed in quality tools for the dev and review agents use `npm xxx`.
-- The good thing is you can just ask an AI to change that. This harness matured enough to let an AI do changes without breaking it easily. I hope so at least :)
-- You don't use Node.js? Well then let the AI port the CLI to python or else
+- This readme explains how this harness works and what its components are.
+- It demonstrates that there can't be one harness to rule them all.
+- Different types of tests are also technically part of a harness, but are completely based on your project code.
+- Pick it apart. Copy only what you need. Use it to inspire you to build your own completely from scratch.
+- Disclaimer: This harness blueprint was built for a front-end project. The quality tools that are already built in for the development and review agents use `npm xxx`.
+- The good news is that you can simply ask an AI to make those changes. This harness has matured enough to allow an AI to make changes without easily breaking it. I hope so, at least!
+- You don't use Node.js? Well, let the AI port the CLI to Python.
 
 ## Part 1: How to use it
 
