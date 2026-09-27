@@ -51,10 +51,17 @@ test("indented continuation lines join the list item", () => {
 test("( ) / (x) and [ ] / [x] lines render as checkboxes", () => {
   expect(body("(x) done\n( ) todo\n- [X] md done")).toBe(
     '<ul class="checks">' +
-      '<li class="check done"><span class="box">✓</span>done</li>' +
-      '<li class="check"><span class="box"></span>todo</li>' +
-      '<li class="check done"><span class="box">✓</span>md done</li>' +
+      '<li class="check done"><span class="box">✓</span><span class="txt">done</span></li>' +
+      '<li class="check"><span class="box"></span><span class="txt">todo</span></li>' +
+      '<li class="check done"><span class="box">✓</span><span class="txt">md done</span></li>' +
       "</ul>",
+  );
+});
+
+test("checkbox text with inline code stays one element", () => {
+  expect(body("(x) a `b` c `d`")).toBe(
+    '<ul class="checks"><li class="check done"><span class="box">✓</span>' +
+      '<span class="txt">a <code>b</code> c <code>d</code></span></li></ul>',
   );
 });
 

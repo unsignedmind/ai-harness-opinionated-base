@@ -558,6 +558,7 @@ table.list td .label {
   padding: 20px 24px;
   min-height: 300px;
   min-width: 0;
+  overflow-x: auto;
 }
 .detail h1 {
   font-size: 20px;
@@ -743,6 +744,11 @@ table.list td .label {
   text-align: center;
   position: relative;
   top: 2px;
+}
+/* one flex item for the whole text, else every <code> and text run is its own column */
+.md .check .txt {
+  flex: 1;
+  min-width: 0;
 }
 .md .check.done .box {
   background: var(--done);
