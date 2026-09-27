@@ -64,13 +64,15 @@ open ──► in-specification ──► specified ──► in-progress ──
 - Install: `cd .claude/skills/nos/cli && npm install && npm link` (see Part 6)
 
 If you're running this in a web frontend project 
-- Test suite, linter, formatter in the project | Develop and both reviewers agents run all three (e.g. `npm test`, `npm run lint`, `npm run format:check`)
+- Make sure you have a test suite, linter, formatter configured in the project | Develop and both reviewers agents run all three (e.g. `npm test`, `npm run lint`, `npm run format:check`)
 
 If you're running this in another kind of project
 - Start Claude in .claude/skills/nos
 - Tell the AI what kind of project this is and let it identify the Test suite, linter, formatter in the project
 - Tell it to make sure the harness uses these instead of the default ones
 > e.g. "This is a backend project. Please identify what commands are used for the test suite, linter, formatter. Make sure the harness uses these instead of the default ones"
+
+> Alternatively tell it to remove these for now and add them later 
 
 ### Start
 
