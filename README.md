@@ -551,9 +551,11 @@ during the fix phase review. Which statuses are set, and where does it resume?
 ```
 cd .claude/skills/nos/ui
 npm install      # once
-npm run dev
+npm run dev           # or: npm run dev-to-lan
 ```
-This serves `dev.html` on http://localhost:5180. It reads `specs/` through Vite and reloads the page when a spec changes. It is handy for watching a run in AUTO mode.
+This serves `dev.html` on http://localhost:5180. The server reads `specs/` from disk and the page fetches it (`/__specs`). When a spec changes the page refreshes by itself; **↻ Reload** fetches again. It is handy for watching a run in AUTO mode.
+
+`npm run dev-to-lan` does the same, but also listens on the network. Other devices open the printed `Network` URL (`http://<host-ip>:5180/`) and see the host's `specs/` without picking a folder. Windows may ask to let Node through the firewall.
 
 ### Views
 
@@ -571,7 +573,7 @@ Board and Backlog can be filtered by label, status, idea and free text. Values o
 | --- | --- |
 | `src/model.ts` | Pure: turns `path → text` of `specs/` into ideas → phases → steps. Parses `plan.json`, reads the spec sections, counts markers |
 | `src/status.ts` | The statuses from `templates/status.xml` and their board order |
-| `src/load.ts` | Dev server: Vite `import.meta.glob` of `domain-*/idea.md`, `plan.json`, `phases/**/*.md` |
+| `src/serve-specs.ts` + `src/main.ts` | Dev server: a Vite plugin reads `specs/` on the host with `readSpecsFolder` and serves it at `/__specs` (`/` is `dev.html`); it pushes `specs:changed` when a file changes, and the page fetches again |
 | `src/folder.ts` + `src/handle-store.ts` + `src/standalone.ts` | Standalone: reads the picked folder and remembers the handle in IndexedDB |
 | `src/route.ts`, `src/filter.ts` | Hash routes and filters |
 | `src/app.ts`, `src/views/*` | Rendering: explore, board, backlog, kanban, filter bar |
@@ -585,6 +587,7 @@ The viewer is a separate npm package, so the project it sits in has no viewer sc
 | Command | Does |
 | --- | --- |
 | `npm run dev` | dev server with live reload |
+| `npm run dev-to-lan` | the same, reachable from other devices on the network |
 | `npm test` / `npm run test:watch` | viewer tests |
 | `npm run typecheck` | TypeScript check |
 | `npm run format` / `npm run format:check` | Prettier |
