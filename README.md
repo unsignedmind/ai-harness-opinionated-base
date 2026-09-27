@@ -20,6 +20,10 @@ The main session is the **orchestrator**. It never writes code itself. It starts
 
 ---
 
+![screenshot-spec-ui](https://i.imgur.com/DaXJGQT.png)
+
+---
+
 ## Part 0: The idea
 
 ### The flow
