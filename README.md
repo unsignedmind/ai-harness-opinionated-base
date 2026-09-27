@@ -59,7 +59,7 @@ open ──► in-specification ──► specified ──► in-progress ──
 If you're running this in a web frontend project 
 - Test suite, linter, formatter in the project | Develop and both reviewers agents run all three (e.g. `npm test`, `npm run lint`, `npm run format:check`)
 
-If you're running this in a web frontend project
+If you're running this in another kind of project
 - Start Claude in .claude/skills/nos
 - Tell the AI what kind of project this is and let it identify the Test suite, linter, formatter in the project
 - Tell it to make sure the harness uses these instead of the default ones
