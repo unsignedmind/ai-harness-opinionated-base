@@ -271,17 +271,17 @@ Every cycle starts with `<entry>resume</entry>`, and every cycle step has `resum
 
 The status change of the resumed step is skipped because it already happened. The ability is told that it resumes interrupted work.
 
-### abilities/idea.md: idea
+### abilities/idea.md: idea 💡
 
 Asks you focused questions until the idea is ready for planning. It generates a slug and saves the idea with `nos create-domain`, which creates `specs/domain-<id>-<slug>/idea.md`. It reports the domain folder. Its questions reach you through the orchestrator. Optional input: a starting context, e.g. tech debt entries handed over by the architect.
 
-### abilities/plan.md: implementation architect and planner
+### abilities/plan.md: implementation architect and planner 🏗️
 
 Reads `docs/architecture.md` if it exists and respects its structure and rules. Two actions:
 - **create**: needs the domain and its `idea.md`. Splits the idea into phases and steps that respect the existing architecture, following `templates/plan.json`. All statuses are `open`, and every phase and step gets a slug. Saves with `nos create-plan`, which creates phase folders and empty step spec files and fills `spec-file`.
 - **extend**: used after a phase is rejected. Inserts a fix phase directly after the rejected one, with the issues split into steps and `human-validation-needed: true`. Saves with `nos update-plan`.
 
-### abilities/develop.md: developer
+### abilities/develop.md: developer 🪛
 
 Input: domain, phase id, step id, optional feedback and resume flag. For one step it:
 1. Reads `plan.json` and the step spec file. A spec without ACs → `blocked` (step not specified).
@@ -296,7 +296,7 @@ It never changes the Description or ACs. Changing a test to make it pass is stri
 
 It reads the coding guardrails in `docs/guardrails.xml` and the architecture in `docs/architecture.md` if they exist. It never changes the architecture docs. When a change needs them updated or breaks one of their rules, it notes this in the Dev Log marked `(architecture)` for the architect.
 
-### abilities/specify.md: requirements engineer
+### abilities/specify.md: requirements engineer 📑
 
 Runs before develop, as its own subagent. Input: domain, phase id, step id, mode, optional feedback. It reads `idea.md`, `plan.json` and the spec, fills an empty spec from `step-spec-template.md`, and writes the Description and the Acceptance Criteria (`( )`). ACs must be understandable and verifiable by a non-technical person, with no filenames or line numbers. On feedback it changes ACs only where the feedback isn't already covered.
 
@@ -306,7 +306,7 @@ When something is unclear:
 
 It writes every assumption into the Dev Log marked `(specify)`, so develop and the reviewers see it. It never writes tasks or code, and it doesn't commit; develop commits the spec together with the code.
 
-### abilities/review-pessimistic.md: first reviewer
+### abilities/review-pessimistic.md: first reviewer 🕵🏼😠
 
 It assumes the implementation is wrong. It never changes code or tests. It finds the changes through the commit prefix, runs tests, lint and format check, and reviews with a target-specific focus:
 - **step**: ACs met, tests cover every AC, edge cases, bugs, weakened tests, quality and conventions, broken architecture rules, and whether the Task List and Dev Log are truthful.
@@ -314,13 +314,13 @@ It assumes the implementation is wrong. It never changes code or tests. It finds
 
 It writes its findings into the review file (step: `## Review` in the spec, phase: `review.md` in the phase folder), replacing the old content. Each finding is `( )` with a category (bug|gap|test|quality), a severity, a location and evidence. It reports only `passed`/`failed`.
 
-### abilities/review-fixing.md: second reviewer and fixer
+### abilities/review-fixing.md: second reviewer and fixer 🕵🏼🛠️
 
 Runs in a new context and does its **own review first, without reading the review file**, including tests, lint and format. Then it reads the pessimistic review, compares, removes invalid findings and adds missing ones. It fixes the findings with TDD and marks each one `(x)` fixed or `(!)` (not fixable, out of scope, or needs your decision). It reruns the full checks, writes its fixes into the Dev Log marked `(reviewer)`, and commits with `step-<id>`/`phase-<id>`. It reports `pass` or `blocked`. When human validation is needed, it adds simple verification steps that the orchestrator shows you.
 
 Both reviewers read the review guardrails in `docs/guardrails.xml` and the architecture in `docs/architecture.md` if they exist. Like develop, review-fixing never changes the architecture docs and notes needed changes in the Dev Log marked `(architecture)`.
 
-### abilities/architect.md: quality and docs architect
+### abilities/architect.md: quality and docs architect 🏗️🕵🏼
 
 Not part of the run cycle. It is started from the menu (ARCHITECT) and works with you. Its core rules come from harness engineering: harden only in response to observed failures, change one thing at a time and measure it, don't trust a rule just because it exists, and test both "should happen" and "should NOT happen". It never changes production code, and it is the only role that changes the architecture docs.
 
