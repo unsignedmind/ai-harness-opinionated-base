@@ -36,7 +36,7 @@ idea agent      plan agent                      (implementation artifacts)
 
 Phases and steps are inspired by implementation plans from the Claude plan mode when it is prompted to split the work
 ```
-- Then, the user can choose to develop the harness fully autonomously, or manually control each step if needed.
+- Then, the user can choose to develop fully autonomously, or manually control each step if needed.
 - Even though manual control is an option, the goal is to improve the harness to the point where you can trust it to autonomously build features overnight.
 - For every step in every phase, the following cycle is executed:
 ```
