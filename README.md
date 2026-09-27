@@ -29,6 +29,16 @@ The main session is the **orchestrator**. It never writes code itself. It starts
 | git repository | Develop and review commit every change (push if an `origin` exists) |
 | Test suite, linter, formatter in the project | Develop and both reviewers run all three (e.g. `npm test`, `npm run lint`, `npm run format:check`) |
 
+### Install CLI
+
+```
+cd .claude/skills/nos/cli
+npm install
+npm link        # makes `nos` available globally
+```
+
+Without linking: `node bin/nos.js <command>`. Help: `nos help <command>` or `nos <command> --help`.
+
 ### Start
 
 In Claude Code, type:
