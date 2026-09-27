@@ -1,6 +1,6 @@
 # nos: Orchestrated development with Claude Code
 
-nos turns Claude Code into a small development team. You describe an idea. nos turns it into a plan, implements that plan step by step with TDD, reviews every step twice and every phase once more, and only stops when it needs you.
+nos turns Claude Code into a small development team. You describe an idea. nos turns it into a plan, implements that plan step by step with TDD, reviews every step twice and every phase once more, and all of this happens in a loop that only stops when you want it to.
 
 The main session is the **orchestrator**. It never writes code itself. It starts a fresh subagent for every job (idea, plan, develop, review, architect), keeps track of progress in `specs/`, and reports to you in simple language.
 
@@ -43,6 +43,7 @@ Phases and steps are inspired by implementation plans from the Claude plan mode 
 open ──► in-specification ──► specified ──► in-progress ──► implemented ──► in-review ──► reviewed ──► done
          specify                            develop                         review agents                                                                    
 ```
+- The orchestrator is the backbone of the loop capability. It enables full implementation runs with dozens of contexts to be run overnight. 
 - The Specs UI is an addition to the Orchestrator Chat, allowing users to browse and track their current progress.
 - This process is designed for larger implementations; for quick fixes, it is overkill. Since this is a blueprint, feel free to add your own quick-dev flow.
 
