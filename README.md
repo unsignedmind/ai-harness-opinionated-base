@@ -5,6 +5,7 @@ nos turns Claude Code into a small development team. You describe an idea. nos t
 The main session is the **orchestrator**. It never writes code itself. It starts a fresh subagent for every job (idea, plan, develop, review, architect), keeps track of progress in `specs/`, and reports to you in simple language.
 
 > **This is a blueprint, not a product.** It shows one way to build a harness. Use it as is, take pieces from it, or rebuild it for your own team and project. Part 3 explains the ideas behind it, and Part 4 shows how to change it.
+> **My suggestion. Fork this and clone into your `skills` folder. If your skills are not git ignored then clone and copy contents into your skill folder.** 
 
 **Contents**
 - Part 1: How to use it
@@ -21,23 +22,10 @@ The main session is the **orchestrator**. It never writes code itself. It starts
 
 ### Prerequisites
 
-| What | Why |
-| --- | --- |
-| Claude Code | Runs the skill |
-| `nos` CLI (Node.js 20+) | Creates `specs/` folders and ids and changes statuses. Install: `cd .claude/skills/nos/cli && npm install && npm link` (see Part 6) |
-| `.claude/settings.json` with `"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "2"` | Lets an ability start its own subagent. No ability needs it today, but it keeps the option open |
-| git repository | Develop and review commit every change (push if an `origin` exists) |
-| Test suite, linter, formatter in the project | Develop and both reviewers run all three (e.g. `npm test`, `npm run lint`, `npm run format:check`) |
-
-### Install CLI
-
-```
-cd .claude/skills/nos/cli
-npm install
-npm link        # makes `nos` available globally
-```
-
-Without linking: `node bin/nos.js <command>`. Help: `nos help <command>` or `nos <command> --help`.
+- Build and tested with Claude. 
+- `nos` CLI (Node.js 20+) | Creates `specs/` folders and ids and changes statuses.
+- Install: `cd .claude/skills/nos/cli && npm install && npm link` (see Part 6)
+- Test suite, linter, formatter in the project | Develop and both reviewers agents run all three (e.g. `npm test`, `npm run lint`, `npm run format:check`)
 
 ### Start
 
@@ -192,22 +180,6 @@ All skill files are written in minimal pseudo-XML: `<coreRules>`, `<input>`, and
 ### SKILL.md: the orchestrator
 
 Defines the main session's role. It only delegates, orchestrates and reports. It never implements or verifies. It must read `workflow.md` first and must not read an ability file until the workflow calls for it. It lists the abilities: idea, plan, specify, develop, review-pessimistic, review-fixing, architect.
-
-### workflow.md: the orchestrator's playbook
-
-| Block | Purpose |
-| --- | --- |
-| `<rules>` | Every ability runs in a new subagent. Statuses change only via `nos set-status`. Questions from subagents are relayed to you and the answers sent back to the same subagent. Reports use simple language. Every question uses the `A - text [KEY]` format |
-| `<start>` | The IDEA / PLAN / RUN / ARCHITECT menu |
-| `<option name="idea">` | Runs idea, then offers PLAN |
-| `<option name="architect">` | Runs architect. Tech debt handed over → offers an idea for all bugs or one per bug |
-| `<option name="plan">` | Picks a domain without a plan, runs plan (create), then offers RUN |
-| `<modes>` | Defines AUTO and MANUAL through the `mode` attribute on each `<park>` |
-| `<option name="run">` | Picks a plan and a mode, sets the plan `in-progress`, runs every unfinished phase, sets the plan `done` |
-| `<cycle name="phase">` | Runs all steps, then reviews the phase as a whole |
-| `<cycle name="step">` | specify → develop → review-pessimistic → review-fixing |
-| `<park>` | Stop, explain, and ask GO / switch mode / REJECT / PAUSE |
-| `<resume>` | How to continue after an interruption |
 
 #### Step and phase cycle
 
@@ -369,6 +341,22 @@ Used in ACs, the Task List and review findings:
 - Questions from subagents (idea, architect, and specify in MANUAL) are relayed through the orchestrator session. They only work while that session is open.
 - Reviewers find changes only through the commit prefix. A commit without the prefix is invisible to them.
 - An interrupted review reruns both review stages. The pessimistic review file is replaced.
+
+### workflow.md: the orchestrator's playbook
+
+| Block | Purpose |
+| --- | --- |
+| `<rules>` | Every ability runs in a new subagent. Statuses change only via `nos set-status`. Questions from subagents are relayed to you and the answers sent back to the same subagent. Reports use simple language. Every question uses the `A - text [KEY]` format |
+| `<start>` | The IDEA / PLAN / RUN / ARCHITECT menu |
+| `<option name="idea">` | Runs idea, then offers PLAN |
+| `<option name="architect">` | Runs architect. Tech debt handed over → offers an idea for all bugs or one per bug |
+| `<option name="plan">` | Picks a domain without a plan, runs plan (create), then offers RUN |
+| `<modes>` | Defines AUTO and MANUAL through the `mode` attribute on each `<park>` |
+| `<option name="run">` | Picks a plan and a mode, sets the plan `in-progress`, runs every unfinished phase, sets the plan `done` |
+| `<cycle name="phase">` | Runs all steps, then reviews the phase as a whole |
+| `<cycle name="step">` | specify → develop → review-pessimistic → review-fixing |
+| `<park>` | Stop, explain, and ask GO / switch mode / REJECT / PAUSE |
+| `<resume>` | How to continue after an interruption |
 
 ---
 
