@@ -1,0 +1,26 @@
+<valid-statuses>
+    <plans>
+        <status><name>open</name><description>First status. The plan has not been started</description></status>
+        <status><name>in-progress</name><description>AI sessions are working on the plan</description></status>
+        <status><name>on-hold</name><description>The plan is paused or discontinued</description></status>
+        <status><name>done</name><description>The plan is fully implemented and verified</description></status>
+    </plans>
+    <phases>
+        <status><name>open</name><description>First status. The phase has not been started</description></status>
+        <status><name>in-progress</name><description>Its steps are being worked on</description></status>
+        <status><name>implemented</name><description>All its steps are done</description></status>
+        <status><name>in-review</name><description>Review agents verify the phase as a whole</description></status>
+        <status><name>reviewed</name><description>Review agents COMPLETED verifying the phase</description></status>
+        <status><name>done</name><description>The phase is fully implemented and verified</description></status>
+    </phases>
+    <steps>
+        <status><name>open</name><description>First status. The step has not been started</description></status>
+        <status><name>in-specification</name><description>The specify agent writes the description and acceptance criteria</description></status>
+        <status><name>specified</name><description>The specify agent COMPLETED the specification</description></status>
+        <status><name>in-progress</name><description>The develop agent is implementing</description></status>
+        <status><name>implemented</name><description>The develop agent COMPLETED implementing</description></status>
+        <status><name>in-review</name><description>Review agents verify the implementation</description></status>
+        <status><name>reviewed</name><description>Review agents COMPLETED verifying the implementation</description></status>
+        <status><name>done</name><description>The step is fully implemented and verified</description></status>
+    </steps>
+</valid-statuses>

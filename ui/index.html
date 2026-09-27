@@ -1,0 +1,44 @@
+<!doctype html>
+<!-- Standalone viewer: open this file directly in Chrome or Edge and pick the specs/ folder.
+     For live reload while editing specs, use `npm run dev` (dev.html). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>specs</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">specs <span id="source"></span></div>
+      <nav id="nav" aria-label="Views">
+        <a data-view="explore" href="#explore">Explore</a>
+        <a data-view="board" href="#board">Board</a>
+        <a data-view="backlog" href="#backlog">Backlog</a>
+      </nav>
+      <div class="right">
+        <span id="status"></span>
+        <button
+          type="button"
+          id="reload"
+          data-action="reload"
+          hidden
+          title="Read the folder again"
+        >
+          &#8635; Reload
+        </button>
+        <button type="button" id="pick" data-action="pick">
+          Open folder&hellip;
+        </button>
+      </div>
+    </header>
+    <main id="main">
+      <p class="muted">
+        Loading&hellip; If this stays, <code>bundle/viewer.js</code> is missing:
+        run <code>npm run build</code>.
+      </p>
+    </main>
+    <script src="./bundle/viewer.js"></script>
+  </body>
+</html>

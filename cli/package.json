@@ -1,0 +1,17 @@
+{
+  "name": "nos-cli",
+  "version": "0.1.0",
+  "description": "File manager CLI for the n_os harness: manages spec folders, id counters and spec files",
+  "type": "module",
+  "bin": {
+    "nos": "bin/nos.js"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:watch": "node --test --watch \"test/**/*.test.js\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

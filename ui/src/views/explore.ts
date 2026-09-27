@@ -1,0 +1,231 @@
+// Explore: tree of ideas -> phases -> steps on the left, detail with boards on the right.
+import { esc, inline, renderMd } from "../markdown";
+import type { Idea, Model, Phase, Step } from "../model";
+import { hrefOf, type Route } from "../route";
+import { kanban } from "./kanban";
+import {
+  crumbs,
+  dots,
+  hvnBadge,
+  itemId,
+  labelChips,
+  pill,
+  plural,
+  progressText,
+  rollup,
+} from "./parts";
+
+// UI state that survives re-renders: expanded tree nodes (`idea` / `idea/phase`) and the chosen
+// subtab per detail kind.
+// `canPick`: standalone viewer, data comes from a folder the user picks (undefined on the dev server).
+export type ExploreUi = {
+  expanded: Set<string>;
+  tabs: Record<string, string>;
+  canPick?: boolean;
+};
+
+type Tab = string | { html: string };
+
+function subtabs(
+  ui: ExploreUi,
+  key: string,
+  tabs: Record<string, Tab | null>,
+): string {
+  const names = Object.keys(tabs).filter((n) => tabs[n]);
+  if (!names.length) return "";
+  const cur = names.includes(ui.tabs[key]) ? ui.tabs[key] : names[0];
+  const v = tabs[cur]!;
+  return `<div class="subtabs" data-key="${esc(key)}">${names
+    .map(
+      (n) =>
+        `<button type="button" class="${n === cur ? "active" : ""}" data-tab="${esc(n)}">${esc(n)}</button>`,
+    )
+    .join("")}</div>
+    <div class="subtab-body">${typeof v === "string" ? renderMd(v) : v.html}</div>`;
+}
+
+// drop the H1 (already the page title)
+const stripH1 = (md: string) => md.replace(/^\s*#\s.*(\r?\n|$)/, "");
+
+const phaseKey = (p: Phase) => `${p.idea.slug}/${p.slug}`;
+
+function tree(
+  model: Model,
+  sel: { idea?: Idea; phase?: Phase; step?: Step },
+  ui: ExploreUi,
+) {
+  let out = "";
+  const node = (
+    href: string,
+    cls: string,
+    twisty: string,
+    id: string,
+    label: string,
+    tail: string,
+    toggle = "",
+  ) =>
+    `<div class="node ${cls}" data-href="${esc(href)}"${toggle ? ` data-toggle="${esc(toggle)}"` : ""}>
+      <span class="tw">${twisty}</span><span class="id mono">${esc(id)}</span><span class="lbl">${esc(label)}</span>${tail}</div>`;
+  for (const idea of model.ideas) {
+    const open = sel.idea === idea || ui.expanded.has(idea.slug);
+    const isSel = sel.idea === idea && !sel.phase;
+    out += node(
+      hrefOf(idea),
+      isSel ? "sel" : "",
+      idea.phases.length ? (open ? "▾" : "▸") : "·",
+      String(idea.number),
+      idea.title,
+      `<span class="dot ${idea.status.key}" title="${esc(idea.status.label)}"></span>`,
+      idea.slug,
+    );
+    if (!open) continue;
+    for (const p of idea.phases) {
+      const popen = sel.phase === p || ui.expanded.has(phaseKey(p));
+      out += node(
+        hrefOf(p),
+        `lvl1${sel.phase === p && !sel.step ? " sel" : ""}`,
+        p.steps.length ? (popen ? "▾" : "▸") : "·",
+        itemId(p),
+        p.name,
+        dots(p.steps),
+        phaseKey(p),
+      );
+      if (!popen) continue;
+      for (const s of p.steps)
+        out += node(
+          hrefOf(s),
+          `lvl2${sel.step === s ? " sel" : ""}`,
+          "",
+          itemId(s),
+          s.title,
+          `<span class="dot ${s.status.key}" title="${esc(s.status.label)}"></span>`,
+        );
+    }
+  }
+  return `<nav class="tree" aria-label="Ideas">${out}</nav>`;
+}
+
+function empty(canPick: boolean | undefined) {
+  if (canPick === undefined)
+    return '<div class="empty"><p class="muted">No ideas under <code>specs/domain-*</code> yet.</p></div>';
+  return `<div class="empty">
+    <p>Read-only view of the <code>specs/</code> folder: ideas, phases and steps as boards.</p>
+    ${
+      canPick
+        ? '<button type="button" class="primary" data-action="pick">Open the specs/ folder</button>'
+        : '<p class="error">This browser cannot open folders. Use Chrome or Edge.</p>'
+    }
+    <p class="muted">Nothing is uploaded or written. The folder is remembered in this browser.</p>
+  </div>`;
+}
+
+function overview(model: Model, canPick: boolean | undefined) {
+  if (!model.ideas.length) return `<h1>Ideas</h1>${empty(canPick)}`;
+  return `<h1>Ideas</h1>
+    <p class="muted">${plural(model.ideas.length, "idea")} · ${plural(model.phases.length, "phase")} · ${plural(model.steps.length, "step")}</p>
+    <div class="cards">${model.ideas
+      .map(
+        (i) => `<div class="card" data-href="${esc(hrefOf(i))}">
+        <h3><span class="id mono">${i.number}</span>${esc(i.title)} ${pill(i.status)}</h3>
+        ${i.intent ? `<p>${esc(i.intent.length > 240 ? i.intent.slice(0, 240) + "…" : i.intent)}</p>` : ""}
+        ${i.labels.length ? `<div class="row">${labelChips(i.labels)}</div>` : ""}
+        ${i.plan ? `<div class="row"><span class="muted">${plural(i.phases.length, "phase")} · ${plural(i.steps.length, "step")}</span>${dots(i.steps)}</div><div class="row">${rollup(i.steps)}</div>` : ""}
+      </div>`,
+      )
+      .join("")}</div>`;
+}
+
+function ideaDetail(i: Idea, ui: ExploreUi) {
+  return (
+    crumbs(["Ideas", "#explore"], [i.title]) +
+    `<h1><span class="id mono">${i.number}</span>${esc(i.title)} ${pill(i.status)}</h1>
+    ${i.error ? `<p class="error">${esc(i.error)}</p>` : ""}
+    <dl class="meta">
+      ${i.plan ? `<dt>Plan</dt><dd>${esc(i.plan.name)}</dd>` : ""}
+      ${i.labels.length ? `<dt>Labels</dt><dd>${labelChips(i.labels)}</dd>` : ""}
+      ${i.plan ? `<dt>Steps</dt><dd>${rollup(i.steps)}</dd>` : ""}
+      <dt>Folder</dt><dd class="mono">specs/${esc(i.folder)}/</dd>
+    </dl>
+    ${i.intent ? `<p>${inline(i.intent)}</p>` : ""}
+    ${subtabs(ui, "idea", {
+      Phases: i.plan ? { html: kanban(i.phases, { level: "phases" }) } : null,
+      Steps: i.plan ? { html: kanban(i.steps, { where: true }) } : null,
+      "idea.md": i.md ? stripH1(i.md) : null,
+      "plan.json": i.planJson
+        ? { html: `<pre><code>${esc(i.planJson)}</code></pre>` }
+        : null,
+    })}`
+  );
+}
+
+function phaseDetail(p: Phase, ui: ExploreUi) {
+  return (
+    crumbs(
+      ["Ideas", "#explore"],
+      [p.idea.title, hrefOf(p.idea)],
+      [`${itemId(p)} ${p.name}`],
+    ) +
+    `<h1><span class="id mono">${itemId(p)}</span>${esc(p.name)} ${pill(p.status)}</h1>
+    <div class="row">${rollup(p.steps)}${hvnBadge(p.hvn)}</div>
+    ${p.intent ? `<p>${inline(p.intent)}</p>` : ""}
+    ${subtabs(ui, "phase", {
+      Board: { html: kanban(p.steps) },
+      Steps: {
+        html: `<div class="cards">${p.steps
+          .map(
+            (s) => `<div class="card" data-href="${esc(hrefOf(s))}">
+          <h3><span class="id mono">${itemId(s)}</span>${esc(s.title)}</h3>
+          <div class="row">${pill(s.status)}${progressText("AC", s.ac, "ac")}${hvnBadge(s.hvn)}</div>
+          <p>${esc(s.intent)}</p></div>`,
+          )
+          .join("")}</div>`,
+      },
+      Description: p.description || null,
+    })}`
+  );
+}
+
+function stepDetail(s: Step) {
+  return (
+    crumbs(
+      ["Ideas", "#explore"],
+      [s.idea.title, hrefOf(s.idea)],
+      [`${itemId(s.phase)} ${s.phase.name}`, hrefOf(s.phase)],
+      [itemId(s)],
+    ) +
+    `<h1><span class="id mono">${itemId(s)}</span>${esc(s.title)} ${pill(s.status)}</h1>
+    <dl class="meta">
+      <dt>Progress</dt><dd>${progressText("AC", s.ac, "ac") || '<span class="muted">no AC</span>'} ${progressText("Tasks", s.tasks, "tasks")}</dd>
+      <dt>Human check</dt><dd>${s.hvn ? hvnBadge(true) : "no"}</dd>
+      <dt>Spec file</dt><dd class="mono">${esc(s.specPath || "—")}</dd>
+    </dl>
+    ${s.intent ? `<p>${inline(s.intent)}</p>` : ""}
+    ${s.description ? `<h2>Plan notes</h2>${renderMd(s.description)}` : ""}
+    <h2>Spec</h2>
+    ${s.specMd ? renderMd(stripH1(s.specMd)) : '<p class="muted">No spec written yet.</p>'}`
+  );
+}
+
+const notFound = (what: string) =>
+  `<h1>Not found</h1><p class="muted">${esc(what)} does not exist (anymore).</p><p><a href="#explore">Back to ideas</a></p>`;
+
+export function renderExplore(model: Model, r: Route, ui: ExploreUi): string {
+  const idea = r.idea ? model.ideas.find((i) => i.slug === r.idea) : undefined;
+  const phase =
+    idea && r.phase ? idea.phases.find((p) => p.slug === r.phase) : undefined;
+  const step =
+    phase && r.step ? phase.steps.find((s) => s.slug === r.step) : undefined;
+
+  let detail: string;
+  if (r.idea && !idea) detail = notFound(`Idea "${r.idea}"`);
+  else if (r.phase && !phase) detail = notFound(`Phase "${r.phase}"`);
+  else if (r.step && !step) detail = notFound(`Step "${r.step}"`);
+  else if (step) detail = stepDetail(step);
+  else if (phase) detail = phaseDetail(phase, ui);
+  else if (idea) detail = ideaDetail(idea, ui);
+  else detail = overview(model, ui.canPick);
+
+  if (!model.ideas.length)
+    return `<div class="explore solo"><div class="detail">${detail}</div></div>`;
+  return `<div class="explore">${tree(model, { idea, phase, step }, ui)}<div class="detail">${detail}</div></div>`;
+}

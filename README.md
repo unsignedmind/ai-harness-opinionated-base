@@ -1,0 +1,602 @@
+# nos: Orchestrated development with Claude Code
+
+nos turns Claude Code into a small development team. You describe an idea. nos turns it into a plan, implements that plan step by step with TDD, reviews every step twice and every phase once more, and only stops when it needs you.
+
+The main session is the **orchestrator**. It never writes code itself. It starts a fresh subagent for every job (idea, plan, develop, review, architect), keeps track of progress in `specs/`, and reports to you in simple language.
+
+> **This is a blueprint, not a product.** It shows one way to build a harness. Use it as is, take pieces from it, or rebuild it for your own team and project. Part 3 explains the ideas behind it, and Part 4 shows how to change it.
+
+**Contents**
+- Part 1: How to use it
+- Part 2: What everything does
+- Part 3: Understanding harnesses (for newcomers)
+- Part 4: Changing the blueprint (by hand and with AI)
+- Part 5: Spec UI (viewer)
+- Part 6: nos CLI
+- Porting to another project
+
+---
+
+## Part 1: How to use it
+
+### Prerequisites
+
+| What | Why |
+| --- | --- |
+| Claude Code | Runs the skill |
+| `nos` CLI (Node.js 20+) | Creates `specs/` folders and ids and changes statuses. Install: `cd .claude/skills/nos/cli && npm install && npm link` (see Part 6) |
+| `.claude/settings.json` with `"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "2"` | Lets an ability start its own subagent. No ability needs it today, but it keeps the option open |
+| git repository | Develop and review commit every change (push if an `origin` exists) |
+| Test suite, linter, formatter in the project | Develop and both reviewers run all three (e.g. `npm test`, `npm run lint`, `npm run format:check`) |
+
+### Start
+
+In Claude Code, type:
+
+```
+/nos
+```
+
+The orchestrator asks:
+
+```
+What do you want to do?
+A - Document an idea [IDEA]
+B - Create a plan from an idea [PLAN]
+C - Run or continue a plan [RUN]
+D - Improve project quality and docs: architecture docs, guardrails, tests [ARCHITECT]
+```
+
+Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
+
+### The typical path
+
+1. **IDEA**: describe what you want. The idea agent asks you questions until the idea is clear. It saves the result as `specs/domain-<id>-<slug>/idea.md`.
+   Then: `Create a plan now?` → `YES`.
+2. **PLAN**: the planner splits the idea into phases and steps and saves `plan.json`. Every step gets an empty spec file.
+   Then: `Run it now?` → `YES`.
+3. **RUN**: choose a mode:
+   ```
+   How should the plan run?
+   A - Autonomous. Stops only for problems or human validation [AUTO]
+   B - Stops after each specification, implementation and review for your go [MANUAL]
+   ```
+   nos now works through every step and phase.
+
+Each option can also be started on its own. PLAN lists ideas without a plan. RUN lists all plans that are not done.
+
+### Project quality and docs (ARCHITECT)
+
+Outside the typical path. Use it when you add nos to a project, and whenever runs keep failing in the same way. The architect shows a menu first and does nothing before you pick:
+
+```
+What do you want to do?
+A - Create the architecture docs [CREATE-DOCS]          (no or empty docs/architecture.md)
+B - Update the architecture docs [UPDATE-DOCS]          (docs/architecture.md has content)
+C - Add guardrails from observed failures [ADD-GUARDRAILS]
+D - Review the existing guardrails [REVIEW-GUARDRAILS]  (docs/guardrails.xml exists)
+E - Add missing test types [TESTS]
+F - Measure the effect of past harness changes [MEASURE]
+G - End [DONE]                                          (after a task ran)
+```
+
+After each task the menu comes back. Every change is proposed first and committed on its own with prefix `architect`. Bugs it finds go into the Tech debt section of the architecture doc. At the end nos offers to start an idea for them.
+
+### Modes
+
+| | AUTO | MANUAL |
+| --- | --- | --- |
+| After a step is specified | continues | stops, shows the spec in simple words, waits for your go |
+| After a step or phase is implemented | continues | stops, waits for your go |
+| After a step or phase is reviewed | continues | stops, waits for your go |
+| Develop or review is blocked | stops | stops |
+| `human-validation-needed: true` | stops at reviewed | stops at reviewed |
+
+You can switch modes at every stop.
+
+### When nos stops (a "park")
+
+nos tells you what it stopped at, its status and why. For human validation it explains in simple steps what to check, so you don't need to know the code. Then:
+
+```
+How do you want to continue?
+A - Continue with the next step of the cycle [GO]
+B - Switch to the other mode and continue [MANUAL]
+C - Give feedback on what is wrong [REJECT]      (only when something is specified or reviewed)
+D - Pause the plan [PAUSE]
+```
+
+- **GO**: continue.
+- **AUTO/MANUAL**: switch the mode and continue.
+- **REJECT (specified step)**: the step goes back to `in-specification`. Specify reworks the description and ACs with your feedback.
+- **REJECT (reviewed step)**: the step goes back to `in-specification` with your feedback. Specify updates the ACs if needed, then develop and both reviews run again.
+- **REJECT (phase)**: the planner adds a new **fix phase** directly after it, made from your feedback. The fix phase runs the full cycle and always asks you to validate it.
+- **PAUSE**: the plan becomes `on-hold`. Start it again later with RUN.
+
+### Interruptions
+
+Usage limit, closed terminal, shutdown: nothing is lost. Start `/nos` → `RUN` and pick the plan. nos reads the statuses in `plan.json` and continues exactly where it stopped. It never resets a status. Interrupted work is simply redone. For example, a step stuck at `in-review` gets both reviews run again.
+
+### Controlling human validation
+
+In `plan.json`, every phase and step has `"human-validation-needed"`. When it is `true`, nos always stops at `reviewed` for you, in any mode. You can edit this in the plan before or during a run. Fix phases always have it set.
+
+### Where to look
+
+```
+specs/
+├── config.json                          id counters (managed by nos)
+└── domain-1-user-auth/
+    ├── idea.md                          the idea
+    ├── plan.json                        phases, steps, statuses
+    └── phases/
+        └── phase-1-data-model/
+            ├── step-1-user-table.md     spec: description, ACs, tasks, dev log, review
+            └── review.md                phase review
+```
+
+```
+docs/
+├── architecture-template.md             structure of the architecture doc (architect)
+├── architecture.md                      architecture, rules, tech debt (architect)
+└── guardrails.xml                       extra rules per ability (architect)
+```
+
+Commits are prefixed `step-<id>` or `phase-<id>`, so `git log --grep step-3` shows everything done for step 3. The architect's commits are prefixed `architect`.
+
+The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Chrome or Edge, or run `npm run dev` inside `ui/` for live updates while a run is going (see Part 5).
+
+---
+
+## Part 2: What everything does
+
+### File overview
+
+```
+.claude/skills/nos/
+├── SKILL.md                        orchestrator: role, rules, list of abilities
+├── workflow.md                     orchestrator: what to do when
+├── README.md                       this file
+├── abilities/                      abilities, each run as its own subagent
+│   ├── idea.md
+│   ├── plan.md
+│   ├── specify.md
+│   ├── develop.md
+│   ├── review-pessimistic.md
+│   ├── review-fixing.md
+│   └── architect.md
+├── templates/
+│   ├── config.json                 initial id counters
+│   ├── plan.json                   plan structure
+│   ├── status.xml                  valid statuses
+│   ├── step-spec-template.md       structure of a step spec file
+│   ├── architecture-sections.md    section catalog for a project's architecture template
+│   ├── test-types.md               test groups and architecture rule ideas
+│   └── guardrails.xml              structure of docs/guardrails.xml
+├── cli/                            `nos` CLI: ids, folders, statuses (Part 6)
+└── ui/                             read-only browser viewer for specs/ (Part 5)
+```
+
+All skill files are written in minimal pseudo-XML: `<coreRules>`, `<input>`, and a numbered `<workflow>`.
+
+### SKILL.md: the orchestrator
+
+Defines the main session's role. It only delegates, orchestrates and reports. It never implements or verifies. It must read `workflow.md` first and must not read an ability file until the workflow calls for it. It lists the abilities: idea, plan, specify, develop, review-pessimistic, review-fixing, architect.
+
+### workflow.md: the orchestrator's playbook
+
+| Block | Purpose |
+| --- | --- |
+| `<rules>` | Every ability runs in a new subagent. Statuses change only via `nos set-status`. Questions from subagents are relayed to you and the answers sent back to the same subagent. Reports use simple language. Every question uses the `A - text [KEY]` format |
+| `<start>` | The IDEA / PLAN / RUN / ARCHITECT menu |
+| `<option name="idea">` | Runs idea, then offers PLAN |
+| `<option name="architect">` | Runs architect. Tech debt handed over → offers an idea for all bugs or one per bug |
+| `<option name="plan">` | Picks a domain without a plan, runs plan (create), then offers RUN |
+| `<modes>` | Defines AUTO and MANUAL through the `mode` attribute on each `<park>` |
+| `<option name="run">` | Picks a plan and a mode, sets the plan `in-progress`, runs every unfinished phase, sets the plan `done` |
+| `<cycle name="phase">` | Runs all steps, then reviews the phase as a whole |
+| `<cycle name="step">` | specify → develop → review-pessimistic → review-fixing |
+| `<park>` | Stop, explain, and ask GO / switch mode / REJECT / PAUSE |
+| `<resume>` | How to continue after an interruption |
+
+#### Step and phase cycle
+
+Each cycle step shows exactly which status changes (`<status from to>`), what runs (`<do>`), and where it may stop (`<park mode when>`).
+
+Step:
+```
+open ──► in-specification ──► specified ──► in-progress ──► implemented ──► in-review ──► reviewed ──► done
+         specify              park: MANUAL  develop         park: MANUAL    pessimistic   park: MANUAL
+                                            park: blocked                   fixing        park: human validation
+                                                                            park: blocked
+```
+
+Phase (no specification stage):
+```
+open ──► in-progress ──► implemented ──► in-review ──► reviewed ──► done
+         all steps       park: MANUAL    pessimistic   park: MANUAL
+                                         fixing        park: human validation
+                                         park: blocked
+```
+
+- Step: `in-specification` runs specify, `in-progress` runs develop.
+- Phase: `in-progress` runs the step cycle for every step that is not done. The phase review starts only after all steps are done.
+- There is no review of the whole plan. The phase reviews already cover how steps fit together.
+- Plan statuses: `open`/`on-hold` → `in-progress` → `done`.
+
+#### Resume
+
+Every cycle starts with `<entry>resume</entry>`, and every cycle step has `resume-at="<status>"`. On start nos reads the status:
+
+| Status | Continues with |
+| --- | --- |
+| `open` | step1 (normal start) |
+| `in-specification` | specify again (step only) |
+| `specified` | the MANUAL park, then develop (step only) |
+| `in-progress` | develop again (step), or the step loop (phase) |
+| `implemented` | the MANUAL park, then review |
+| `in-review` | both reviews again |
+| `reviewed` | the parks, then `done` |
+| `done` | skipped |
+
+The status change of the resumed step is skipped because it already happened. The ability is told that it resumes interrupted work.
+
+### abilities/idea.md: idea
+
+Asks you focused questions until the idea is ready for planning. It generates a slug and saves the idea with `nos create-domain`, which creates `specs/domain-<id>-<slug>/idea.md`. It reports the domain folder. Its questions reach you through the orchestrator. Optional input: a starting context, e.g. tech debt entries handed over by the architect.
+
+### abilities/plan.md: implementation architect and planner
+
+Reads `docs/architecture.md` if it exists and respects its structure and rules. Two actions:
+- **create**: needs the domain and its `idea.md`. Splits the idea into phases and steps that respect the existing architecture, following `templates/plan.json`. All statuses are `open`, and every phase and step gets a slug. Saves with `nos create-plan`, which creates phase folders and empty step spec files and fills `spec-file`.
+- **extend**: used after a phase is rejected. Inserts a fix phase directly after the rejected one, with the issues split into steps and `human-validation-needed: true`. Saves with `nos update-plan`.
+
+### abilities/develop.md: developer
+
+Input: domain, phase id, step id, optional feedback and resume flag. For one step it:
+1. Reads `plan.json` and the step spec file. A spec without ACs → `blocked` (step not specified).
+2. Writes a detailed implementation plan into the Task List, with a test task before each implementation task. On feedback it changes or extends the tasks. On resume it checks every task and AC against the code.
+3. Works through the tasks with TDD: test → see it fail → implement → green. It ticks tasks and met ACs with `(x)`.
+4. Runs the full test suite, linter and formatter check. It fixes what it can and marks what it can't with `(!)`.
+5. Fills the Dev Log and keeps specify's entries.
+6. Commits code and spec file with `step-<id>`, and pushes if there is an origin.
+7. Reports `pass` or `blocked`.
+
+It never changes the Description or ACs. Changing a test to make it pass is strictly forbidden.
+
+It reads the coding guardrails in `docs/guardrails.xml` and the architecture in `docs/architecture.md` if they exist. It never changes the architecture docs. When a change needs them updated or breaks one of their rules, it notes this in the Dev Log marked `(architecture)` for the architect.
+
+### abilities/specify.md: requirements engineer
+
+Runs before develop, as its own subagent. Input: domain, phase id, step id, mode, optional feedback. It reads `idea.md`, `plan.json` and the spec, fills an empty spec from `step-spec-template.md`, and writes the Description and the Acceptance Criteria (`( )`). ACs must be understandable and verifiable by a non-technical person, with no filenames or line numbers. On feedback it changes ACs only where the feedback isn't already covered.
+
+When something is unclear:
+- **MANUAL**: it asks you focused questions, which are relayed through the orchestrator.
+- **AUTO**: it makes a reasonable assumption.
+
+It writes every assumption into the Dev Log marked `(specify)`, so develop and the reviewers see it. It never writes tasks or code, and it doesn't commit; develop commits the spec together with the code.
+
+### abilities/review-pessimistic.md: first reviewer
+
+It assumes the implementation is wrong. It never changes code or tests. It finds the changes through the commit prefix, runs tests, lint and format check, and reviews with a target-specific focus:
+- **step**: ACs met, tests cover every AC, edge cases, bugs, weakened tests, quality and conventions, broken architecture rules, and whether the Task List and Dev Log are truthful.
+- **phase**: steps fit together, gaps between steps, duplication and inconsistency, phase intent met.
+
+It writes its findings into the review file (step: `## Review` in the spec, phase: `review.md` in the phase folder), replacing the old content. Each finding is `( )` with a category (bug|gap|test|quality), a severity, a location and evidence. It reports only `passed`/`failed`.
+
+### abilities/review-fixing.md: second reviewer and fixer
+
+Runs in a new context and does its **own review first, without reading the review file**, including tests, lint and format. Then it reads the pessimistic review, compares, removes invalid findings and adds missing ones. It fixes the findings with TDD and marks each one `(x)` fixed or `(!)` (not fixable, out of scope, or needs your decision). It reruns the full checks, writes its fixes into the Dev Log marked `(reviewer)`, and commits with `step-<id>`/`phase-<id>`. It reports `pass` or `blocked`. When human validation is needed, it adds simple verification steps that the orchestrator shows you.
+
+Both reviewers read the review guardrails in `docs/guardrails.xml` and the architecture in `docs/architecture.md` if they exist. Like develop, review-fixing never changes the architecture docs and notes needed changes in the Dev Log marked `(architecture)`.
+
+### abilities/architect.md: quality and docs architect
+
+Not part of the run cycle. It is started from the menu (ARCHITECT) and works with you. Its core rules come from harness engineering: harden only in response to observed failures, change one thing at a time and measure it, don't trust a rule just because it exists, and test both "should happen" and "should NOT happen". It never changes production code, and it is the only role that changes the architecture docs.
+
+It shows its task menu first and analyzes nothing before you pick. Every change is proposed, applied only after you agree, and committed on its own with prefix `architect`.
+
+| Task | Does |
+| --- | --- |
+| CREATE-DOCS | Derives a project template (`docs/architecture-template.md`) from `templates/architecture-sections.md`: from the code's project type and stack, or for an empty project from `idea.md` or your intent. You approve the template, then it writes `docs/architecture.md` exactly by it |
+| UPDATE-DOCS | Checks each section against the code, fixed tech debt and `(architecture)` Dev Log notes. Proposes one fix per drift. A new section changes the template first |
+| ADD-GUARDRAILS | Collects observed failures (review findings, `(!)` markers, `(reviewer)` Dev Log entries, fix commits) and proposes one guardrail per recurring failure, with the evidence as `reason`. No evidence, no guardrail |
+| REVIEW-GUARDRAILS | Proposes sharper wording, enforcement by a test, or removal for vague, duplicate, contradicting, blocking or never relevant guardrails |
+| TESTS | Investigates the code and existing tests, then summarizes needed tests grouped as unit logic, unit ui, unit a11y, integration, e2e and architecture, with tooling present or a suggested library. Only tests that add value. You approve, also partly. Then group by group: tooling, and per test: fail first, see it fail, final version, see it pass |
+| MEASURE | Lists the `architect` commits. For the one you pick it compares the failures it targets before and after, and recommends keep, sharpen or remove |
+
+**Why a template.** Architecture docs look different in every project. The skill ships only a catalog of sections and profiles per project type. The architect turns it into a template for your project, and the doc follows that template. Later runs reuse it, so the structure stays stable and drift is easy to find.
+
+**Tech debt.** When a test fails because of production code, the architect doesn't fix the code and doesn't write a test that locks in the bug. It leaves the test out and adds the bug to the Tech debt section of the architecture doc. At the end it hands the new entries over, and the orchestrator offers to start an idea for them.
+
+### Templates
+
+- **config.json**: initial id counters for domain, phase and step. `nos` copies it to `specs/config.json`. Ids are global across all domains.
+- **plan.json**: plan structure. It has a name, status, labels and phases. Phases have a name, status, intent, `human-validation-needed`, a description and steps. Steps have an intent, status, `human-validation-needed`, a description and `spec-file`, and every phase and step also has a slug. `spec-file` is filled by `nos`.
+- **status.xml**: valid statuses. `nos set-status` rejects anything else.
+  - Plans: `open`, `in-progress`, `on-hold`, `done`.
+  - Phases: `open`, `in-progress`, `implemented`, `in-review`, `reviewed`, `done`.
+  - Steps: `open`, `in-specification`, `specified`, `in-progress`, `implemented`, `in-review`, `reviewed`, `done`.
+  - Three sections, `<plans>`, `<phases>` and `<steps>`, so a status can be valid for steps only.
+- **step-spec-template.md**: sections Description, Acceptance Criteria, Task List, Dev Log (What I did / What I didn't do and why), and Review.
+- **architecture-sections.md**: catalog for a project's architecture template. Core sections (Overview, Stack & commands, Structure, Rules, Testing, Decisions, Tech debt), optional sections with "include when", profiles per project type, and the template format.
+- **test-types.md**: test groups with when they add value and tooling examples, architecture rule ideas, enforcement mechanisms (lint rule, dependency graph, test) and pitfalls.
+- **guardrails.xml**: structure of `docs/guardrails.xml`. One section per ability that reads it (coding, review, specify). Every guardrail has a `reason`.
+
+### Markers
+
+Used in ACs, the Task List and review findings:
+
+| Marker | Meaning |
+| --- | --- |
+| `( )` | open |
+| `(x)` | done / met / fixed |
+| `(!)` | problem, not fixable → verdict blocked |
+
+### nos CLI commands used
+
+| Command | Used by | Does |
+| --- | --- | --- |
+| `nos create-domain --idea <file> --slug <slug>` | idea | new domain id, folder, `idea.md` |
+| `nos create-plan --domain <d> --plan <file>` | plan (create) | saves `plan.json`, creates phase folders and step files |
+| `nos update-plan --domain <d> --plan <file>` | plan (extend) | saves the changed plan, creates/moves/deletes phases and steps |
+| `nos set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | orchestrator | changes one status, checked against the matching `status.xml` section |
+
+### Who may do what
+
+| Role | Writes code | Writes spec | Changes status | Commits |
+| --- | --- | --- | --- | --- |
+| orchestrator | no | no | yes (nos) | no |
+| idea / plan | no | idea / plan (nos) | no | no |
+| specify | no | Description, ACs, assumptions in Dev Log | no | no |
+| develop | yes | Task List, AC ticks, Dev Log | no | yes (incl. spec) |
+| review-pessimistic | no | Review | no | no |
+| review-fixing | yes | Review marks, Dev Log | no | yes |
+| architect | tests and test tooling only | no. Writes architecture template and doc, guardrails | no | yes (`architect`) |
+
+### Known limitations
+
+- Questions from subagents (idea, architect, and specify in MANUAL) are relayed through the orchestrator session. They only work while that session is open.
+- Reviewers find changes only through the commit prefix. A commit without the prefix is invisible to them.
+- An interrupted review reruns both review stages. The pessimistic review file is replaced.
+
+---
+
+## Part 3: Understanding harnesses (for newcomers)
+
+### What is a harness?
+
+An AI coding agent on its own is one long conversation. It forgets, it drifts, it grades its own homework, and it is hard to stop and resume. A **harness** is the structure around the agent: roles, rules, files and tools that turn "chat with an AI" into a repeatable process.
+
+A useful mental model is a small team with a project board:
+
+| Team | nos |
+| --- | --- |
+| Project manager | orchestrator (`SKILL.md` + `workflow.md`) |
+| Product owner interview | idea |
+| Implementation architect | plan |
+| Requirements engineer | specify |
+| Developer | develop |
+| Critical code reviewer | review-pessimistic |
+| Senior reviewer who fixes | review-fixing |
+| Quality and docs architect | architect |
+| Ticket board | `plan.json` + statuses |
+| Tickets | step spec files |
+| Board admin tool | `nos` CLI |
+
+### The ideas behind the design
+
+Each idea is worth stealing on its own:
+
+1. **One job per context.** Every ability runs in a fresh subagent. A fresh context has no bias from earlier work and no clutter. That is why develop, the first review and the second review are separate agents.
+2. **The orchestrator does not work.** When the manager also codes, it loses track of the process. Keeping it to "delegate and report" keeps its context small enough for long runs.
+3. **State lives in files, not in memory.** Statuses in `plan.json`, specs in markdown, changes in git. Any session can pick up where another stopped. This is what makes resume after a shutdown possible.
+4. **Deterministic things go into a tool.** Ids, folder names and status changes are done by `nos`, not by the AI. An AI can mistype JSON; a CLI with validation cannot.
+5. **Statuses form a state machine.** Every status is set by exactly one step. So the current status always tells you where to continue.
+6. **Parking states give humans control.** `specified`, `implemented` and `reviewed` are places to stop. AUTO passes through them, MANUAL stops at each, and human validation always stops at `reviewed`. You choose how much autonomy you give.
+7. **Review in two stages against bias.** The first reviewer is told to find problems. The second one reviews on its own before reading those findings, then judges them. This catches both missed bugs and false alarms.
+8. **Business-readable acceptance criteria.** ACs without code terms let a non-developer verify the result. That makes human validation meaningful.
+9. **TDD and "never change a test to pass".** Tests are the contract. The rule stops the agent from cheating its way to green.
+10. **Minimal pseudo-XML instructions.** Short tagged steps are easier for a model to follow, and for you to read and change, than long prose.
+
+### How to learn it
+
+- Read `workflow.md` next to the status diagram in Part 2. It is the whole process on one page.
+- Run a tiny idea (for example "add a footer with the version number") in MANUAL mode. Watch each park and open the spec file every time.
+- Look at `git log` and the spec's Dev Log and Review sections after each step. That is where you see what each role did.
+- Then try AUTO on something slightly bigger.
+
+### Ideas for your own harness
+
+- Other roles: a security reviewer, a documentation writer, a UX checker driving a browser, a performance reviewer.
+- A different state store: GitHub issues or a ticket system instead of `plan.json`.
+- Notifications: send a message when a run parks.
+- Cost control: cheaper models for simple roles through `effort` or model settings in the frontmatter.
+- Parallel steps: independent steps in separate git worktrees.
+- Metrics: count how often reviews find bugs, to see which roles earn their cost.
+
+---
+
+## Part 4: Changing the blueprint
+
+### The golden rule: keep it consistent
+
+Most changes touch more than one file. Before you finish a change, check these connections:
+
+| If you change… | Also check… |
+| --- | --- |
+| an ability name or file | the `<abilities>` list in `SKILL.md` and every `Run ability "..."` in `workflow.md` |
+| a status | the right section (`<plans>`, `<phases>`, `<steps>`) of `templates/status.xml` (nos validates against it), every `<status from to>` in `workflow.md`, the `resume-at` attributes, `ui/src/status.ts` and the colours in `ui/styles.css` |
+| what an ability reports (e.g. `pass`/`blocked`) | the `<park when="...">` that reacts to it in `workflow.md` |
+| spec sections | `step-spec-template.md` and every skill that reads or writes that section |
+| inputs of an ability | what the caller passes in `workflow.md` |
+| commit prefix | develop, review-fixing and review-pessimistic (it searches by prefix). `architect` prefix: architect (MEASURE searches by it) |
+| markers | specify, develop, both reviewers, the template, `ui/src/model.ts` |
+| doc paths (`docs/architecture.md`, `docs/architecture-template.md`, `docs/guardrails.xml`) | architect `<files>` and every ability that reads them: plan, develop, specify, both reviewers |
+| Dev Log marker `(architecture)` | develop, review-fixing, architect (UPDATE-DOCS) |
+| guardrail sections (`coding`, `review`, `specify`) | `templates/guardrails.xml`, architect (ADD-GUARDRAILS), the ability that reads the section |
+| architect handover (tech debt) | `<option name="architect">` in `workflow.md`, `idea.md` input |
+| `plan.json` structure or spec sections | `ui/src/model.ts` and its tests |
+
+### Changing it by hand
+
+The files are plain text, so no tools are needed.
+
+**Change behaviour inside a role.** Edit the `<workflow>` or `<coreRules>` of that file in `abilities/`. Example: make the pessimistic reviewer also check accessibility by adding it to `<focus target="step">`.
+
+**Add a role.** Example: a security review after the pessimistic review.
+1. Create `abilities/review-security.md` with frontmatter, `<coreRules>`, `<input>` and `<workflow>`. Copy an existing reviewer as a starting point.
+2. Add an `<ability name="review-security">` to `SKILL.md`.
+3. In `workflow.md`, add `<do>Run ability "review-security" with the step</do>` to step5 of the step cycle (the review step), plus a `<park>` if it can block.
+
+**Add a stop point.** Example: always stop before a phase review. Add `<park mode="auto,manual"/>` to step2 of the phase cycle.
+
+**Change when AUTO stops.** Add or remove `auto` in a park's `mode` attribute.
+
+**Add a status.** Add it to `status.xml`, then add a cycle step with `<status from to>` and `resume-at` in `workflow.md`, and adjust the `from` of the next step. Every status must be set by exactly one step, or resume breaks.
+
+**Change the spec.** Edit `step-spec-template.md`, then the skills that fill that section.
+
+**Tip:** make small changes and test each one with a tiny idea in MANUAL mode.
+
+### Changing it with AI
+
+Claude Code can edit the harness too. What worked well while building this one:
+
+1. **Use plan mode.** Let the AI propose first and edit after you approve.
+2. **Ask for the exact final text.** Have the plan show the complete new pseudo-XML, not a summary, so you can check every word.
+3. **Change one skill at a time.** Review it, commit it, then go to the next.
+4. **Let it ask questions.** Tell it to ask when the intended workflow is unclear instead of guessing.
+5. **Ask for a consistency check.** After a change, have it check the table above.
+6. **Keep it lean.** Tell it to avoid bloat: minimal pseudo-XML, one line per step.
+7. **Test the edge cases in conversation.** Ask "what happens if the computer shuts down while a step is in-review?". Questions like that found real gaps in this blueprint.
+
+Example prompts:
+
+```
+Add a security review ability after the pessimistic review. Show the full new file
+and every change to SKILL.md and workflow.md in the plan. Ask me when unsure.
+```
+
+```
+Check the nos skill for consistency: ability names, statuses vs status.xml,
+verdicts vs parks, inputs vs callers, commit prefixes. List problems only.
+```
+
+```
+Walk through a run where the user rejects phase 2 and then the usage limit hits
+during the fix phase review. Which statuses are set, and where does it resume?
+```
+
+---
+
+## Part 5: Spec UI (viewer)
+
+`ui/` is a read-only browser viewer for `specs/`. It shows what nos is doing without opening JSON or markdown files. It never changes anything. Statuses change only through `nos set-status`.
+
+### Use it
+
+**Without a server (standalone):**
+1. Open `.claude/skills/nos/ui/index.html` straight from disk in Chrome or Edge. These browsers support the File System Access API.
+2. Click **Open folder…** and pick `specs/` or the repo root.
+3. The folder is remembered, so the next visit takes one click (**Reopen**). **↻ Reload** reads the folder again.
+
+**With live reload (dev server):**
+```
+cd .claude/skills/nos/ui
+npm install      # once
+npm run dev
+```
+This serves `dev.html` on http://localhost:5180. It reads `specs/` through Vite and reloads the page when a spec changes. It is handy for watching a run in AUTO mode.
+
+### Views
+
+| View | Shows |
+| --- | --- |
+| **Explore** | Tree of ideas → phases → steps on the left. On the right: details (idea.md, rendered spec, AC/task progress) and a kanban per idea or phase |
+| **Board** | One kanban of all steps or phases across all ideas. There is one column per status. Step boards include `in specification` and `specified`; phase boards only show them when used. `on-hold` and unknown statuses appear only when used |
+| **Backlog** | The same items as a sortable table (id, title, where, status, AC progress) with status tiles |
+
+Board and Backlog can be filtered by label, status, idea and free text. Values of one kind combine with OR, different kinds with AND. Filters live in the URL hash (`#board?status=in-review&labels=ui`), so every view can be bookmarked. Cards show AC and task progress, which is counted from the `( )`/`(x)` markers, and a badge for human validation. Unknown statuses are flagged.
+
+### How it works
+
+| File | Role |
+| --- | --- |
+| `src/model.ts` | Pure: turns `path → text` of `specs/` into ideas → phases → steps. Parses `plan.json`, reads the spec sections, counts markers |
+| `src/status.ts` | The statuses from `templates/status.xml` and their board order |
+| `src/load.ts` | Dev server: Vite `import.meta.glob` of `domain-*/idea.md`, `plan.json`, `phases/**/*.md` |
+| `src/folder.ts` + `src/handle-store.ts` + `src/standalone.ts` | Standalone: reads the picked folder and remembers the handle in IndexedDB |
+| `src/route.ts`, `src/filter.ts` | Hash routes and filters |
+| `src/app.ts`, `src/views/*` | Rendering: explore, board, backlog, kanban, filter bar |
+| `src/markdown.ts` | Minimal markdown renderer. Escapes first, so no raw HTML is rendered |
+| `bundle/viewer.js` | Built standalone script (IIFE, because `file://` pages can't load modules). Commit it with source changes |
+| `tests/` | Vitest tests. `real-specs.test.ts` checks that the real `specs/` (repo root) parse |
+| `package.json`, `tsconfig.json`, `vite.config.ts` | Its own package: vite, vitest, jsdom, TypeScript, Prettier. Nothing in the host project |
+
+The viewer is a separate npm package, so the project it sits in has no viewer scripts, tests or configs. Run these inside `ui/`:
+
+| Command | Does |
+| --- | --- |
+| `npm run dev` | dev server with live reload |
+| `npm test` / `npm run test:watch` | viewer tests |
+| `npm run typecheck` | TypeScript check |
+| `npm run format` / `npm run format:check` | Prettier |
+| `npm run build` | rebuilds `bundle/viewer.js`. Commit it with every source change |
+
+### Changing it
+
+- **New status:** add it to `src/status.ts` (`STATUS_ORDER`, `STEP_BOARD_STATUSES` / `PHASE_BOARD_STATUSES`, labels) and a colour to `styles.css`, as well as to `status.xml`. Otherwise it shows as a flagged "other".
+- **New spec section with markers:** add a `progress(section(...))` in `src/model.ts`, then show it in `src/views/parts.ts`.
+- **New `plan.json` field:** extend the `Raw*` types and the model in `src/model.ts`.
+- Changes to the spec template or the plan structure must also be checked against the viewer (see the consistency table in Part 4). `tests/real-specs.test.ts` fails when the real `specs/` no longer parse.
+
+---
+
+## Part 6: nos CLI
+
+`cli/` holds `nos`, the file manager for `specs/`. It hands out ids from the counters in `specs/config.json`, creates domain and phase folders, lays out empty step spec files, and changes statuses in `plan.json`. The AI never does these by hand (idea 4 in Part 3). No dependencies, Node.js 20+.
+
+Full reference (all options, examples, `update-plan` rules, output format): [`cli/README.md`](cli/README.md).
+
+### Install
+
+```
+cd .claude/skills/nos/cli
+npm install
+npm link        # makes `nos` available globally
+```
+
+Without linking: `node bin/nos.js <command>`. Help: `nos help <command>` or `nos <command> --help`.
+
+### Commands
+
+| Command | Does |
+| --- | --- |
+| `create-domain --idea <file\|-> --slug <slug>` | reserves a domain id, creates `specs/domain-<id>-<slug>/idea.md` (and `specs/config.json` if missing) |
+| `create-plan --domain <d> --plan <file\|->` | saves `plan.json`, creates phase folders and empty step files, fills `spec-file`. One plan per domain |
+| `update-plan --domain <d> --plan <file\|-> [--dry-run] [--force]` | saves a changed plan, creates/moves/deletes phases and steps. Deleting files with content needs `--force` |
+| `set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | changes one status. Plan, phase or step depends on the arguments. Checked against `templates/status.xml` |
+
+### Rules
+
+- `nos` never generates slugs. They must be lowercase kebab-case (`user-auth`).
+- `-` as a file argument reads from stdin.
+- `--root <dir>` sets the project root that contains `specs/` (default: current directory).
+- Plans are validated before anything is written.
+- Output is JSON on stdout, errors on stderr. Exit codes: `0` success, `1` failed, `2` usage error.
+- Ids are global across the project and never reused.
+
+### Develop it
+
+Run inside `cli/`: `npm test` (node:test) or `npm run test:watch`. Code lives in `src/`, one file per command. See `cli/README.md` for the file table.
+
+---
+
+## Porting to another project
+
+1. Copy `.claude/skills/nos/` and the `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` setting.
+2. Install `nos` (Part 6).
+3. Make sure the project has a test command, a linter and a formatter, or remove those checks from develop and the reviewers.
+   Then run `/nos` → `ARCHITECT`: CREATE-DOCS for the architecture docs, TESTS for missing test types. Add guardrails later, once runs show real failures.
+4. Viewer: comes along with the folder. Opening `ui/index.html` needs nothing. For live reload or changes, run `npm install` in `ui/`. The viewer expects `specs/` at the repo root, four levels above `ui/` (`src/load.ts`, `vite.config.ts`, `tests/real-specs.test.ts`). Adjust these paths if the skill sits elsewhere.

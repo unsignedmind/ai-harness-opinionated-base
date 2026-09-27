@@ -1,0 +1,19 @@
+{
+  "name": "",
+  "status": "",
+  "labels": [],
+  "phases": {
+    "name": "",
+    "status": "",
+    "intent": "",
+    "human-validation-needed": false,
+    "description": "",
+    "steps": {
+      "intent": "",
+      "status": "",
+      "human-validation-needed": false,
+      "description": "",
+      "spec-file": ""
+    }
+  }
+}

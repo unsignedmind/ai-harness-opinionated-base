@@ -1,0 +1,11 @@
+<guardrails>
+    <guardrails for="coding">
+        <guardrail-1 reason="observed failure or user decision">Do this or that</guardrail-1>
+    </guardrails>
+    <guardrails for="review">
+        <guardrail-1 reason="observed failure or user decision">Check this specific thing everytime</guardrail-1>
+    </guardrails>
+    <guardrails for="specify">
+        <guardrail-1 reason="observed failure or user decision">When AC contains XY to always add A</guardrail-1>
+    </guardrails>
+</guardrails>
