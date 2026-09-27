@@ -23,6 +23,9 @@
             <choice key="NO">Stop here</choice>
         </question>
     </step2>
+    <step3>
+        <do>When the plan is created and the cli commands are done: in the spec-ui folder start the dev server via dev-to-lan npm task and provide the network url e.g. 192.168.XXX.XXX:XXXX</do>
+    </step3>
 </option>
 
 <option name="architect">
