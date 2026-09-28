@@ -40,6 +40,10 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
             <description>this skill initiates a review of the instructed target and fixes issues.</description>
             <skill>./abilities/review-fixing.md</skill>
         </ability>
+        <ability name="quick-dev">
+            <description>fast proof-of-concept flow in a worktree without reviews. Iterates with the user and distills the idea and learnings</description>
+            <skill>./abilities/quick-dev/SKILL.md</skill>
+        </ability>
         <ability name="architect">
             <description>this skill is the quality and docs architect: architecture docs, guardrails, tests and measuring harness changes</description>
             <skill>./abilities/architect.md</skill>
