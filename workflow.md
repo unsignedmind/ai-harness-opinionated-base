@@ -64,6 +64,7 @@
     <step4>Report the phases
         <question>Run it now?
             <choice key="YES">Run the plan → option "run" with this domain</choice>
+            <choice key="CHANGE">Change the split → ask what to change. Run ability "plan" (action revise) with the domain and the changes. Repeat step4</choice>
             <choice key="NO">Stop here</choice>
         </question>
     </step4>

@@ -100,7 +100,7 @@ Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
 1. **IDEA**: describe what you want. The idea agent asks you questions until the idea is clear. It saves the result as `specs/domain-<id>-<slug>/idea.md`.
    Then: `Create a plan now?` → `YES`.
 2. **PLAN**: the planner splits the idea into phases and steps and saves `plan.json`. Every step gets an empty spec file.
-   Then: `Run it now?` → `YES`.
+   Then: `Run it now?` → `YES`. Or `CHANGE` to describe changes to the split. The planner revises the plan and asks again.
    > The plan agent will judge on its own where human intervention is required and where a review is not needed (pure documentation). It configures this in the plan.json. By changing the boolean values you can overrule that.
 3. **RUN**: choose a mode:
    ```
@@ -306,6 +306,7 @@ Asks you focused questions until the idea is ready for planning. It generates a 
 Reads `docs/architecture.md` if it exists and respects its structure and rules. Two actions:
 - **create**: needs the domain and its `idea.md`. Splits the idea into phases and steps that respect the existing architecture, following `templates/plan.json`. All statuses are `open`, and every phase and step gets a slug. Pure documentation steps, and phases that are only documentation and human verification (with all their steps), get `review-needed: false`. A phase with exactly one step always gets `review-needed: false` on the phase only. Saves with `nos create-plan`, which creates phase folders and empty step spec files and fills `spec-file`.
 - **extend**: used after a phase is rejected. Inserts a fix phase directly after the rejected one, with the issues split into steps and `human-validation-needed: true`, and `review-needed` set by the same rules as create. Saves with `nos update-plan`.
+- **revise**: used when you pick `CHANGE` after the split is shown. Applies your changes (move, merge, split, add or remove phases and steps), reapplies the `review-needed` rules and saves with `nos update-plan`.
 
 ### abilities/develop.md: developer 🪛
 
@@ -404,7 +405,7 @@ Used in ACs, the Task List and review findings:
 | --- | --- | --- |
 | `nos create-domain --idea <file> --slug <slug>` | idea | new domain id, folder, `idea.md` |
 | `nos create-plan --domain <d> --plan <file>` | plan (create) | saves `plan.json`, creates phase folders and step files |
-| `nos update-plan --domain <d> --plan <file>` | plan (extend) | saves the changed plan, creates/moves/deletes phases and steps |
+| `nos update-plan --domain <d> --plan <file>` | plan (extend, revise) | saves the changed plan, creates/moves/deletes phases and steps |
 | `nos set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | orchestrator | changes one status, checked against the matching `status.xml` section |
 
 ### Who may do what

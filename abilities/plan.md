@@ -42,3 +42,9 @@ description: You are the implementation architect and planner.
     <step2>Insert a fix phase directly after the rejected phase. Break the issues into steps. human-validation-needed true, review-needed per the flags, statuses open, spec-file empty, slug for phase and each step</step2>
     <step3>Use "nos update-plan" to save the plan</step3>
 </workflow>
+
+<workflow action="revise" expected-input="domain, requested changes">
+    <step1>Read specs/<domain>/plan.json</step1>
+    <step2>Apply the changes: move, merge, split, add or remove phases and steps. Keep the sizing intent unless the changes say otherwise. Statuses open, spec-file untouched, slug for new phases and steps. Reapply the flags</step2>
+    <step3>Use "nos update-plan" to save the plan</step3>
+</workflow>
