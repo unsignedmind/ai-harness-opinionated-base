@@ -236,6 +236,7 @@ The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Ch
 │   ├── plan.json                   plan structure
 │   ├── status.xml                  valid statuses
 │   ├── step-spec-template.md       structure of a step spec file
+│   ├── review-template.md          structure and rules of a review (step Review section, phase review.md)
 │   ├── architecture-sections.md    section catalog for a project's architecture template
 │   ├── test-types.md               test groups and architecture rule ideas
 │   └── guardrails.xml              structure of docs/guardrails.xml
@@ -337,11 +338,17 @@ It assumes the implementation is wrong. It never changes code or tests. It finds
 - **step**: ACs met, tests cover every AC, edge cases, bugs, weakened tests, quality and conventions, broken architecture rules, and whether the Task List and Dev Log are truthful.
 - **phase**: steps fit together, gaps between steps, duplication and inconsistency, phase intent met.
 
-It writes its findings into the review file (step: `## Review` in the spec, phase: `review.md` in the phase folder), replacing the old content. Each finding is `( )` with a category (bug|gap|test|quality), a severity, a location and evidence. It reports only `passed`/`failed`.
+It runs four passes on top of that focus:
+- **criteria**: each AC is split into checkable conditions and marked `met`, `partly` or `not met`, with what is missing.
+- **code**: names, error paths, security, cleanup, unsafe casts, duplication and null guards.
+- **edges**: empty input, off-by-one, races, big input, validation at boundaries and actionable error messages.
+- **tests**: whether a test checks each AC's outcome and edge cases. If an AC names an error case and no test covers it, that is `must-fix`.
+
+It writes the review file (step: `## Review` in the spec, phase: `review.md` in the phase folder) from `templates/review-template.md`, replacing the old content. Each finding is `( )` with an id (`F1`), a weight (`must-fix`|`should-fix`), a category (bug|gap|test|quality), `file:line`, evidence, a suggested fix and a fix kind (`mechanical`|`judgment`). The Result is `passed` only when every AC is met and there is no `must-fix`, and it reports only that Result.
 
 ### abilities/review-fixing/SKILL.md: second reviewer and fixer 🕵🏼🛠️
 
-Runs in a new context and does its **own review first, without reading the review file**, including tests, lint and format. Then it reads the pessimistic review, compares, removes invalid findings and adds missing ones. It fixes the findings with TDD and marks each one `(x)` fixed or `(!)` (not fixable, out of scope, or needs your decision). It reruns the full checks, writes its fixes into the Dev Log marked `(reviewer)`, and commits with `step-<id>`/`phase-<id>`. It reports `pass` or `blocked`. When human validation is needed, it adds simple verification steps that the orchestrator shows you.
+Runs in a new context and does its **own review first, without reading the review file**, including tests, lint and format. Then it reads the pessimistic review, compares, removes invalid findings and adds missing ones. It fixes the findings with TDD and marks each one `(x)` fixed or `(!)` (not fixable, out of scope, or needs your decision). It reruns the full checks, writes its fixes into the Dev Log marked `(reviewer)`, and commits with `step-<id>`/`phase-<id>`. Then it fills `### Fixes` in the review with the commit sha, updates Criteria and Result when they changed, and commits again. It reports `pass` or `blocked`. When human validation is needed, it adds simple verification steps that the orchestrator shows you.
 
 Both reviewers read the review guardrails in `docs/guardrails.xml` and the architecture in `docs/architecture.md` if they exist. Like develop, review-fixing never changes the architecture docs and notes needed changes in the Dev Log marked `(architecture)`.
 
@@ -376,6 +383,7 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
   - Steps: `open`, `in-specification`, `specified`, `in-progress`, `implemented`, `in-review`, `reviewed`, `done`.
   - Three sections, `<plans>`, `<phases>` and `<steps>`, so a status can be valid for steps only.
 - **step-spec-template.md**: sections Description, Acceptance Criteria, Task List, Dev Log (What I did / What I didn't do and why), and Review.
+- **review-template.md**: the Review section and phase `review.md`. It has a Date and Result line, a short summary, Criteria (one line per AC), Findings (`( )` with id, weight, category, location, evidence, fix and fix kind) and Fixes (written by review-fixing). Rules for weights and fix kinds are at the bottom.
 - **architecture-sections.md**: catalog for a project's architecture template. Core sections (Overview, Stack & commands, Structure, Rules, Testing, Decisions, Tech debt), optional sections with "include when", profiles per project type, and the template format.
 - **test-types.md**: test groups with when they add value and tooling examples, architecture rule ideas, enforcement mechanisms (lint rule, dependency graph, test) and pitfalls.
 - **guardrails.xml**: structure of `docs/guardrails.xml`. One section per ability that reads it (coding, review, specify). Every guardrail has a `reason`.
@@ -503,6 +511,7 @@ Most changes touch more than one file. Before you finish a change, check these c
 | a status | the right section (`<plans>`, `<phases>`, `<steps>`) of `templates/status.xml` (nos validates against it), every `<status from to>` in `workflow.md`, the `resume-at` attributes, `ui/src/status.ts` and the colours in `ui/styles.css` |
 | what an ability reports (e.g. `pass`/`blocked`) | the `<park when="...">` that reacts to it in `workflow.md` |
 | spec sections | `step-spec-template.md` and every skill that reads or writes that section |
+| review layout (weights, fix kinds, Result) | `review-template.md`, the `<passes>` of review-pessimistic, review-fixing |
 | inputs of an ability | what the caller passes in `workflow.md` |
 | commit prefix | develop, review-fixing and review-pessimistic (it searches by prefix). `architect` prefix: architect (MEASURE searches by it) |
 | markers | specify, develop, both reviewers, the template, `ui/src/model.ts` |
