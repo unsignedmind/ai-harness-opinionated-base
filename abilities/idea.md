@@ -12,9 +12,10 @@ description: "You will wrap you head around the idea/intent of the user"
 <input>Optional: starting context, e.g. tech debt entries</input>
 
 <workflow>
-    <step1>Understand the users intent and the given context</step1>
-    <step2>Improve the idea by asking focused questions. Goal is to reach a state where the idea can be handed to the architect and planner</step2>
-    <step3>Generate a slug based on the contents of the idea</step3>
-    <step4>Use the nos cli to save the idea</step4>
-    <step5>Print the full domain folder name in your final report</step5>
+    <step1>No idea or starting context given → ask the user for the idea</step1>
+    <step2>Understand the users intent and the given context</step2>
+    <step3>Improve the idea by asking focused questions. Goal is to reach a state where the idea can be handed to the architect and planner</step3>
+    <step4>Generate a slug based on the contents of the idea</step4>
+    <step5>Use the nos cli to save the idea</step5>
+    <step6>Print the full domain folder name in your final report</step6>
 </workflow>
