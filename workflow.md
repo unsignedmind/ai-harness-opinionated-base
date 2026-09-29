@@ -53,13 +53,20 @@
             <choice key="domain id">One choice per specs/domain-* folder without plan.json: domain name</choice>
         </question>
     </step1>
-    <step2>Run ability "plan" (action create) with the domain</step2>
-    <step3>Report the phases
+    <step2>
+        <question>How big should phases and steps be?
+            <choice key="S">Small. Many phases, small focused steps</choice>
+            <choice key="M">Medium. Balanced</choice>
+            <choice key="L">Large. Few phases (maybe one), few big steps (maybe one)</choice>
+        </question>
+    </step2>
+    <step3>Run ability "plan" (action create) with the domain and the sizing</step3>
+    <step4>Report the phases
         <question>Run it now?
             <choice key="YES">Run the plan → option "run" with this domain</choice>
             <choice key="NO">Stop here</choice>
         </question>
-    </step3>
+    </step4>
 </option>
 
 <modes>

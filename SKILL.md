@@ -34,11 +34,11 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
         </ability>
         <ability name="review-pessimistic">
             <description>this skill initiates a pessimistic review of the instructed target.</description>
-            <skill>./abilities/review-pessimistic.md</skill>
+            <skill>./abilities/review-pessimistic/SKILL.md</skill>
         </ability>
         <ability name="review-fixing">
             <description>this skill initiates a review of the instructed target and fixes issues.</description>
-            <skill>./abilities/review-fixing.md</skill>
+            <skill>./abilities/review-fixing/SKILL.md</skill>
         </ability>
         <ability name="quick-dev">
             <description>fast proof-of-concept flow in a worktree without reviews. Iterates with the user and distills the idea and learnings</description>

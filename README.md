@@ -227,8 +227,8 @@ The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Ch
 │   ├── plan.md
 │   ├── specify.md
 │   ├── develop.md
-│   ├── review-pessimistic.md
-│   ├── review-fixing.md
+│   ├── review-pessimistic/SKILL.md  also runs standalone
+│   ├── review-fixing/SKILL.md       also runs standalone
 │   ├── architect.md
 │   └── quick-dev/SKILL.md          also runs standalone
 ├── templates/
@@ -331,7 +331,7 @@ When something is unclear:
 
 It writes every assumption into the Dev Log marked `(specify)`, so develop and the reviewers see it. It never writes tasks or code, and it doesn't commit; develop commits the spec together with the code.
 
-### abilities/review-pessimistic.md: first reviewer 🕵🏼😠
+### abilities/review-pessimistic/SKILL.md: first reviewer 🕵🏼😠
 
 It assumes the implementation is wrong. It never changes code or tests. It finds the changes through the commit prefix, runs tests, lint and format check, and reviews with a target-specific focus:
 - **step**: ACs met, tests cover every AC, edge cases, bugs, weakened tests, quality and conventions, broken architecture rules, and whether the Task List and Dev Log are truthful.
@@ -339,11 +339,13 @@ It assumes the implementation is wrong. It never changes code or tests. It finds
 
 It writes its findings into the review file (step: `## Review` in the spec, phase: `review.md` in the phase folder), replacing the old content. Each finding is `( )` with a category (bug|gap|test|quality), a severity, a location and evidence. It reports only `passed`/`failed`.
 
-### abilities/review-fixing.md: second reviewer and fixer 🕵🏼🛠️
+### abilities/review-fixing/SKILL.md: second reviewer and fixer 🕵🏼🛠️
 
 Runs in a new context and does its **own review first, without reading the review file**, including tests, lint and format. Then it reads the pessimistic review, compares, removes invalid findings and adds missing ones. It fixes the findings with TDD and marks each one `(x)` fixed or `(!)` (not fixable, out of scope, or needs your decision). It reruns the full checks, writes its fixes into the Dev Log marked `(reviewer)`, and commits with `step-<id>`/`phase-<id>`. It reports `pass` or `blocked`. When human validation is needed, it adds simple verification steps that the orchestrator shows you.
 
 Both reviewers read the review guardrails in `docs/guardrails.xml` and the architecture in `docs/architecture.md` if they exist. Like develop, review-fixing never changes the architecture docs and notes needed changes in the Dev Log marked `(architecture)`.
+
+Both work standalone too: tell Claude to follow `abilities/review-pessimistic/SKILL.md` or `abilities/review-fixing/SKILL.md`, optionally with a scope (files, commit range, branch). No scope → uncommitted changes plus branch commits not in main. Without a step ticket they print the outcome instead of writing a review file or Dev Log. Standalone review-fixing accepts findings (e.g. the printed pessimistic review), fixes them but doesn't commit.
 
 ### abilities/architect.md: quality and docs architect 🏗️🕵🏼
 
