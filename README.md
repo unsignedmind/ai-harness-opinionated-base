@@ -184,7 +184,7 @@ In `plan.json`, every phase and step has `"human-validation-needed"`. When it is
 
 ### Controlling reviews
 
-In `plan.json`, every phase and step has `"review-needed"` (missing counts as `true`). When it is `false`, nos skips both reviews and moves it from `implemented` straight to `done`. If human validation is needed too, nos stops at `implemented` instead and derives the verification steps from the ACs. The planner sets it to `false` for pure documentation steps, and for phases that are only documentation and human verification (then the phase and all its steps). You can edit this in the plan before or during a run.
+In `plan.json`, every phase and step has `"review-needed"` (missing counts as `true`). When it is `false`, nos skips both reviews and moves it from `implemented` straight to `done`. If human validation is needed too, nos stops at `implemented` instead and derives the verification steps from the ACs. The planner sets it to `false` for pure documentation steps, and for phases that are only documentation and human verification (then the phase and all its steps), and always for phases with exactly one step (only the phase, the step keeps its own flag). You can edit this in the plan before or during a run.
 
 ### Where to look
 
@@ -304,7 +304,7 @@ Asks you focused questions until the idea is ready for planning. It generates a 
 ### abilities/plan.md: implementation architect and planner 🏗️
 
 Reads `docs/architecture.md` if it exists and respects its structure and rules. Two actions:
-- **create**: needs the domain and its `idea.md`. Splits the idea into phases and steps that respect the existing architecture, following `templates/plan.json`. All statuses are `open`, and every phase and step gets a slug. Pure documentation steps, and phases that are only documentation and human verification (with all their steps), get `review-needed: false`. Saves with `nos create-plan`, which creates phase folders and empty step spec files and fills `spec-file`.
+- **create**: needs the domain and its `idea.md`. Splits the idea into phases and steps that respect the existing architecture, following `templates/plan.json`. All statuses are `open`, and every phase and step gets a slug. Pure documentation steps, and phases that are only documentation and human verification (with all their steps), get `review-needed: false`. A phase with exactly one step always gets `review-needed: false` on the phase only. Saves with `nos create-plan`, which creates phase folders and empty step spec files and fills `spec-file`.
 - **extend**: used after a phase is rejected. Inserts a fix phase directly after the rejected one, with the issues split into steps and `human-validation-needed: true`, and `review-needed` set by the same rules as create. Saves with `nos update-plan`.
 
 ### abilities/develop.md: developer 🪛

@@ -15,6 +15,7 @@ description: You are the implementation architect and planner.
     <rule>"review-needed" is true by default</rule>
     <rule>Step is pure documentation (only docs text, no code, config or tests) → step "review-needed" false</rule>
     <rule>Phase is only documentation and/or human verification → phase and all its steps "review-needed" false</rule>
+    <rule>Phase has exactly one step → phase "review-needed" false, always. The step keeps its own flag</rule>
 </flags>
 
 <sizing>
