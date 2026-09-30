@@ -1,6 +1,6 @@
 # Test types
 
-Catalog for the architect task TESTS. A type is missing only when it would catch real problems in this project.
+Catalog for the architect task TESTS and the Test Strategy of specify and spec-review. A type is missing only when it would catch real problems in this project.
 
 | Group        | Covers                                                        | Adds value when                                                  | Tooling examples                                                    |
 | ------------ | ------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------- |

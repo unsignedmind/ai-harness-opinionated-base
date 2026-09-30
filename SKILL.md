@@ -16,6 +16,10 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
     </workflow>
 
     <abilities>
+        <ability name="setup">
+            <description>this skill sets up nos for the project: specs folder, config.json, quality tools and project commands</description>
+            <skill>./abilities/setup.md</skill>
+        </ability>
         <ability name="idea">
             <description>this skill works through an idea with the user and save the outcome as a file as context for the plan skill</description>
             <skill>./abilities/idea.md</skill>
@@ -27,6 +31,10 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
         <ability name="specify">
             <description>this skill writes the description and acceptance criteria of a step</description>
             <skill>./abilities/specify.md</skill>
+        </ability>
+        <ability name="spec-review">
+            <description>this skill reviews the spec of a step against the requirement, asks the specify session for its reasoning and fixes the spec</description>
+            <skill>./abilities/spec-review.md</skill>
         </ability>
         <ability name="develop">
             <description>This skill implements a specified step</description>

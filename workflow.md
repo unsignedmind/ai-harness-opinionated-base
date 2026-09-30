@@ -8,14 +8,26 @@
 </rules>
 
 <start>
+    <check>specs/config.json missing or without "quality-tools" →
+        <question>nos is not set up for this project yet. Set it up now?
+            <choice key="YES">Set up → option "setup", then show the menu</choice>
+            <choice key="NO">Skip. Abilities that run quality checks will stop until setup ran</choice>
+        </question>
+    </check>
     <question>What do you want to do?
         <choice key="IDEA">Document an idea</choice>
         <choice key="PLAN">Create a plan from an idea</choice>
         <choice key="RUN">Run or continue a plan</choice>
         <choice key="QUICK">Quickly try out an idea in a proof of concept</choice>
         <choice key="ARCHITECT">Improve project quality and docs: architecture docs, guardrails, tests</choice>
+        <choice key="SETUP">Set up or update nos for this project: specs folder, config, quality tools</choice>
     </question>
 </start>
+
+<option name="setup">
+    <step1>Run ability "setup"</step1>
+    <step2>Report the configured quality tools and project commands</step2>
+</option>
 
 <option name="idea">
     <step1>Run ability "idea"</step1>
@@ -133,7 +145,11 @@
     <entry>resume</entry>
     <step1 resume-at="in-specification">
         <status target="step" from="open" to="in-specification"/>
-        <do>Run ability "specify" with domain, phase id, step id, mode and user feedback if any</do>
+        <do>Run ability "specify" with domain, phase id, step id, mode and user feedback if any. Keep its subagent alive when it reports done</do>
+        <do>Run ability "spec-review" with domain, phase id, step id, mode and user feedback if any. Resume and specify not run in this session → tell it the spec author is unavailable</do>
+        <do>spec-review returns questions "for-specify" → SendMessage them to the specify subagent. Its answers → SendMessage to the spec-review subagent. specify asks back → relay to spec-review and the reply back</do>
+        <do>spec-review returns questions for the user → ask the user, send the answers back to spec-review</do>
+        <do>spec-review reports done → the specification is finished. Send nothing more to the specify subagent</do>
     </step1>
     <step2 resume-at="specified">
         <status target="step" from="in-specification" to="specified"/>

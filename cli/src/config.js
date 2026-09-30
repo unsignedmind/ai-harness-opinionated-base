@@ -6,6 +6,15 @@ export const CONFIG_FILE = 'config.json';
 export const TEMPLATE_CONFIG_PATH = '.claude/skills/nos/templates/config.json';
 export const DEFAULT_CONFIG = Object.freeze({
   'id-counters': Object.freeze({ domain: 1, phase: 1, step: 1 }),
+  'quality-tools': Object.freeze({
+    test: null,
+    lint: null,
+    'format-check': null,
+    typecheck: null,
+    e2e: null,
+    additional: Object.freeze([]),
+  }),
+  'project-commands': Object.freeze({ install: null, dev: null, 'deploy-test': null }),
 });
 
 export function specsDir(root) {

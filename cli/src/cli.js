@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { ensureSpecs } from './config.js';
 import { createDomain } from './domain.js';
 import { createPlan } from './plan.js';
 import { setStatus } from './status.js';
@@ -11,6 +12,7 @@ export const USAGE = `nos - file manager for the nos harness
 Usage: nos <command> [options]
 
 Commands:
+  init            Create specs/ and specs/config.json if missing
   create-domain   Reserve a domain id and create specs/domain-<id>-<slug>/idea.md
   create-plan     Save a plan.json in a domain and create its phase folders and step files
   update-plan     Save an updated plan.json and create, move or delete phase folders and step files
@@ -24,7 +26,28 @@ Slugs are never generated: they must be lowercase kebab-case (e.g. user-auth).
 Pass "-" to read an input from stdin. Results are printed as JSON.
 Exit codes: 0 ok, 1 operation failed, 2 usage error / missing input.`;
 
-const CREATE_DOMAIN_HELP = `Usage: nos create-domain --idea <file|-> --slug <slug> [--root <dir>]
+const INIT_HELP = `Usage: nos init [--root <dir>]
+
+Set up the specs folder of a project.
+
+  1. Creates specs/ if missing
+  2. Creates specs/config.json if missing (copied from
+     .claude/skills/nos/templates/config.json when present)
+  An existing config.json is never changed.
+
+Options:
+  --root <dir>     Project root containing specs/ (default: current directory)
+
+Example:
+  nos init
+  {
+    "action": "init",
+    "specs": "specs",
+    "config": "specs/config.json",
+    "createdConfig": true
+  }`;
+
+const CREATE_DOMAIN_HELP =`Usage: nos create-domain --idea <file|-> --slug <slug> [--root <dir>]
 
 Create a new domain for an idea.
 
@@ -167,6 +190,20 @@ Example:
   }`;
 
 const COMMANDS = {
+  init: {
+    help: INIT_HELP,
+    options: { root: { type: 'string' } },
+    required: [],
+    execute(values, io, root) {
+      const result = ensureSpecs(root);
+      return {
+        action: 'init',
+        specs: rel(root, result.specsDir),
+        config: rel(root, result.configPath),
+        createdConfig: result.createdConfig,
+      };
+    },
+  },
   'create-domain': {
     help: CREATE_DOMAIN_HELP,
     options: { idea: { type: 'string' }, slug: { type: 'string' }, root: { type: 'string' } },

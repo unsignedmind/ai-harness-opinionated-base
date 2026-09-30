@@ -23,6 +23,7 @@ nos <command> --help
 
 | Command         | Description                                                                 |
 | --------------- | --------------------------------------------------------------------------- |
+| `init`          | Create `specs/` and `specs/config.json` if missing                          |
 | `create-domain` | Reserve a domain id and create `specs/domain-<id>-<slug>/idea.md`           |
 | `create-plan`   | Save a `plan.json` in a domain and create its phase folders and step files  |
 | `update-plan`   | Save an updated `plan.json` and create, move or delete phases and steps     |
@@ -42,6 +43,24 @@ General rules:
 | `0`  | Success                         |
 | `1`  | The operation failed            |
 | `2`  | Usage error or missing input    |
+
+### `init`
+
+```sh
+nos init [--root <dir>]
+```
+
+Creates `specs/` and `specs/config.json` if they are missing, like `create-domain` step 1. An existing `config.json` is never changed.
+
+```sh
+$ nos init
+{
+  "action": "init",
+  "specs": "specs",
+  "config": "specs/config.json",
+  "createdConfig": true
+}
+```
 
 ### `create-domain`
 
@@ -165,7 +184,7 @@ $ nos set-status --domain domain-1-user-auth --step 1 --status in-review
 
 ```
 specs/
-├── config.json                 # id counters: { "id-counters": { "domain": 1, "phase": 1, "step": 1 } }
+├── config.json                 # "id-counters" (managed by nos), "quality-tools" and "project-commands" (setup ability)
 └── domain-1-user-auth/
     ├── idea.md
     ├── plan.json

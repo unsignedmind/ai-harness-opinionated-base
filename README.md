@@ -41,7 +41,7 @@ Phases and steps are inspired by implementation plans from the Claude plan mode 
 - For every step in every phase, the following cycle is executed:
 ```
 open ──► in-specification ──► specified ──► in-progress ──► implemented ──► in-review ──► reviewed ──► done
-         specify                            develop                         review agents                                                                    
+         specify + spec-review              develop                         review agents                                                                    
 ```
 - The orchestrator is the backbone of the loop capability. It enables full implementation runs with dozens of contexts to be run overnight. 
 - The Specs UI is an addition to the Orchestrator Chat, allowing users to browse and track their current progress.
@@ -52,8 +52,8 @@ open ──► in-specification ──► specified ──► in-progress ──
 - It demonstrates that there can't be one harness to rule them all.
 - Different types of tests are also technically part of a harness, but are completely based on your project code.
 - Pick it apart. Copy only what you need. Use it to inspire you to build your own completely from scratch.
-- Disclaimer: This harness blueprint was built for a front-end project. The quality tools that are already built in for the development and review agents use `npm xxx`.
-- The good news is that you can simply ask an AI to make those changes. This harness has matured enough to allow an AI to make changes without easily breaking it. I hope so, at least!
+- This harness blueprint was built for a front-end project. Project specific commands (test, lint, format, typecheck, e2e, dev server, deploy) are not hardcoded: they live in `specs/config.json` and the SETUP option gathers them for your project.
+- You can simply ask an AI to make further changes. This harness has matured enough to allow an AI to make changes without easily breaking it. I hope so, at least!
 - You don't use Node.js? Well, let the AI port the CLI to Python.
 
 ## Part 1: How to use it
@@ -63,16 +63,34 @@ open ──► in-specification ──► specified ──► in-progress ──
 - `nos` CLI (Node.js 20+) | Creates `specs/` folders and ids and changes statuses.
 - Install: `cd .claude/skills/nos/cli && npm install && npm link` (see Part 6)
 
-If you're running this in a web frontend project 
-- Make sure you have a test suite, linter, formatter configured in the project | Develop and both reviewers agents run all three (e.g. `npm test`, `npm run lint`, `npm run format:check`)
+- A test suite, linter and formatter in the project are recommended. Develop and both reviewers run the configured quality check. Missing ones are skipped; the architect (TESTS) can add them later.
+- Run SETUP once (the orchestrator offers it when `specs/config.json` has no quality tools). Works for any stack, not only npm.
 
-If you're running this in another kind of project
-- Start Claude in .claude/skills/nos
-- Tell the AI what kind of project this is and let it identify the Test suite, linter, formatter in the project
-- Tell it to make sure the harness uses these instead of the default ones
-> e.g. "This is a backend project. Please identify what commands are used for the test suite, linter, formatter. Make sure the harness uses these instead of the default ones"
+### Setup (SETUP)
 
-> Alternatively tell it to remove these for now and add them later 
+1. Runs `nos init`: creates `specs/` and `specs/config.json` if missing. Existing id counters stay untouched.
+2. Detects the tooling: package manager, `package.json` scripts, Makefile, pyproject, go.mod, …
+3. Proposes the commands per key and asks you to confirm or adjust.
+4. Runs each quality command once and reports pass or fail.
+5. Writes `quality-tools` and `project-commands` into `specs/config.json` and commits.
+
+```json
+"quality-tools": {
+  "test": "npm test",
+  "lint": "npm run lint",
+  "format-check": "npm run format:check",
+  "typecheck": "npm run typecheck",
+  "e2e": "npm run e2e",
+  "additional": ["npm run knip"]
+},
+"project-commands": {
+  "install": "npm install",
+  "dev": "npm run dev",
+  "deploy-test": "npm run deploy:test"
+}
+```
+
+`null` → not available. Key meanings and the quality check rules: `templates/quality-tools.md`.
 
 ### Start
 
@@ -91,6 +109,7 @@ B - Create a plan from an idea [PLAN]
 C - Run or continue a plan [RUN]
 D - Quickly try out an idea in a proof of concept [QUICK]
 E - Improve project quality and docs: architecture docs, guardrails, tests [ARCHITECT]
+F - Set up or update nos for this project: specs folder, config, quality tools [SETUP]
 ```
 
 Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
@@ -117,7 +136,7 @@ Each option can also be started on its own. PLAN lists ideas without a plan. RUN
 Outside the typical path. For testing ideas fast. No plan, no specs, no reviews.
 
 1. Creates a worktree with branch `poc/<slug>` and implements the idea there.
-2. Asks once how you preview: `LOCAL` (dev server on your machine, hot reload) or `REMOTE` (`npm run deploy:test`, for remote sessions). Reports the url.
+2. Asks once how you preview: `LOCAL` (dev server on your machine, hot reload) or `REMOTE` (`deploy-test` command from `specs/config.json`, for remote sessions). Only configured modes are offered. Reports the url.
 3. Loops: request a change → implement → preview again. Offers each time to end the loop or switch the preview mode.
 4. At the end it writes one doc: the idea, your change requests, the learnings and the code changes. Then asks `SAVE` (hand it to the idea ability) or `DROP`.
 5. Removes the worktree first, then saves or drops. The `poc/<slug>` branch stays.
@@ -169,8 +188,8 @@ D - Pause the plan [PAUSE]
 
 - **GO**: continue.
 - **AUTO/MANUAL**: switch the mode and continue.
-- **REJECT (specified step)**: the step goes back to `in-specification`. Specify reworks the description and ACs with your feedback.
-- **REJECT (reviewed step, or implemented step without review)**: the step goes back to `in-specification` with your feedback. Specify updates the ACs if needed, then develop runs again, and both reviews too when `review-needed` is `true`.
+- **REJECT (specified step)**: the step goes back to `in-specification`. Specify reworks the description and ACs with your feedback, then spec-review checks them.
+- **REJECT (reviewed step, or implemented step without review)**: the step goes back to `in-specification` with your feedback. Specify updates the ACs if needed and spec-review checks them, then develop runs again, and both reviews too when `review-needed` is `true`.
 - **REJECT (phase)**: the planner adds a new **fix phase** directly after it, made from your feedback. The fix phase runs the full cycle and always asks you to validate it.
 - **PAUSE**: the plan becomes `on-hold`. Start it again later with RUN.
 
@@ -190,13 +209,13 @@ In `plan.json`, every phase and step has `"review-needed"` (missing counts as `t
 
 ```
 specs/
-├── config.json                          id counters (managed by nos)
+├── config.json                          id counters (managed by nos), quality tools, project commands (setup)
 └── domain-1-user-auth/
     ├── idea.md                          the idea
     ├── plan.json                        phases, steps, statuses
     └── phases/
         └── phase-1-data-model/
-            ├── step-1-user-table.md     spec: description, ACs, tasks, dev log, review
+            ├── step-1-user-table.md     spec: description, ACs, spec log, test strategy, tasks, dev log, review
             └── review.md                phase review
 ```
 
@@ -223,21 +242,24 @@ The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Ch
 ├── workflow.md                     orchestrator: what to do when
 ├── README.md                       this file
 ├── abilities/                      abilities, each run as its own subagent
+│   ├── setup.md
 │   ├── idea.md
 │   ├── plan.md
 │   ├── specify.md
+│   ├── spec-review.md
 │   ├── develop.md
 │   ├── review-pessimistic/SKILL.md  also runs standalone
 │   ├── review-fixing/SKILL.md       also runs standalone
 │   ├── architect.md
 │   └── quick-dev/SKILL.md          also runs standalone
 ├── templates/
-│   ├── config.json                 initial id counters
+│   ├── config.json                 initial id counters, empty quality tools and project commands
 │   ├── plan.json                   plan structure
 │   ├── status.xml                  valid statuses
 │   ├── step-spec-template.md       structure of a step spec file
 │   ├── review-template.md          structure and rules of a review (step Review section, phase review.md)
 │   ├── architecture-sections.md    section catalog for a project's architecture template
+│   ├── quality-tools.md            config keys and the quality check
 │   ├── test-types.md               test groups and architecture rule ideas
 │   └── guardrails.xml              structure of docs/guardrails.xml
 ├── cli/                            `nos` CLI: ids, folders, statuses (Part 6)
@@ -248,7 +270,7 @@ All skill files are written in minimal pseudo-XML: `<coreRules>`, `<input>`, and
 
 ### SKILL.md: the orchestrator
 
-Defines the main session's role. It only delegates, orchestrates and reports. It never implements or verifies. It must read `workflow.md` first and must not read an ability file until the workflow calls for it. It lists the abilities: idea, plan, specify, develop, review-pessimistic, review-fixing, architect, quick-dev.
+Defines the main session's role. It only delegates, orchestrates and reports. It never implements or verifies. It must read `workflow.md` first and must not read an ability file until the workflow calls for it. It lists the abilities: setup, idea, plan, specify, spec-review, develop, review-pessimistic, review-fixing, architect, quick-dev.
 
 #### Step and phase cycle
 
@@ -271,7 +293,7 @@ open ──► in-progress ──► implemented ──► in-review ──► r
 ```
 
 - `review-needed: false` (step or phase): `implemented ──► done`. No review, and the human-validation park moves to `implemented`.
-- Step: `in-specification` runs specify, `in-progress` runs develop.
+- Step: `in-specification` runs specify, then spec-review. `in-progress` runs develop.
 - Phase: `in-progress` runs the step cycle for every step that is not done. The phase review starts only after all steps are done.
 - There is no review of the whole plan. The phase reviews already cover how steps fit together.
 - Plan statuses: `open`/`on-hold` → `in-progress` → `done`.
@@ -283,7 +305,7 @@ Every cycle starts with `<entry>resume</entry>`, and every cycle step has `resum
 | Status | Continues with |
 | --- | --- |
 | `open` | step1 (normal start) |
-| `in-specification` | specify again (step only) |
+| `in-specification` | specify and spec-review again (step only) |
 | `specified` | the MANUAL park, then develop (step only) |
 | `in-progress` | develop again (step), or the step loop (phase) |
 | `implemented` | the MANUAL park, then review (or `done` when `review-needed: false`) |
@@ -293,9 +315,13 @@ Every cycle starts with `<entry>resume</entry>`, and every cycle step has `resum
 
 The status change of the resumed step is skipped because it already happened. The ability is told that it resumes interrupted work.
 
+### abilities/setup.md: setup 🔧
+
+Not part of the run cycle. Started from the menu (SETUP), or offered at start when `specs/config.json` has no `quality-tools`. Runs `nos init`, detects the project's tooling, lets you confirm the commands, runs them once and writes `quality-tools` and `project-commands`. Never touches the id counters.
+
 ### abilities/quick-dev/SKILL.md: prototyper ⚡
 
-Not part of the run cycle. Started from the menu (QUICK) or standalone. Works in a `poc/<slug>` worktree, skips specify and reviews, only requires `npm run typecheck`. Previews via local dev server or `npm run deploy:test`. Loops on your change requests, then documents idea and learnings. SAVE → idea ability with the doc as starting context (standalone: runs it itself; via orchestrator: the orchestrator runs it). Removes the worktree before saving or dropping.
+Not part of the run cycle. Started from the menu (QUICK) or standalone. Works in a `poc/<slug>` worktree, skips specify and reviews, only requires the configured typecheck. Previews via the configured dev server or deploy-test command. Loops on your change requests, then documents idea and learnings. SAVE → idea ability with the doc as starting context (standalone: runs it itself; via orchestrator: the orchestrator runs it). Removes the worktree before saving or dropping.
 
 ### abilities/idea.md: idea 💡
 
@@ -312,14 +338,14 @@ Reads `docs/architecture.md` if it exists and respects its structure and rules. 
 
 Input: domain, phase id, step id, optional feedback and resume flag. For one step it:
 1. Reads `plan.json` and the step spec file. A spec without ACs → `blocked` (step not specified).
-2. Writes a detailed implementation plan into the Task List, with a test task before each implementation task. On feedback it changes or extends the tasks. On resume it checks every task and AC against the code.
+2. Writes a detailed implementation plan into the Task List, with a test task before each implementation task, plus tasks for the integration/e2e tests and existing-test changes from the Test Strategy. It changes an existing test only when the Test Strategy lists it. On feedback it changes or extends the tasks. On resume it checks every task and AC against the code.
 3. Works through the tasks with TDD: test → see it fail → implement → green. It ticks tasks and met ACs with `(x)`.
 4. Runs the full test suite, linter and formatter check. It fixes what it can and marks what it can't with `(!)`.
-5. Fills the Dev Log and keeps specify's entries.
+5. Fills the Dev Log. It never changes the Spec Log.
 6. Commits code and spec file with `step-<id>`, and pushes if there is an origin.
 7. Reports `pass` or `blocked`.
 
-It never changes the Description or ACs. Changing a test to make it pass is strictly forbidden.
+It never changes the Description, ACs, Spec Log or Test Strategy. Changing a test to make it pass is strictly forbidden.
 
 It reads the coding guardrails in `docs/guardrails.xml` and the architecture in `docs/architecture.md` if they exist. It never changes the architecture docs. When a change needs them updated or breaks one of their rules, it notes this in the Dev Log marked `(architecture)` for the architect.
 
@@ -331,7 +357,27 @@ When something is unclear:
 - **MANUAL**: it asks you focused questions, which are relayed through the orchestrator.
 - **AUTO**: it makes a reasonable assumption.
 
-It writes every assumption into the Dev Log marked `(specify)`, so develop and the reviewers see it. It never writes tasks or code, and it doesn't commit; develop commits the spec together with the code.
+It writes every assumption and every answer you gave into the Spec Log marked `(specify)`, so spec-review, develop and the reviewers see it. It never writes tasks or code, and it doesn't commit; develop commits the spec together with the code.
+
+It fills the Test Strategy: whether new integration and e2e tests add real value (judged with `templates/test-types.md` against the project's tests and tooling), and which existing tests (also unit) must be changed or extended. Strong, meaningful tests only, never a test for the sake of having one. Extending an existing test beats a new one. Missing tooling → no, noted in the Spec Log for the architect.
+
+When it is done, the orchestrator keeps its session alive for spec-review. From then on it MUST NOT edit the spec file. It only answers spec-review's questions about its reasoning, and asks back only when it doesn't understand a question.
+
+### abilities/spec-review.md: spec reviewer 📑🕵🏼
+
+Runs right after specify, as its own subagent, with the same input. It checks the spec with five checks:
+- **requirement**: every part of the step intent, description and relevant idea parts (and your feedback) is covered by an AC, nothing out of scope.
+- **holes**: missing states, error and edge cases, undefined behavior.
+- **coherence**: ACs contradicting each other, the Description, the idea or other steps' specs.
+- **tests**: the Test Strategy is justified: no valuable test missing, no test without value, no affected existing test left out.
+- **decisions**: each Spec Log entry is grounded in code and idea and correctly reflected in the ACs.
+
+When it needs specify's reasoning, it returns all questions at once marked `for-specify`. The orchestrator forwards them to the still-open specify session and the answers back. One round only. On resume without that session it decides alone.
+
+- **MANUAL**: it shows you each flaw with a suggested change and applies what you accept.
+- **AUTO**: it fixes the spec directly and moves on.
+
+It writes every change with its reason into the Spec Log marked `(spec-review)`. Then the specification is finished.
 
 ### abilities/review-pessimistic/SKILL.md: first reviewer 🕵🏼😠
 
@@ -343,7 +389,7 @@ It runs four passes on top of that focus:
 - **criteria**: each AC is split into checkable conditions and marked `met`, `partly` or `not met`, with what is missing.
 - **code**: names, error paths, security, cleanup, unsafe casts, duplication and null guards.
 - **edges**: empty input, off-by-one, races, big input, validation at boundaries and actionable error messages.
-- **tests**: whether a test checks each AC's outcome and edge cases. If an AC names an error case and no test covers it, that is `must-fix`.
+- **tests**: whether a test checks each AC's outcome and edge cases. If an AC names an error case and no test covers it, that is `must-fix`. So is a Test Strategy test that is missing, or a listed existing test that wasn't changed or extended.
 
 It writes the review file (step: `## Review` in the spec, phase: `review.md` in the phase folder) from `templates/review-template.md`, replacing the old content. Each finding is `( )` with an id (`F1`), a weight (`must-fix`|`should-fix`), a category (bug|gap|test|quality), `file:line`, evidence, a suggested fix and a fix kind (`mechanical`|`judgment`). The Result is `passed` only when every AC is met and there is no `must-fix`, and it reports only that Result.
 
@@ -376,14 +422,14 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
 
 ### Templates
 
-- **config.json**: initial id counters for domain, phase and step. `nos` copies it to `specs/config.json`. Ids are global across all domains.
+- **config.json**: initial id counters for domain, phase and step, plus empty `quality-tools` and `project-commands`. `nos` copies it to `specs/config.json`. Ids are global across all domains.
 - **plan.json**: plan structure. It has a name, status, labels and phases. Phases have a name, status, intent, `human-validation-needed`, `review-needed`, a description and steps. Steps have an intent, status, `human-validation-needed`, `review-needed`, a description and `spec-file`, and every phase and step also has a slug. `spec-file` is filled by `nos`.
 - **status.xml**: valid statuses. `nos set-status` rejects anything else.
   - Plans: `open`, `in-progress`, `on-hold`, `done`.
   - Phases: `open`, `in-progress`, `implemented`, `in-review`, `reviewed`, `done`.
   - Steps: `open`, `in-specification`, `specified`, `in-progress`, `implemented`, `in-review`, `reviewed`, `done`.
   - Three sections, `<plans>`, `<phases>` and `<steps>`, so a status can be valid for steps only.
-- **step-spec-template.md**: sections Description, Acceptance Criteria, Task List, Dev Log (What I did / What I didn't do and why), and Review.
+- **step-spec-template.md**: sections Description, Acceptance Criteria, Spec Log (`(specify)` / `(spec-review)` entries), Test Strategy (integration, e2e, existing tests to change), Task List, Dev Log (What I did / What I didn't do and why), and Review.
 - **review-template.md**: the Review section and phase `review.md`. It has a Date and Result line, a short summary, Criteria (one line per AC), Findings (`( )` with id, weight, category, location, evidence, fix and fix kind) and Fixes (written by review-fixing). Rules for weights and fix kinds are at the bottom.
 - **architecture-sections.md**: catalog for a project's architecture template. Core sections (Overview, Stack & commands, Structure, Rules, Testing, Decisions, Tech debt), optional sections with "include when", profiles per project type, and the template format.
 - **test-types.md**: test groups with when they add value and tooling examples, architecture rule ideas, enforcement mechanisms (lint rule, dependency graph, test) and pitfalls.
@@ -403,7 +449,7 @@ Used in ACs, the Task List and review findings:
 
 | Command | Used by | Does |
 | --- | --- | --- |
-| `nos create-domain --idea <file> --slug <slug>` | idea | new domain id, folder, `idea.md` |
+| `nos init` | setup | creates `specs/` and `specs/config.json` if missing | new domain id, folder, `idea.md` |
 | `nos create-plan --domain <d> --plan <file>` | plan (create) | saves `plan.json`, creates phase folders and step files |
 | `nos update-plan --domain <d> --plan <file>` | plan (extend, revise) | saves the changed plan, creates/moves/deletes phases and steps |
 | `nos set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | orchestrator | changes one status, checked against the matching `status.xml` section |
@@ -414,7 +460,8 @@ Used in ACs, the Task List and review findings:
 | --- | --- | --- | --- | --- |
 | orchestrator | no | no | yes (nos) | no |
 | idea / plan | no | idea / plan (nos) | no | no |
-| specify | no | Description, ACs, assumptions in Dev Log | no | no |
+| specify | no | Description, ACs, Spec Log, Test Strategy. Read-only once done | no | no |
+| spec-review | no | Description, ACs, Spec Log, Test Strategy | no | no |
 | develop | yes | Task List, AC ticks, Dev Log | no | yes (incl. spec) |
 | review-pessimistic | no | Review | no | no |
 | review-fixing | yes | Review marks, Dev Log | no | yes |
@@ -423,7 +470,8 @@ Used in ACs, the Task List and review findings:
 
 ### Known limitations
 
-- Questions from subagents (idea, architect, and specify in MANUAL) are relayed through the orchestrator session. They only work while that session is open.
+- Questions from subagents (idea, architect, and specify and spec-review in MANUAL) are relayed through the orchestrator session. They only work while that session is open.
+- spec-review can ask specify only while the orchestrator session that ran specify is open. After a resume it decides alone.
 - Reviewers find changes only through the commit prefix. A commit without the prefix is invisible to them.
 - An interrupted review reruns both review stages. The pessimistic review file is replaced.
 
@@ -439,7 +487,7 @@ Used in ACs, the Task List and review findings:
 | `<modes>` | Defines AUTO and MANUAL through the `mode` attribute on each `<park>` |
 | `<option name="run">` | Picks a plan and a mode, sets the plan `in-progress`, runs every unfinished phase, sets the plan `done` |
 | `<cycle name="phase">` | Runs all steps, then reviews the phase as a whole |
-| `<cycle name="step">` | specify → develop → review-pessimistic → review-fixing |
+| `<cycle name="step">` | specify → spec-review → develop → review-pessimistic → review-fixing |
 | `<park>` | Stop, explain, and ask GO / switch mode / REJECT / PAUSE |
 | `<resume>` | How to continue after an interruption |
 
@@ -459,6 +507,7 @@ A useful mental model is a small team with a project board:
 | Product owner interview | idea |
 | Implementation architect | plan |
 | Requirements engineer | specify |
+| Spec reviewer | spec-review |
 | Developer | develop |
 | Critical code reviewer | review-pessimistic |
 | Senior reviewer who fixes | review-fixing |
@@ -515,10 +564,12 @@ Most changes touch more than one file. Before you finish a change, check these c
 | review layout (weights, fix kinds, Result) | `review-template.md`, the `<passes>` of review-pessimistic, review-fixing |
 | inputs of an ability | what the caller passes in `workflow.md` |
 | commit prefix | develop, review-fixing and review-pessimistic (it searches by prefix). `architect` prefix: architect (MEASURE searches by it) |
-| markers | specify, develop, both reviewers, the template, `ui/src/model.ts` |
-| doc paths (`docs/architecture.md`, `docs/architecture-template.md`, `docs/guardrails.xml`) | architect `<files>` and every ability that reads them: plan, develop, specify, both reviewers |
+| markers | specify, spec-review, develop, both reviewers, the template, `ui/src/model.ts` |
+| doc paths (`docs/architecture.md`, `docs/architecture-template.md`, `docs/guardrails.xml`) | architect `<files>` and every ability that reads them: plan, develop, specify, spec-review, both reviewers |
+| Spec Log markers `(specify)`, `(spec-review)` | specify, spec-review, develop (must not change it), the template |
+| Test Strategy section | the template, specify, spec-review, develop, review-pessimistic (tests pass) |
 | Dev Log marker `(architecture)` | develop, review-fixing, architect (UPDATE-DOCS) |
-| guardrail sections (`coding`, `review`, `specify`) | `templates/guardrails.xml`, architect (ADD-GUARDRAILS), the ability that reads the section |
+| guardrail sections (`coding`, `review`, `specify`) | `templates/guardrails.xml`, architect (ADD-GUARDRAILS), the abilities that read the section (`specify`: specify and spec-review) |
 | architect handover (tech debt) | `<option name="architect">` in `workflow.md`, `idea.md` input |
 | `plan.json` structure or spec sections | `ui/src/model.ts` and its tests |
 
@@ -660,7 +711,7 @@ Without linking: `node bin/nos.js <command>`. Help: `nos help <command>` or `nos
 
 | Command | Does |
 | --- | --- |
-| `create-domain --idea <file\|-> --slug <slug>` | reserves a domain id, creates `specs/domain-<id>-<slug>/idea.md` (and `specs/config.json` if missing) |
+| `init` | creates `specs/` and `specs/config.json` if missing. Never changes an existing config | a domain id, creates `specs/domain-<id>-<slug>/idea.md` (and `specs/config.json` if missing) |
 | `create-plan --domain <d> --plan <file\|->` | saves `plan.json`, creates phase folders and empty step files, fills `spec-file`. One plan per domain |
 | `update-plan --domain <d> --plan <file\|-> [--dry-run] [--force]` | saves a changed plan, creates/moves/deletes phases and steps. Deleting files with content needs `--force` |
 | `set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | changes one status. Plan, phase or step depends on the arguments. Checked against `templates/status.xml` |

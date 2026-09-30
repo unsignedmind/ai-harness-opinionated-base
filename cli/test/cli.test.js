@@ -28,6 +28,32 @@ const PLAN = {
   phases: [{ slug: 'setup', name: 'Setup', status: 'open', intent: '', description: '', steps: [{ slug: 'init-repo', intent: 'Init repo', status: 'open', description: '', 'spec-file': '' }] }],
 };
 
+test('init creates specs/ and config.json and prints JSON', (t) => {
+  const root = makeTempRoot(t);
+
+  const { code, json, err } = invoke(['init'], { cwd: root });
+
+  assert.equal(err, '');
+  assert.equal(code, 0);
+  assert.deepEqual(json, { action: 'init', specs: 'specs', config: 'specs/config.json', createdConfig: true });
+  const config = readJson(root, 'specs/config.json');
+  assert.ok(config['id-counters']);
+  assert.ok(config['quality-tools']);
+  assert.ok(config['project-commands']);
+});
+
+test('init leaves an existing config.json untouched', (t) => {
+  const root = makeTempRoot(t);
+  const existing = { 'id-counters': { domain: 9, phase: 2, step: 3 }, 'quality-tools': { test: 'npm test' } };
+  writeFile(root, 'specs/config.json', existing);
+
+  const { code, json } = invoke(['init'], { cwd: root });
+
+  assert.equal(code, 0);
+  assert.equal(json.createdConfig, false);
+  assert.deepEqual(readJson(root, 'specs/config.json'), existing);
+});
+
 test('create-domain reads the idea from a file and prints JSON', (t) => {
   const root = makeTempRoot(t);
   writeFile(root, 'my-idea.md', '# Search Feature\n');
@@ -143,6 +169,7 @@ test('general help lists every command and points to command help', () => {
     const { code, out, err } = invoke(args, { cwd: '.' });
     assert.equal(code, 0);
     assert.equal(err, '');
+    assert.match(out, /init/);
     assert.match(out, /create-domain/);
     assert.match(out, /create-plan/);
     assert.match(out, /help <command>/);
@@ -151,7 +178,7 @@ test('general help lists every command and points to command help', () => {
 
 test('help <command> and <command> --help print the detailed command help', (t) => {
   const root = makeTempRoot(t);
-  for (const name of ['create-domain', 'create-plan']) {
+  for (const name of ['init', 'create-domain', 'create-plan']) {
     const viaHelp = invoke(['help', name], { cwd: root });
     assert.equal(viaHelp.code, 0);
     assert.match(viaHelp.out, new RegExp(`Usage: nos ${name}`));

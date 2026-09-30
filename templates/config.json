@@ -3,5 +3,18 @@
     "domain": 1,
     "phase": 1,
     "step": 1
+  },
+  "quality-tools": {
+    "test": null,
+    "lint": null,
+    "format-check": null,
+    "typecheck": null,
+    "e2e": null,
+    "additional": []
+  },
+  "project-commands": {
+    "install": null,
+    "dev": null,
+    "deploy-test": null
   }
 }
