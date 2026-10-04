@@ -66,21 +66,23 @@ $ nos init
 ### `create-domain`
 
 ```sh
-nos create-domain --idea <file|-> --slug <slug> [--root <dir>]
+nos create-domain --idea <file|-> --slug <slug> [--name <name>] [--labels <a,b>] [--root <dir>]
 ```
 
 1. Creates `specs/` and `specs/config.json` if they are missing. If `.claude/skills/nos/templates/config.json` exists, `config.json` is copied from it.
 2. Takes the next domain id from `specs/config.json` and increments the counter.
 3. Creates `specs/domain-<id>-<slug>/` and saves the idea in it as `idea.md`.
+4. Saves `domain.json` in it: `name` (`--name`, default: first `# ` heading of the idea without `Idea:`), `labels` (`--labels`, comma separated, lowercase kebab-case, default none) and `cross-cutting` (always `false` for now).
 
 ```sh
-$ nos create-domain --idea idea.md --slug user-auth
+$ nos create-domain --idea idea.md --slug user-auth --labels auth,ui
 {
   "action": "create-domain",
   "id": 1,
   "folder": "domain-1-user-auth",
   "path": "specs/domain-1-user-auth",
-  "idea": "specs/domain-1-user-auth/idea.md"
+  "idea": "specs/domain-1-user-auth/idea.md",
+  "domain": "specs/domain-1-user-auth/domain.json"
 }
 ```
 
@@ -92,7 +94,7 @@ nos create-plan --domain <domain-<id>-<slug>> --plan <file|-> [--root <dir>]
 
 1. For each phase, takes the next phase id and creates `specs/<domain>/phases/phase-<id>-<slug>/`.
 2. For each step, reserves a step id and creates an empty `step-<id>-<slug>.md` in its phase folder.
-3. Sets each step's `spec-file` field and saves `plan.json` in the domain.
+3. Sets each step's `spec-file` field and saves `plan.json` in the domain. A `labels` field is dropped: labels live in `domain.json`.
 
 The plan is validated before anything is written. Each domain can have only one plan.
 
@@ -102,7 +104,6 @@ Example `plan.json` (`phases` and `steps` can be arrays or single objects):
 {
   "name": "User auth",
   "status": "open",
-  "labels": [],
   "phases": [{
     "slug": "data-model",
     "name": "Data model",
@@ -215,6 +216,7 @@ specs/
 ├── config.json                 # "id-counters" (managed by nos), "quality-tools", "project-commands" and "spec-ui" (setup ability)
 └── domain-1-user-auth/
     ├── idea.md
+    ├── domain.json
     ├── plan.json
     ├── phases/
     │   └── phase-1-data-model/

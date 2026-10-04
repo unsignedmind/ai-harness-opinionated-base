@@ -56,7 +56,10 @@ export async function readSpecsFolder(
   for (const d of kids.filter(isDomain)) {
     for (const h of await children(d)) {
       const path = `specs/${d.name}/${h.name}`;
-      if (h.kind === "file" && (h.name === "idea.md" || h.name === "plan.json"))
+      if (
+        h.kind === "file" &&
+        ["idea.md", "domain.json", "plan.json"].includes(h.name)
+      )
         await read(h, path);
       else if (h.kind === "directory" && h.name === "phases")
         await walkPhases(h, path);

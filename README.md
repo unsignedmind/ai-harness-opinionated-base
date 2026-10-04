@@ -212,6 +212,7 @@ specs/
 ├── config.json                          id counters (managed by nos), quality tools, project commands, spec-ui docs folder (setup)
 └── domain-1-user-auth/
     ├── idea.md                          the idea
+    ├── domain.json                      name, labels, cross-cutting
     ├── plan.json                        phases, steps, statuses
     ├── phases/
     │   └── phase-1-data-model/
@@ -257,6 +258,7 @@ The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Ch
 │   └── architect.md
 ├── templates/
 │   ├── config.json                 initial id counters, empty quality tools and project commands, docs folder `docs`
+│   ├── domain.json                 domain structure
 │   ├── plan.json                   plan structure
 │   ├── status.xml                  valid statuses
 │   ├── step-spec-template.md       structure of a step spec file
@@ -324,7 +326,7 @@ Not part of the run cycle. Started from the menu (SETUP), or offered at start wh
 
 ### abilities/idea.md: idea 💡
 
-Asks you focused questions until the idea is ready for planning. It generates a slug and saves the idea with `nos create-domain`, which creates `specs/domain-<id>-<slug>/idea.md`. It reports the domain folder. Its questions reach you through the orchestrator. Optional input: a starting context, e.g. tech debt entries handed over by the architect.
+Asks you focused questions until the idea is ready for planning. It generates a slug, picks a domain name and labels, and saves the idea with `nos create-domain`, which creates `specs/domain-<id>-<slug>/idea.md` and `domain.json`. It reports the domain folder. Its questions reach you through the orchestrator. Optional input: a starting context, e.g. tech debt entries handed over by the architect.
 
 ### abilities/quick-step.md: quick step ⚡
 
@@ -426,7 +428,8 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
 ### Templates
 
 - **config.json**: initial id counters for domain, phase and step, plus empty `quality-tools` and `project-commands`, and `spec-ui.docs-folder` (`docs`, the folder the viewer's Docs view shows). `nos` copies it to `specs/config.json`. Ids are global across all domains.
-- **plan.json**: plan structure. It has a name, status, labels and phases. Phases have a name, status, intent, `human-validation-needed`, `review-needed`, a description and steps. Steps have an intent, status, `human-validation-needed`, `review-needed`, a description and `spec-file`, and every phase and step also has a slug. `spec-file` is filled by `nos`.
+- **domain.json**: domain structure. It has a name, labels and `cross-cutting` (`false` for now, reserved for an upcoming spec UI change). Written by `nos create-domain`.
+- **plan.json**: plan structure. It has a name, status and phases. Phases have a name, status, intent, `human-validation-needed`, `review-needed`, a description and steps. Steps have an intent, status, `human-validation-needed`, `review-needed`, a description and `spec-file`, and every phase and step also has a slug. `spec-file` is filled by `nos`.
 - **status.xml**: valid statuses. `nos set-status` rejects anything else.
   - Plans: `open`, `in-progress`, `on-hold`, `done`.
   - Phases: `open`, `in-progress`, `implemented`, `in-review`, `reviewed`, `done`.
@@ -665,7 +668,7 @@ Board and Backlog can be filtered by label, status, idea and free text. Values o
 
 | File | Role |
 | --- | --- |
-| `src/model.ts` | Pure: turns `path → text` of `specs/` into ideas → phases → steps. Parses `plan.json` and `quick-steps/quick-steps.json` (quick steps: `phase` null, `quick` true), reads the spec sections, counts markers |
+| `src/model.ts` | Pure: turns `path → text` of `specs/` into ideas → phases → steps. Parses `domain.json` (name, labels, cross-cutting), `plan.json` and `quick-steps/quick-steps.json` (quick steps: `phase` null, `quick` true), reads the spec sections, counts markers |
 | `src/status.ts` | The statuses from `templates/status.xml` and their board order |
 | `src/serve-specs.ts` + `src/main.ts` | Dev server: a Vite plugin reads `specs/` on the host with `readSpecsFolder` and serves it at `/__specs` (`/` is `dev.html`); `/__docs` serves the docs folder (`readDocs`); it pushes `specs:changed` / `docs:changed` when a file changes, and the page fetches again |
 | `src/folder.ts` + `src/handle-store.ts` + `src/standalone.ts` | Standalone: reads the picked folder (specs and docs) and remembers the handle in IndexedDB |
@@ -692,7 +695,7 @@ The viewer is a separate npm package, so the project it sits in has no viewer sc
 
 - **New status:** add it to `src/status.ts` (`STATUS_ORDER`, `STEP_BOARD_STATUSES` / `PHASE_BOARD_STATUSES`, labels) and a colour to `styles.css`, as well as to `status.xml`. Otherwise it shows as a flagged "other".
 - **New spec section with markers:** add a `progress(section(...))` in `src/model.ts`, then show it in `src/views/parts.ts`.
-- **New `plan.json` field:** extend the `Raw*` types and the model in `src/model.ts`.
+- **New `plan.json` or `domain.json` field:** extend the `Raw*` types and the model in `src/model.ts`.
 - Changes to the spec template or the plan structure must also be checked against the viewer (see the consistency table in Part 4). `tests/real-specs.test.ts` fails when the real `specs/` no longer parse.
 
 ---

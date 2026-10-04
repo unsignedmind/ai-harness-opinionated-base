@@ -156,6 +156,9 @@ function ideaDetail(i: Idea, ui: ExploreUi) {
       Phases: i.plan ? { html: kanban(i.phases, { level: "phases" }) } : null,
       Steps: i.steps.length ? { html: kanban(i.steps, { where: true }) } : null,
       "idea.md": i.md ? stripH1(i.md) : null,
+      "domain.json": i.domainJson
+        ? { html: `<pre><code>${esc(i.domainJson)}</code></pre>` }
+        : null,
       "plan.json": i.planJson
         ? { html: `<pre><code>${esc(i.planJson)}</code></pre>` }
         : null,

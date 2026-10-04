@@ -12,11 +12,14 @@ export type Idea = {
   title: string;
   intent: string;
   md: string | null;
+  domainJson: string | null;
   planJson: string | null;
   plan: { name: string } | null;
   error: string | null;
   status: Status;
+  // labels and cross-cutting come from domain.json
   labels: string[];
+  crossCutting: boolean;
   phases: Phase[];
   // plan steps and quick steps
   steps: Step[];
@@ -85,8 +88,12 @@ type RawPhase = Partial<{
 type RawPlan = Partial<{
   name: string;
   status: string;
-  labels: string[];
   phases: RawPhase[];
+}>;
+type RawDomain = Partial<{
+  name: string;
+  labels: string[];
+  "cross-cutting": boolean;
 }>;
 
 const normPath = (p: string) => p.replace(/\\/g, "/").replace(/^\.\//, "");
@@ -160,15 +167,25 @@ export function buildModel(input: Record<string, string>): Model {
 function buildIdea(folder: string, files: Map<string, string>): Idea {
   const m = /^domain-(\d+)-(.*)$/.exec(folder);
   const md = files.get(`specs/${folder}/idea.md`) ?? null;
+  const domainJson = files.get(`specs/${folder}/domain.json`) ?? null;
   const planJson = files.get(`specs/${folder}/plan.json`) ?? null;
 
+  let domain: RawDomain | null = null;
   let raw: RawPlan | null = null;
   let error: string | null = null;
+  if (domainJson !== null) {
+    try {
+      domain = JSON.parse(domainJson) as RawDomain;
+    } catch (e) {
+      error = `domain.json: ${(e as Error).message}`;
+    }
+  }
   if (planJson !== null) {
     try {
       raw = JSON.parse(planJson) as RawPlan;
     } catch (e) {
-      error = `plan.json: ${(e as Error).message}`;
+      const msg = `plan.json: ${(e as Error).message}`;
+      error = error ? `${error}; ${msg}` : msg;
     }
   }
 
@@ -179,19 +196,22 @@ function buildIdea(folder: string, files: Map<string, string>): Idea {
     slug: m ? m[2] : folder,
     title:
       firstH1(md).replace(/^idea:\s*/i, "") ||
+      domain?.name ||
       raw?.name ||
       (m ? humanize(m[2]) : folder),
     intent: firstParagraph(section(md, "Intent")),
     md,
+    domainJson,
     planJson,
     plan: raw ? { name: raw.name ?? "" } : null,
     error,
     status: raw
       ? normStatus(raw.status)
-      : error
+      : planJson !== null
         ? { key: "other", label: "invalid plan", flagged: true }
         : { key: "other", label: "no plan", flagged: false },
-    labels: raw?.labels ?? [],
+    labels: domain?.labels ?? [],
+    crossCutting: !!domain?.["cross-cutting"],
     phases: [],
     steps: [],
     quickSteps: [],

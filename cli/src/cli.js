@@ -49,7 +49,7 @@ Example:
     "createdConfig": true
   }`;
 
-const CREATE_DOMAIN_HELP =`Usage: nos create-domain --idea <file|-> --slug <slug> [--root <dir>]
+const CREATE_DOMAIN_HELP =`Usage: nos create-domain --idea <file|-> --slug <slug> [--name <name>] [--labels <a,b>] [--root <dir>]
 
 Create a new domain for an idea.
 
@@ -57,20 +57,24 @@ Create a new domain for an idea.
      .claude/skills/nos/templates/config.json when present)
   2. Takes the next domain id from specs/config.json and increases the counter
   3. Creates specs/domain-<id>-<slug>/ and saves the idea as idea.md in it
+  4. Saves domain.json in it: { "name", "labels", "cross-cutting": false }
 
 Options:
   --idea <file|->  Idea markdown file, or "-" to read it from stdin   (required)
   --slug <slug>    Slug for the folder name, lowercase kebab-case     (required)
+  --name <name>    Domain name (default: first "# " heading of the idea without "Idea:")
+  --labels <a,b>   Comma separated labels, lowercase kebab-case (default: none)
   --root <dir>     Project root containing specs/ (default: current directory)
 
 Example:
-  nos create-domain --idea idea.md --slug user-auth
+  nos create-domain --idea idea.md --slug user-auth --labels auth,ui
   {
     "action": "create-domain",
     "id": 1,
     "folder": "domain-1-user-auth",
     "path": "specs/domain-1-user-auth",
-    "idea": "specs/domain-1-user-auth/idea.md"
+    "idea": "specs/domain-1-user-auth/idea.md",
+    "domain": "specs/domain-1-user-auth/domain.json"
   }`;
 
 const CREATE_PLAN_HELP = `Usage: nos create-plan --domain <domain-<id>-<slug>> --plan <file|-> [--root <dir>]
@@ -94,7 +98,6 @@ plan.json ("phases" and "steps" may be arrays or single objects):
   {
     "name": "User auth",
     "status": "open",
-    "labels": [],
     "phases": [{
       "slug": "data-model",
       "name": "Data model",
@@ -110,7 +113,8 @@ plan.json ("phases" and "steps" may be arrays or single objects):
       }]
     }]
   }
-Every phase and step needs a "slug" (lowercase kebab-case). Other fields are kept as-is.
+Every phase and step needs a "slug" (lowercase kebab-case). Other fields are kept as-is,
+except "labels": labels belong to the domain (domain.json) and are dropped.
 
 Example:
   nos create-plan --domain domain-1-user-auth --plan plan.json
@@ -243,16 +247,28 @@ const COMMANDS = {
   },
   'create-domain': {
     help: CREATE_DOMAIN_HELP,
-    options: { idea: { type: 'string' }, slug: { type: 'string' }, root: { type: 'string' } },
+    options: {
+      idea: { type: 'string' },
+      slug: { type: 'string' },
+      name: { type: 'string' },
+      labels: { type: 'string' },
+      root: { type: 'string' },
+    },
     required: ['idea', 'slug'],
     execute(values, io, root) {
-      const result = createDomain(root, { idea: readInput(values.idea, io), slug: values.slug });
+      const result = createDomain(root, {
+        idea: readInput(values.idea, io),
+        slug: values.slug,
+        name: values.name,
+        labels: values.labels,
+      });
       return {
         action: 'create-domain',
         id: result.id,
         folder: result.folder,
         path: rel(root, result.path),
         idea: rel(root, result.ideaPath),
+        domain: rel(root, result.domainFilePath),
       };
     },
   },

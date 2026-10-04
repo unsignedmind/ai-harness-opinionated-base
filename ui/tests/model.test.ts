@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
 
 import { buildModel } from "../src/model";
-import { fixtureFiles, quickFixtureFiles } from "./fixtures";
+import { DOMAIN, PLAN, fixtureFiles, quickFixtureFiles } from "./fixtures";
 
 const model = () => buildModel(fixtureFiles());
 const dark = () => model().ideas.find((i) => i.slug === "dark-mode")!;
@@ -31,11 +31,40 @@ test("an idea without plan.json has no plan, a 'no plan' status and no phases", 
   expect(i.labels).toStrictEqual([]);
 });
 
-test("plan status and labels come from plan.json", () => {
+test("plan status comes from plan.json, labels and cross-cutting from domain.json", () => {
   const i = dark();
   expect(i.plan?.name).toBe("Dark mode");
   expect(i.status.key).toBe("in-progress");
   expect(i.labels).toStrictEqual(["ui", "css"]);
+  expect(i.crossCutting).toBe(false);
+});
+
+test("labels in plan.json are ignored", () => {
+  const files = fixtureFiles();
+  delete files["specs/domain-2-dark-mode/domain.json"];
+  files["specs/domain-2-dark-mode/plan.json"] = JSON.stringify({
+    ...PLAN,
+    labels: ["old"],
+  });
+  expect(buildModel(files).ideas[1].labels).toStrictEqual([]);
+});
+
+test("cross-cutting is read from domain.json", () => {
+  const files = fixtureFiles();
+  files["specs/domain-2-dark-mode/domain.json"] = JSON.stringify({
+    ...DOMAIN,
+    "cross-cutting": true,
+  });
+  expect(buildModel(files).ideas[1].crossCutting).toBe(true);
+});
+
+test("broken domain.json keeps the idea and its plan visible with an error", () => {
+  const files = fixtureFiles();
+  files["specs/domain-2-dark-mode/domain.json"] = "{ nope";
+  const i = buildModel(files).ideas[1];
+  expect(i.error).toMatch(/domain\.json/);
+  expect(i.status.key).toBe("in-progress");
+  expect(i.labels).toStrictEqual([]);
 });
 
 test("phases are numbered from their folder, keep intent, description and validation flag", () => {
@@ -134,9 +163,11 @@ test("windows separators and ./ prefixes in paths are normalised", () => {
   expect(buildModel(files).ideas[1].steps[0].specMd).toBe(md);
 });
 
-test("an idea folder with only plan.json takes its title from the plan", () => {
+test("an idea folder without idea.md takes its title from domain.json, else the plan", () => {
   const files = fixtureFiles();
   delete files["specs/domain-2-dark-mode/idea.md"];
+  expect(buildModel(files).ideas[1].title).toBe("Dark mode theme");
+  delete files["specs/domain-2-dark-mode/domain.json"];
   expect(buildModel(files).ideas[1].title).toBe("Dark mode");
 });
 

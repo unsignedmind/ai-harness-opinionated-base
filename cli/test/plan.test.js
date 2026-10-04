@@ -82,7 +82,7 @@ test('saves plan.json in the domain with spec-file paths filled in', (t) => {
 
   const saved = readJson(root, `specs/${domain}/plan.json`);
   assert.equal(saved.name, 'Auth');
-  assert.deepEqual(saved.labels, ['backend']);
+  assert.equal('labels' in saved, false, 'labels belong to domain.json');
   assert.equal(saved.phases[0].slug, 'data-model');
   assert.equal(
     saved.phases[0].steps[1]['spec-file'],

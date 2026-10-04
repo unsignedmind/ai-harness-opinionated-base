@@ -16,10 +16,13 @@ import { fixtureFiles } from "./fixtures";
 
 const model = () => {
   const files = fixtureFiles();
+  files["specs/domain-3-sync/domain.json"] = JSON.stringify({
+    name: "Sync",
+    labels: ["backend"],
+  });
   files["specs/domain-3-sync/plan.json"] = JSON.stringify({
     name: "Sync",
     status: "open",
-    labels: ["backend"],
     phases: [
       {
         slug: "api",

@@ -9,16 +9,22 @@ const DOMAIN_PATTERN = /^domain-\d+-[a-z0-9-]+$/;
 
 export const asList = (value) => (value == null ? [] : Array.isArray(value) ? value : [value]);
 
+// Labels belong to the domain (domain.json), so a plan never keeps them.
 export function parsePlan(plan, command = 'create-plan') {
   if (plan == null || plan === '') {
     throw new Error(`Missing input: plan. ${command} requires the plan.json content`);
   }
-  if (typeof plan !== 'string') return structuredClone(plan);
-  try {
-    return JSON.parse(plan);
-  } catch (err) {
-    throw new Error(`Invalid plan JSON: ${err.message}`);
+  let parsed;
+  if (typeof plan !== 'string') parsed = structuredClone(plan);
+  else {
+    try {
+      parsed = JSON.parse(plan);
+    } catch (err) {
+      throw new Error(`Invalid plan JSON: ${err.message}`);
+    }
   }
+  if (parsed && typeof parsed === 'object') delete parsed.labels;
+  return parsed;
 }
 
 export function resolveDomain(root, domain, command = 'create-plan') {

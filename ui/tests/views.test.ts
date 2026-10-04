@@ -177,7 +177,13 @@ test("idea detail defaults to the phases board and offers the other tabs", () =>
   const tabs = [...root.querySelectorAll<HTMLElement>(".subtabs button")].map(
     (b) => b.dataset.tab,
   );
-  expect(tabs).toStrictEqual(["Phases", "Steps", "idea.md", "plan.json"]);
+  expect(tabs).toStrictEqual([
+    "Phases",
+    "Steps",
+    "idea.md",
+    "domain.json",
+    "plan.json",
+  ]);
   expect(root.querySelectorAll(".subtab-body .kcard")).toHaveLength(2);
 });
 

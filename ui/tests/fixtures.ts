@@ -9,10 +9,15 @@ Second line of intent.
 - none
 `;
 
+export const DOMAIN = {
+  name: "Dark mode theme",
+  labels: ["ui", "css"],
+  "cross-cutting": false,
+};
+
 export const PLAN = {
   name: "Dark mode",
   status: "in-progress",
-  labels: ["ui", "css"],
   phases: [
     {
       slug: "tokens",
@@ -85,6 +90,7 @@ export const fixtureFiles = (): Record<string, string> => ({
   "specs/domain-1-i18n/idea.md":
     "# Idea: i18n support\n\n## Intent\nTwo languages.\n",
   "specs/domain-2-dark-mode/idea.md": IDEA_MD,
+  "specs/domain-2-dark-mode/domain.json": JSON.stringify(DOMAIN),
   "specs/domain-2-dark-mode/plan.json": JSON.stringify(PLAN),
   "specs/domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md":
     STEP_1_MD,

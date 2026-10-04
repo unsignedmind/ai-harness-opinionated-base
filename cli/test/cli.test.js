@@ -68,8 +68,28 @@ test('create-domain reads the idea from a file and prints JSON', (t) => {
     folder: 'domain-1-search',
     path: 'specs/domain-1-search',
     idea: 'specs/domain-1-search/idea.md',
+    domain: 'specs/domain-1-search/domain.json',
   });
   assert.ok(existsSync(path.join(root, 'specs/domain-1-search/idea.md')));
+  assert.deepEqual(readJson(root, 'specs/domain-1-search/domain.json'), {
+    name: 'Search Feature',
+    labels: [],
+    'cross-cutting': false,
+  });
+});
+
+test('create-domain takes --name and comma separated --labels', (t) => {
+  const root = makeTempRoot(t);
+  const { code } = invoke(
+    ['create-domain', '--idea', '-', '--slug', 'search', '--name', 'Search', '--labels', 'ui, api'],
+    { cwd: root, stdin: '# Idea: Search everything\n' },
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(readJson(root, 'specs/domain-1-search/domain.json'), {
+    name: 'Search',
+    labels: ['ui', 'api'],
+    'cross-cutting': false,
+  });
 });
 
 test('create-domain reads the idea from stdin with --idea -', (t) => {
@@ -195,7 +215,7 @@ test('help <command> and <command> --help print the detailed command help', (t) 
 
 test('create-domain help documents its options and the result', () => {
   const { out } = invoke(['help', 'create-domain'], { cwd: '.' });
-  for (const text of ['--idea', '--slug', '--root', 'idea.md', 'config.json', 'kebab-case']) {
+  for (const text of ['--idea', '--slug', '--name', '--labels', '--root', 'idea.md', 'domain.json', 'cross-cutting', 'config.json', 'kebab-case']) {
     assert.ok(out.includes(text), `missing "${text}"`);
   }
 });
