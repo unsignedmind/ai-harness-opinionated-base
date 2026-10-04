@@ -1,72 +1,52 @@
 // Small HTML fragments shared by every view.
-import type { Item } from "../filter";
-import { esc } from "../markdown";
-import type { Progress } from "../model";
-import {
-  STATUS_ORDER,
-  statusLabel,
-  type Status,
-  type StatusKey,
-} from "../status";
+import type { Item } from '../filter';
+import { esc } from '../markdown';
+import type { Progress } from '../model';
+import { STATUS_ORDER, statusLabel, type Status, type StatusKey } from '../status';
 
 export const pill = (st: Status) =>
-  `<span class="pill ${st.key}${st.flagged ? " flagged" : ""}"${
-    st.flagged
-      ? ' title="not an nos status — see .claude/skills/nos/templates/status.xml"'
-      : ""
-  }>${esc(st.label)}${st.flagged ? " ⚠" : ""}</span>`;
+  `<span class="pill ${st.key}${st.flagged ? ' flagged' : ''}"${
+    st.flagged ? ' title="not an nos status — see .claude/skills/nos/templates/status.xml"' : ''
+  }>${esc(st.label)}${st.flagged ? ' ⚠' : ''}</span>`;
 
-export const keyPill = (key: StatusKey, text = statusLabel(key)) =>
-  `<span class="pill ${key}">${esc(text)}</span>`;
+export const keyPill = (key: StatusKey, text = statusLabel(key)) => `<span class="pill ${key}">${esc(text)}</span>`;
 
-export const itemId = (it: Item) =>
-  (it.kind === "step" ? "S" : "P") + it.number;
+export const itemId = (it: Item) => (it.kind === 'step' ? 'S' : 'P') + it.number;
 
-export const labelChips = (labels: string[]) =>
-  labels.map((l) => `<span class="label">${esc(l)}</span>`).join("");
+export const labelChips = (labels: string[]) => labels.map((l) => `<span class="label">${esc(l)}</span>`).join('');
 
 export const dots = (items: Item[]) =>
   `<span class="dots">${items
-    .map(
-      (it) =>
-        `<span class="dot ${it.status.key}" title="${esc(itemId(it))} ${esc(it.status.label)}"></span>`,
-    )
-    .join("")}</span>`;
+    .map((it) => `<span class="dot ${it.status.key}" title="${esc(itemId(it))} ${esc(it.status.label)}"></span>`)
+    .join('')}</span>`;
 
-export function rollup(items: Item[], empty = "no steps") {
+export function rollup(items: Item[], empty = 'no steps') {
   const c: Partial<Record<StatusKey, number>> = {};
   for (const it of items) c[it.status.key] = (c[it.status.key] ?? 0) + 1;
   return (
     STATUS_ORDER.filter((k) => c[k])
       .map((k) => keyPill(k, `${c[k]} ${statusLabel(k)}`))
-      .join(" ") || `<span class="muted">${esc(empty)}</span>`
+      .join(' ') || `<span class="muted">${esc(empty)}</span>`
   );
 }
 
 export const progressText = (label: string, p: Progress, cls: string) =>
   p.total
-    ? `<span class="${cls}${p.done === p.total ? " complete" : ""}">${esc(label)} ${p.done}/${p.total}</span>`
-    : "";
+    ? `<span class="${cls}${p.done === p.total ? ' complete' : ''}">${esc(label)} ${p.done}/${p.total}</span>`
+    : '';
 
 export const hvnBadge = (on: boolean) =>
-  on
-    ? '<span class="hvn" title="human validation needed">👁 human check</span>'
-    : "";
+  on ? '<span class="hvn" title="human validation needed">👁 human check</span>' : '';
 
 export const quickBadge = (on: boolean) =>
-  on
-    ? '<span class="quick" title="quick step: a single step outside the plan">⚡ quick</span>'
-    : "";
+  on ? '<span class="quick" title="quick step: a single step outside the plan">⚡ quick</span>' : '';
 
-export const plural = (n: number, word: string) =>
-  `${n} ${word}${n === 1 ? "" : "s"}`;
+export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 export const crumbs = (...parts: [string, string?][]) =>
   `<div class="crumbs">${parts
-    .map(([label, href]) =>
-      href ? `<a href="${esc(href)}">${esc(label)}</a>` : esc(label),
-    )
-    .join(" › ")}</div>`;
+    .map(([label, href]) => (href ? `<a href="${esc(href)}">${esc(label)}</a>` : esc(label)))
+    .join(' › ')}</div>`;
 
 // One row of a .tree: `twisty` ▸/▾ expands the `toggle` key (see app.ts), `style` e.g. an indent
 export const treeNode = (
@@ -76,8 +56,8 @@ export const treeNode = (
   id: string,
   label: string,
   tail: string,
-  toggle = "",
-  style = "",
+  toggle = '',
+  style = '',
 ) =>
-  `<div class="node ${cls}" data-href="${esc(href)}"${toggle ? ` data-toggle="${esc(toggle)}"` : ""}${style ? ` style="${esc(style)}"` : ""}>
+  `<div class="node ${cls}" data-href="${esc(href)}"${toggle ? ` data-toggle="${esc(toggle)}"` : ''}${style ? ` style="${esc(style)}"` : ''}>
       <span class="tw">${twisty}</span><span class="id mono">${esc(id)}</span><span class="lbl">${esc(label)}</span>${tail}</div>`;

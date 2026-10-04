@@ -3,12 +3,12 @@
 // named in specs/config.json ("spec-ui" -> "docs-folder", relative to the repo root).
 
 export type FileLike = {
-  kind: "file";
+  kind: 'file';
   name: string;
   getFile(): Promise<{ text(): Promise<string> }>;
 };
 export type DirLike = {
-  kind: "directory";
+  kind: 'directory';
   name: string;
   entries(): AsyncIterable<readonly [string, FileLike | DirLike]>;
 };
@@ -19,28 +19,19 @@ async function children(dir: DirLike) {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-const isDomain = (h: FileLike | DirLike): h is DirLike =>
-  h.kind === "directory" && h.name.startsWith("domain-");
+const isDomain = (h: FileLike | DirLike): h is DirLike => h.kind === 'directory' && h.name.startsWith('domain-');
 
 // The specs/ folder and the repo root it sits in (null when specs/ itself was picked)
-export async function locateSpecs(
-  picked: DirLike,
-): Promise<{ specs: DirLike; root: DirLike | null }> {
+export async function locateSpecs(picked: DirLike): Promise<{ specs: DirLike; root: DirLike | null }> {
   const kids = await children(picked);
   if (kids.some(isDomain)) return { specs: picked, root: null };
-  const specs = kids.find(
-    (h): h is DirLike => h.kind === "directory" && h.name === "specs",
-  );
+  const specs = kids.find((h): h is DirLike => h.kind === 'directory' && h.name === 'specs');
   if (specs) return { specs, root: picked };
-  if (picked.name === "specs") return { specs: picked, root: null };
-  throw new Error(
-    `"${picked.name}/" has no domain-* folders — pick the specs/ folder.`,
-  );
+  if (picked.name === 'specs') return { specs: picked, root: null };
+  throw new Error(`"${picked.name}/" has no domain-* folders — pick the specs/ folder.`);
 }
 
-export async function readSpecsFolder(
-  picked: DirLike,
-): Promise<Record<string, string>> {
+export async function readSpecsFolder(picked: DirLike): Promise<Record<string, string>> {
   const { specs } = await locateSpecs(picked);
   const kids = await children(specs);
   const files: Record<string, string> = {};
@@ -49,26 +40,18 @@ export async function readSpecsFolder(
   };
   const walkPhases = async (dir: DirLike, path: string) => {
     for (const h of await children(dir)) {
-      if (h.kind === "directory") await walkPhases(h, `${path}/${h.name}`);
-      else if (h.name.endsWith(".md")) await read(h, `${path}/${h.name}`);
+      if (h.kind === 'directory') await walkPhases(h, `${path}/${h.name}`);
+      else if (h.name.endsWith('.md')) await read(h, `${path}/${h.name}`);
     }
   };
   for (const d of kids.filter(isDomain)) {
     for (const h of await children(d)) {
       const path = `specs/${d.name}/${h.name}`;
-      if (
-        h.kind === "file" &&
-        ["idea.md", "domain.json", "plan.json"].includes(h.name)
-      )
-        await read(h, path);
-      else if (h.kind === "directory" && h.name === "phases")
-        await walkPhases(h, path);
-      else if (h.kind === "directory" && h.name === "quick-steps")
+      if (h.kind === 'file' && ['idea.md', 'domain.json', 'plan.json'].includes(h.name)) await read(h, path);
+      else if (h.kind === 'directory' && h.name === 'phases') await walkPhases(h, path);
+      else if (h.kind === 'directory' && h.name === 'quick-steps')
         for (const q of await children(h))
-          if (
-            q.kind === "file" &&
-            (q.name === "quick-steps.json" || q.name.endsWith(".md"))
-          )
+          if (q.kind === 'file' && (q.name === 'quick-steps.json' || q.name.endsWith('.md')))
             await read(q, `${path}/${q.name}`);
     }
   }
@@ -83,39 +66,31 @@ export type DocsData = {
   error?: string;
 };
 
-export const DEFAULT_DOCS_FOLDER = "docs";
+export const DEFAULT_DOCS_FOLDER = 'docs';
 
 const TEXT_EXT = new Set(
-  "md markdown txt json jsonc xml yml yaml toml csv tsv html htm svg css scss js mjs cjs ts tsx jsx sh ps1 sql ini cfg env log".split(
-    " ",
+  'md markdown txt json jsonc xml yml yaml toml csv tsv html htm svg css scss js mjs cjs ts tsx jsx sh ps1 sql ini cfg env log'.split(
+    ' ',
   ),
 );
-export const isTextFile = (name: string) =>
-  TEXT_EXT.has(name.slice(name.lastIndexOf(".") + 1).toLowerCase());
+export const isTextFile = (name: string) => TEXT_EXT.has(name.slice(name.lastIndexOf('.') + 1).toLowerCase());
 
 export async function docsFolderOf(specs: DirLike): Promise<string> {
-  const cfg = (await children(specs)).find(
-    (h): h is FileLike => h.kind === "file" && h.name === "config.json",
-  );
+  const cfg = (await children(specs)).find((h): h is FileLike => h.kind === 'file' && h.name === 'config.json');
   if (!cfg) return DEFAULT_DOCS_FOLDER;
   try {
-    const v = JSON.parse(await (await cfg.getFile()).text())?.["spec-ui"]?.[
-      "docs-folder"
-    ];
-    return typeof v === "string" && v.trim() ? v.trim() : DEFAULT_DOCS_FOLDER;
+    const v = JSON.parse(await (await cfg.getFile()).text())?.['spec-ui']?.['docs-folder'];
+    return typeof v === 'string' && v.trim() ? v.trim() : DEFAULT_DOCS_FOLDER;
   } catch {
     return DEFAULT_DOCS_FOLDER;
   }
 }
 
-export async function readDocs(
-  specs: DirLike,
-  root: DirLike | null,
-): Promise<DocsData> {
+export async function readDocs(specs: DirLike, root: DirLike | null): Promise<DocsData> {
   const setting = await docsFolderOf(specs);
-  const parts = setting.split(/[\\/]/).filter((p) => p && p !== ".");
-  const folder = parts.join("/");
-  if (!parts.length || parts.includes(".."))
+  const parts = setting.split(/[\\/]/).filter((p) => p && p !== '.');
+  const folder = parts.join('/');
+  if (!parts.length || parts.includes('..'))
     return {
       folder: setting,
       files: {},
@@ -130,9 +105,7 @@ export async function readDocs(
 
   let dir = root;
   for (const p of parts) {
-    const next = (await children(dir)).find(
-      (h): h is DirLike => h.kind === "directory" && h.name === p,
-    );
+    const next = (await children(dir)).find((h): h is DirLike => h.kind === 'directory' && h.name === p);
     if (!next)
       return {
         folder,
@@ -145,13 +118,12 @@ export async function readDocs(
   const files: Record<string, string> = {};
   const walk = async (d: DirLike, prefix: string) => {
     for (const h of await children(d)) {
-      if (h.name.startsWith(".") || h.name === "node_modules") continue;
+      if (h.name.startsWith('.') || h.name === 'node_modules') continue;
       const path = prefix + h.name;
-      if (h.kind === "directory") await walk(h, path + "/");
-      else if (isTextFile(h.name))
-        files[path] = await (await h.getFile()).text();
+      if (h.kind === 'directory') await walk(h, path + '/');
+      else if (isTextFile(h.name)) files[path] = await (await h.getFile()).text();
     }
   };
-  await walk(dir, "");
+  await walk(dir, '');
   return { folder, files };
 }

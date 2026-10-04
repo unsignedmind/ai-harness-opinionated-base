@@ -1,11 +1,11 @@
 // Turns the raw files of specs/ into ideas -> phases -> steps. Pure: the loader hands over
 // `repo-relative path -> text`, so tests feed fixtures and the app feeds `import.meta.glob`.
-import { normStatus, type Status } from "./status";
+import { normStatus, type Status } from './status';
 
 export type Progress = { done: number; total: number };
 
 export type Idea = {
-  kind: "idea";
+  kind: 'idea';
   folder: string;
   number: number;
   slug: string;
@@ -27,7 +27,7 @@ export type Idea = {
 };
 
 export type Phase = {
-  kind: "phase";
+  kind: 'phase';
   number: number;
   slug: string;
   name: string;
@@ -41,7 +41,7 @@ export type Phase = {
 };
 
 export type Step = {
-  kind: "step";
+  kind: 'step';
   number: number;
   slug: string;
   title: string;
@@ -71,9 +71,9 @@ type RawStep = Partial<{
   slug: string;
   intent: string;
   status: string;
-  "human-validation-needed": boolean;
+  'human-validation-needed': boolean;
   description: string;
-  "spec-file": string;
+  'spec-file': string;
 }>;
 type RawQuickStep = RawStep & Partial<{ labels: string[] }>;
 type RawPhase = Partial<{
@@ -81,7 +81,7 @@ type RawPhase = Partial<{
   name: string;
   status: string;
   intent: string;
-  "human-validation-needed": boolean;
+  'human-validation-needed': boolean;
   description: string;
   steps: RawStep[];
 }>;
@@ -93,27 +93,27 @@ type RawPlan = Partial<{
 type RawDomain = Partial<{
   name: string;
   labels: string[];
-  "cross-cutting": boolean;
+  'cross-cutting': boolean;
 }>;
 
-const normPath = (p: string) => p.replace(/\\/g, "/").replace(/^\.\//, "");
+const normPath = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '');
 
 export const humanize = (slug: string) => {
-  const s = slug.replace(/[-_]+/g, " ").trim();
+  const s = slug.replace(/[-_]+/g, ' ').trim();
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
 
 export function firstH1(md: string | null): string {
-  const m = /^#\s+(.+)$/m.exec(md ?? "");
-  return m ? m[1].trim() : "";
+  const m = /^#\s+(.+)$/m.exec(md ?? '');
+  return m ? m[1].trim() : '';
 }
 
 // text of `## name…` until the next `## `
 export function section(md: string | null, name: string): string {
-  const re = new RegExp("^##\\s+" + name + "\\b.*$", "mi");
-  const text = md ?? "";
+  const re = new RegExp('^##\\s+' + name + '\\b.*$', 'mi');
+  const text = md ?? '';
   const m = re.exec(text);
-  if (!m) return "";
+  if (!m) return '';
   const rest = text.slice(m.index + m[0].length);
   const end = /^##\s/m.exec(rest);
   return (end ? rest.slice(0, end.index) : rest).trim();
@@ -122,20 +122,20 @@ export function section(md: string | null, name: string): string {
 export function firstParagraph(text: string): string {
   for (const b of text.split(/\n\s*\n/)) {
     const t = b.trim();
-    if (t && !/^[|#`]/.test(t)) return t.replace(/\s*\n\s*/g, " ");
+    if (t && !/^[|#`]/.test(t)) return t.replace(/\s*\n\s*/g, ' ');
   }
-  return "";
+  return '';
 }
 
 // `( )` / `(x)` (step-spec template) and `[ ]` / `[x]` (markdown) checkboxes
 export function progress(text: string): Progress {
   let done = 0,
     total = 0;
-  for (const line of text.split("\n")) {
+  for (const line of text.split('\n')) {
     const m = /^\s*(?:[-*]\s+)?[([]([ xX])[)\]]/.exec(line);
     if (!m) continue;
     total++;
-    if (m[1] !== " ") done++;
+    if (m[1] !== ' ') done++;
   }
   return { done, total };
 }
@@ -190,28 +190,24 @@ function buildIdea(folder: string, files: Map<string, string>): Idea {
   }
 
   const idea: Idea = {
-    kind: "idea",
+    kind: 'idea',
     folder,
     number: m ? Number(m[1]) : 0,
     slug: m ? m[2] : folder,
-    title:
-      firstH1(md).replace(/^idea:\s*/i, "") ||
-      domain?.name ||
-      raw?.name ||
-      (m ? humanize(m[2]) : folder),
-    intent: firstParagraph(section(md, "Intent")),
+    title: firstH1(md).replace(/^idea:\s*/i, '') || domain?.name || raw?.name || (m ? humanize(m[2]) : folder),
+    intent: firstParagraph(section(md, 'Intent')),
     md,
     domainJson,
     planJson,
-    plan: raw ? { name: raw.name ?? "" } : null,
+    plan: raw ? { name: raw.name ?? '' } : null,
     error,
     status: raw
       ? normStatus(raw.status)
       : planJson !== null
-        ? { key: "other", label: "invalid plan", flagged: true }
-        : { key: "other", label: "no plan", flagged: false },
+        ? { key: 'other', label: 'invalid plan', flagged: true }
+        : { key: 'other', label: 'no plan', flagged: false },
     labels: domain?.labels ?? [],
-    crossCutting: !!domain?.["cross-cutting"],
+    crossCutting: !!domain?.['cross-cutting'],
     phases: [],
     steps: [],
     quickSteps: [],
@@ -220,17 +216,16 @@ function buildIdea(folder: string, files: Map<string, string>): Idea {
   let stepIndex = 0;
   (raw?.phases ?? []).forEach((rp, pi) => {
     const rawSteps = rp.steps ?? [];
-    const firstSpec =
-      rawSteps.map((s) => normPath(s["spec-file"] ?? "")).find(Boolean) ?? "";
+    const firstSpec = rawSteps.map((s) => normPath(s['spec-file'] ?? '')).find(Boolean) ?? '';
     const phase: Phase = {
-      kind: "phase",
-      number: numberIn(firstSpec, "phase") ?? pi + 1,
+      kind: 'phase',
+      number: numberIn(firstSpec, 'phase') ?? pi + 1,
       slug: rp.slug ?? `phase-${pi + 1}`,
       name: rp.name ?? humanize(rp.slug ?? `phase ${pi + 1}`),
       status: normStatus(rp.status),
-      intent: rp.intent ?? "",
-      description: rp.description ?? "",
-      hvn: !!rp["human-validation-needed"],
+      intent: rp.intent ?? '',
+      description: rp.description ?? '',
+      hvn: !!rp['human-validation-needed'],
       idea,
       labels: idea.labels,
       steps: [],
@@ -248,7 +243,7 @@ function buildIdea(folder: string, files: Map<string, string>): Idea {
   if (quickJson !== undefined) {
     try {
       const rawQuick = JSON.parse(quickJson) as RawQuickStep[];
-      if (!Array.isArray(rawQuick)) throw new Error("expected an array");
+      if (!Array.isArray(rawQuick)) throw new Error('expected an array');
       rawQuick.forEach((rs, qi) => {
         const step = buildStep(rs, files, idea, null, qi + 1);
         step.labels = rs.labels ?? idea.labels;
@@ -263,32 +258,29 @@ function buildIdea(folder: string, files: Map<string, string>): Idea {
   return idea;
 }
 
-export const QUICK_STEPS_JSON = "quick-steps/quick-steps.json";
+// a domain with a plan.json is matured (Explore); without one it is a not yet refined idea (Ideas)
+export const isMatured = (i: Idea) => i.planJson !== null;
 
-function buildStep(
-  rs: RawStep,
-  files: Map<string, string>,
-  idea: Idea,
-  phase: Phase | null,
-  index: number,
-): Step {
-  const specPath = normPath(rs["spec-file"] ?? "");
+export const QUICK_STEPS_JSON = 'quick-steps/quick-steps.json';
+
+function buildStep(rs: RawStep, files: Map<string, string>, idea: Idea, phase: Phase | null, index: number): Step {
+  const specPath = normPath(rs['spec-file'] ?? '');
   const text = specPath ? files.get(specPath) : undefined;
   const specMd = text && text.trim() ? text : null;
   const slug = rs.slug ?? `step-${index}`;
   return {
-    kind: "step",
-    number: numberIn(specPath, "step") ?? index,
+    kind: 'step',
+    number: numberIn(specPath, 'step') ?? index,
     slug,
     title: firstH1(specMd) || humanize(slug),
     status: normStatus(rs.status),
-    intent: rs.intent ?? "",
-    description: rs.description ?? "",
-    hvn: !!rs["human-validation-needed"],
+    intent: rs.intent ?? '',
+    description: rs.description ?? '',
+    hvn: !!rs['human-validation-needed'],
     specPath,
     specMd,
-    ac: progress(section(specMd, "Acceptance Criteria")),
-    tasks: progress(section(specMd, "Task List")),
+    ac: progress(section(specMd, 'Acceptance Criteria')),
+    tasks: progress(section(specMd, 'Task List')),
     idea,
     phase,
     quick: !phase,

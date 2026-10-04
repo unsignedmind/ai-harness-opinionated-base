@@ -73,7 +73,7 @@ body {
   font:
     14px/1.45 system-ui,
     -apple-system,
-    "Segoe UI",
+    'Segoe UI',
     Roboto,
     sans-serif;
 }
@@ -87,7 +87,7 @@ a:hover {
 code,
 pre,
 .mono {
-  font-family: ui-monospace, Consolas, "SF Mono", Menlo, monospace;
+  font-family: ui-monospace, Consolas, 'SF Mono', Menlo, monospace;
   font-size: 12.5px;
 }
 button,
@@ -262,52 +262,52 @@ main {
 
 /* status colours: pills, dots, status chips */
 .pill.open,
-.chip.st-open[aria-pressed="true"] {
+.chip.st-open[aria-pressed='true'] {
   color: var(--open);
   background: var(--open-bg);
 }
 .pill.in-specification,
-.chip.st-in-specification[aria-pressed="true"] {
+.chip.st-in-specification[aria-pressed='true'] {
   color: var(--in-specification);
   background: var(--in-specification-bg);
 }
 .pill.specified,
-.chip.st-specified[aria-pressed="true"] {
+.chip.st-specified[aria-pressed='true'] {
   color: var(--specified);
   background: var(--specified-bg);
 }
 .pill.in-progress,
-.chip.st-in-progress[aria-pressed="true"] {
+.chip.st-in-progress[aria-pressed='true'] {
   color: var(--in-progress);
   background: var(--in-progress-bg);
 }
 .pill.implemented,
-.chip.st-implemented[aria-pressed="true"] {
+.chip.st-implemented[aria-pressed='true'] {
   color: var(--implemented);
   background: var(--implemented-bg);
 }
 .pill.in-review,
-.chip.st-in-review[aria-pressed="true"] {
+.chip.st-in-review[aria-pressed='true'] {
   color: var(--in-review);
   background: var(--in-review-bg);
 }
 .pill.reviewed,
-.chip.st-reviewed[aria-pressed="true"] {
+.chip.st-reviewed[aria-pressed='true'] {
   color: var(--reviewed);
   background: var(--reviewed-bg);
 }
 .pill.done,
-.chip.st-done[aria-pressed="true"] {
+.chip.st-done[aria-pressed='true'] {
   color: var(--done);
   background: var(--done-bg);
 }
 .pill.on-hold,
-.chip.st-on-hold[aria-pressed="true"] {
+.chip.st-on-hold[aria-pressed='true'] {
   color: var(--on-hold);
   background: var(--on-hold-bg);
 }
 .pill.other,
-.chip.st-other[aria-pressed="true"] {
+.chip.st-other[aria-pressed='true'] {
   color: var(--other);
   background: var(--other-bg);
 }
@@ -420,16 +420,16 @@ main {
   color: var(--muted);
   font-size: 11px;
 }
-.chip[aria-pressed="true"] {
+.chip[aria-pressed='true'] {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-ink);
 }
-.chip[aria-pressed="true"] .n {
+.chip[aria-pressed='true'] .n {
   color: inherit;
   opacity: 0.8;
 }
-.chip[class*="st-"][aria-pressed="true"] {
+.chip[class*='st-'][aria-pressed='true'] {
   border-color: currentColor;
 }
 .shown {
@@ -553,6 +553,16 @@ table.list td .label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tree .tree-group {
+  margin-top: 8px;
+  padding: 8px 8px 4px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .tree .lvl1 {
   padding-left: 24px;
@@ -827,19 +837,36 @@ table.list td .label {
 }
 
 @media (max-width: 860px) {
+  /* one header row; the nav scrolls sideways instead of wrapping */
   header {
-    grid-template-columns: 1fr;
-    justify-items: center;
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
-  header .right {
-    justify-self: center;
+  #nav {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  #nav::-webkit-scrollbar {
+    display: none;
+  }
+  #nav a {
+    padding: 6px 12px;
+    white-space: nowrap;
+  }
+  #status {
+    display: none;
   }
   .explore {
     grid-template-columns: 1fr;
   }
+  /* tree keeps its own scroll box so the detail stays reachable */
   .tree {
     position: static;
-    max-height: none;
+    max-height: 40vh;
+  }
+  .tree .node {
+    padding-top: 8px;
+    padding-bottom: 8px;
   }
   .detail {
     padding: 16px;
@@ -847,5 +874,54 @@ table.list td .label {
   .board {
     grid-auto-flow: row;
     grid-auto-columns: auto;
+  }
+}
+
+/* phone: views move to a bottom tab bar, header keeps brand + actions */
+@media (max-width: 640px) {
+  body {
+    padding-bottom: calc(52px + env(safe-area-inset-bottom));
+  }
+  header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 8px 12px;
+  }
+  header .brand {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  header .right button {
+    padding: 4px 8px;
+  }
+  #nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 6;
+    justify-self: stretch;
+    gap: 0;
+    padding: 0 0 env(safe-area-inset-bottom);
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+    background: var(--panel);
+  }
+  #nav a {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    padding: 0 4px;
+    border-radius: 0;
+    border-top: 2px solid transparent;
+    font-size: 13px;
+  }
+  #nav a.active {
+    background: none;
+    color: var(--accent);
+    border-top-color: var(--accent);
   }
 }

@@ -4,7 +4,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>specs</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./styles.css" />
@@ -13,6 +13,7 @@
     <header>
       <div class="brand">specs <span id="source">live</span></div>
       <nav id="nav" aria-label="Views">
+        <a data-view="ideas" href="#ideas">Ideas</a>
         <a data-view="explore" href="#explore">Explore</a>
         <a data-view="board" href="#board">Board</a>
         <a data-view="backlog" href="#backlog">Backlog</a>
@@ -20,22 +21,15 @@
       </nav>
       <div class="right">
         <span id="status"></span>
-        <button
-          type="button"
-          id="reload"
-          data-action="reload"
-          hidden
-          title="Read specs/ on the host again"
-        >
+        <button type="button" id="reload" data-action="reload" hidden title="Read specs/ on the host again">
           &#8635; Reload
         </button>
       </div>
     </header>
     <main id="main">
       <p class="muted">
-        Loading specs&hellip; This page needs the dev server (<code
-          >npm run dev</code
-        >). Opened from disk, use <code>index.html</code>.
+        Loading specs&hellip; This page needs the dev server (<code>npm run dev</code>). Opened from disk, use
+        <code>index.html</code>.
       </p>
     </main>
     <script type="module" src="./src/main.ts"></script>

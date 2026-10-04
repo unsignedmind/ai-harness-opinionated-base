@@ -3,21 +3,16 @@
 // `GET /__specs` as `path -> text` JSON, `GET /__docs` as the docs folder named in specs/config.json
 // (relative to the repo root, the parent of specs/), and pushes "specs:changed" / "docs:changed"
 // when a file under either changes.
-import { readdir, readFile } from "node:fs/promises";
-import { basename, dirname, join, resolve, sep } from "node:path";
-import type { Plugin } from "vite";
+import { readdir, readFile } from 'node:fs/promises';
+import { basename, dirname, join, resolve, sep } from 'node:path';
+import type { Plugin } from 'vite';
 
-import {
-  readDocs,
-  readSpecsFolder,
-  type DirLike,
-  type FileLike,
-} from "./folder.ts";
+import { readDocs, readSpecsFolder, type DirLike, type FileLike } from './folder.ts';
 
 // A folder on disk in the shape of a File System Access handle, so readSpecsFolder reads it
 export function nodeDir(path: string): DirLike {
   return {
-    kind: "directory",
+    kind: 'directory',
     name: basename(path),
     async *entries() {
       for (const e of await readdir(path, { withFileTypes: true })) {
@@ -27,9 +22,9 @@ export function nodeDir(path: string): DirLike {
           yield [
             e.name,
             {
-              kind: "file",
+              kind: 'file',
               name: e.name,
-              getFile: async () => ({ text: () => readFile(p, "utf8") }),
+              getFile: async () => ({ text: () => readFile(p, 'utf8') }),
             } satisfies FileLike,
           ] as const;
       }
@@ -43,15 +38,15 @@ export function serveSpecs(specsDir: string): Plugin {
   // set on each /__docs request, since the config may change
   let docsDir: string | null = null;
   return {
-    name: "serve-specs",
-    apply: "serve",
+    name: 'serve-specs',
+    apply: 'serve',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        const path = req.url?.split("?")[0];
-        if (path === "/") req.url = "/dev.html";
-        if (path !== "/__specs" && path !== "/__docs") return next();
+        const path = req.url?.split('?')[0];
+        if (path === '/') req.url = '/dev.html';
+        if (path !== '/__specs' && path !== '/__docs') return next();
         const read =
-          path === "/__specs"
+          path === '/__specs'
             ? readSpecsFolder(nodeDir(dir))
             : readDocs(nodeDir(dir), nodeDir(root)).then((docs) => {
                 if (!docs.error) {
@@ -62,8 +57,8 @@ export function serveSpecs(specsDir: string): Plugin {
               });
         read.then(
           (data) => {
-            res.setHeader("Content-Type", "application/json");
-            res.setHeader("Cache-Control", "no-store");
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Cache-Control', 'no-store');
             res.end(JSON.stringify(data));
           },
           (e: Error) => {
@@ -80,10 +75,10 @@ export function serveSpecs(specsDir: string): Plugin {
         timers[event] = setTimeout(() => server.ws.send(event), 100);
       };
       server.watcher.add(dir);
-      server.watcher.on("all", (_event, file) => {
+      server.watcher.on('all', (_event, file) => {
         const f = resolve(file);
-        if (f.startsWith(dir + sep)) burst("specs:changed");
-        if (docsDir && f.startsWith(docsDir + sep)) burst("docs:changed");
+        if (f.startsWith(dir + sep)) burst('specs:changed');
+        if (docsDir && f.startsWith(docsDir + sep)) burst('docs:changed');
       });
     },
   };
