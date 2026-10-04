@@ -19,6 +19,7 @@ import {
   labelChips,
   pill,
   progressText,
+  quickBadge,
 } from "./parts";
 
 export function renderBacklog(model: Model, f: Filters): string {
@@ -54,7 +55,7 @@ export function renderBacklog(model: Model, f: Filters): string {
         (it) => `<tr data-href="${esc(hrefOf(it))}">
         <td class="id mono">${esc(itemId(it))}</td>
         <td>${esc(titleOf(it))}<div class="path">${esc(it.intent)}</div></td>
-        <td><div>${esc(it.idea.title)}</div>${it.kind === "step" ? `<div class="path">P${it.phase.number} ${esc(it.phase.name)}</div>` : ""}</td>
+        <td><div>${esc(it.idea.title)}</div>${it.kind === "step" ? `<div class="path">${it.phase ? `P${it.phase.number} ${esc(it.phase.name)}` : quickBadge(true)}</div>` : ""}</td>
         <td>${pill(it.status)}</td>
         <td>${labelChips(it.labels)}</td>
         <td>${it.kind === "step" ? progressText("AC", it.ac, "ac") : dots(it.steps)}</td>

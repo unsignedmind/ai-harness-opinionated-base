@@ -5,6 +5,7 @@
     <rule>Report to the user concisely in simple language. The user may not know the code or the feature</rule>
     <rule>Every question with choices, also relayed from subagents: one choice per line, "<letter> - <choice text> [<key>]". Letters A, B, C… in choice order. The user answers with letter or key</rule>
     <rule>"review-needed" missing in plan.json → true</rule>
+    <rule>Quick step: a single step without plan and phase in specs/<domain>/quick-steps/quick-steps.json. Its status changes with "nos set-status --domain --step" without --phase. Pass "quick step" and no phase id to every ability</rule>
 </rules>
 
 <start>
@@ -17,7 +18,8 @@
     <question>What do you want to do?
         <choice key="IDEA">Document an idea</choice>
         <choice key="PLAN">Create a plan from an idea</choice>
-        <choice key="RUN">Run or continue a plan</choice>
+        <choice key="RUN">Run or continue a plan or quick step</choice>
+        <choice key="QUICK">Quick step: one small change straight to specify, develop, review</choice>
         <choice key="ARCHITECT">Improve project quality and docs: architecture docs, guardrails, tests</choice>
         <choice key="SETUP">Set up or update nos for this project: specs folder, config, quality tools</choice>
     </question>
@@ -39,6 +41,19 @@
     <step3>
         <do>When the plan is created and the cli commands are done: in the spec-ui folder start the dev server via dev-to-lan npm task and provide the network url e.g. 192.168.XXX.XXX:XXXX</do>
     </step3>
+</option>
+
+<option name="quick">
+    <step1>Quick steps not done in specs/domain-*/quick-steps/quick-steps.json →
+        <question>Continue a quick step or create a new one?
+            <choice key="step id">One choice per quick step not done: domain name, intent and status → option "run" step2 with this quick step</choice>
+            <choice key="NEW">Create a new quick step</choice>
+        </question>
+    </step1>
+    <step2>NEW or no quick step open → run ability "quick-step" with the intent if the user already gave one. It asks the user for the intent first. Relay all its questions to the user and the answers back</step2>
+    <step3>Report the domain (new or existing) and the quick step. Mode = the returned pipeline mode</step3>
+    <step4>cycle "step" with the domain and the quick step</step4>
+    <step5>Report</step5>
 </option>
 
 <option name="architect">
@@ -83,8 +98,9 @@
 
 <option name="run">
     <step1>No domain given →
-        <question>Which plan should run?
+        <question>Which plan or quick step should run?
             <choice key="domain id">One choice per plan in specs/domain-*/plan.json not done: plan name and status</choice>
+            <choice key="step id">One choice per quick step in specs/domain-*/quick-steps/quick-steps.json not done: "<domain name> › Quick › <intent>" and status</choice>
         </question>
     </step1>
     <step2>
@@ -93,7 +109,7 @@
             <choice key="MANUAL">Stops after each specification, implementation and review for your go</choice>
         </question>
     </step2>
-    <entry>Read the plan status. open or on-hold → step3. in-progress → step4</entry>
+    <entry>Quick step → cycle "step" with the domain and the quick step, then report. Plan → read the plan status. open or on-hold → step3. in-progress → step4</entry>
     <step3>
         <status target="plan" from="open|on-hold" to="in-progress"/>
     </step3>
@@ -138,7 +154,7 @@
     <entry>resume</entry>
     <step1 resume-at="in-specification">
         <status target="step" from="open" to="in-specification"/>
-        <do>Run ability "specify" with domain, phase id, step id, mode and user feedback if any. Keep its subagent alive when it reports done</do>
+        <do>Run ability "specify" with domain, phase id (quick step: "quick step" instead), step id, mode and user feedback if any. Keep its subagent alive when it reports done</do>
         <do>Run ability "spec-review" with domain, phase id, step id, mode and user feedback if any. Resume and specify not run in this session → tell it the spec author is unavailable</do>
         <do>spec-review returns questions "for-specify" → SendMessage them to the specify subagent. Its answers → SendMessage to the spec-review subagent. specify asks back → relay to spec-review and the reply back</do>
         <do>spec-review returns questions for the user → ask the user, send the answers back to spec-review</do>
@@ -193,9 +209,9 @@
                 <status target="phase" from="reviewed|implemented" to="done"/>
                 <do>Turn the feedback into clear issues. Run ability "plan" (action extend) with domain, phase id and issues. Continue the run</do>
             </choice>
-            <choice key="PAUSE">Pause the plan
-                <status target="plan" from="in-progress" to="on-hold"/>
-                <do>End the run</do>
+            <choice key="PAUSE">Pause the plan or quick step
+                <status target="plan" from="in-progress" to="on-hold" when="not a quick step"/>
+                <do>End the run. A quick step keeps its status and continues via QUICK or RUN</do>
             </choice>
         </question>
     </step2>
@@ -203,6 +219,6 @@
 
 <resume>
     <rule>A run can be interrupted anytime (limits, shutdown). Never reset a status on resume</rule>
-    <rule>Read the target status in plan.json. open → step1. done → skip the cycle. Otherwise → the step with resume-at = status: skip its status change, run its actions and parks</rule>
+    <rule>Read the target status in plan.json, quick step: in quick-steps.json. open → step1. done → skip the cycle. Otherwise → the step with resume-at = status: skip its status change, run its actions and parks</rule>
     <rule>Tell a rerun ability that it resumes interrupted work</rule>
 </resume>

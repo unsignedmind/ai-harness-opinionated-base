@@ -18,7 +18,9 @@ export type Idea = {
   status: Status;
   labels: string[];
   phases: Phase[];
+  // plan steps and quick steps
   steps: Step[];
+  quickSteps: Step[];
 };
 
 export type Phase = {
@@ -49,7 +51,9 @@ export type Step = {
   ac: Progress;
   tasks: Progress;
   idea: Idea;
-  phase: Phase;
+  // null for a quick step: a single step outside the plan (specs/<domain>/quick-steps/)
+  phase: Phase | null;
+  quick: boolean;
   labels: string[];
 };
 
@@ -68,6 +72,7 @@ type RawStep = Partial<{
   description: string;
   "spec-file": string;
 }>;
+type RawQuickStep = RawStep & Partial<{ labels: string[] }>;
 type RawPhase = Partial<{
   slug: string;
   name: string;
@@ -189,6 +194,7 @@ function buildIdea(folder: string, files: Map<string, string>): Idea {
     labels: raw?.labels ?? [],
     phases: [],
     steps: [],
+    quickSteps: [],
   };
 
   let stepIndex = 0;
@@ -211,31 +217,61 @@ function buildIdea(folder: string, files: Map<string, string>): Idea {
     };
     for (const rs of rawSteps) {
       stepIndex++;
-      const specPath = normPath(rs["spec-file"] ?? "");
-      const text = specPath ? files.get(specPath) : undefined;
-      const specMd = text && text.trim() ? text : null;
-      const slug = rs.slug ?? `step-${stepIndex}`;
-      const step: Step = {
-        kind: "step",
-        number: numberIn(specPath, "step") ?? stepIndex,
-        slug,
-        title: firstH1(specMd) || humanize(slug),
-        status: normStatus(rs.status),
-        intent: rs.intent ?? "",
-        description: rs.description ?? "",
-        hvn: !!rs["human-validation-needed"],
-        specPath,
-        specMd,
-        ac: progress(section(specMd, "Acceptance Criteria")),
-        tasks: progress(section(specMd, "Task List")),
-        idea,
-        phase,
-        labels: idea.labels,
-      };
+      const step = buildStep(rs, files, idea, phase, stepIndex);
       phase.steps.push(step);
       idea.steps.push(step);
     }
     idea.phases.push(phase);
   });
+
+  const quickJson = files.get(`specs/${folder}/${QUICK_STEPS_JSON}`);
+  if (quickJson !== undefined) {
+    try {
+      const rawQuick = JSON.parse(quickJson) as RawQuickStep[];
+      if (!Array.isArray(rawQuick)) throw new Error("expected an array");
+      rawQuick.forEach((rs, qi) => {
+        const step = buildStep(rs, files, idea, null, qi + 1);
+        step.labels = rs.labels ?? idea.labels;
+        idea.quickSteps.push(step);
+        idea.steps.push(step);
+      });
+    } catch (e) {
+      const msg = `quick-steps.json: ${(e as Error).message}`;
+      idea.error = idea.error ? `${idea.error}; ${msg}` : msg;
+    }
+  }
   return idea;
+}
+
+export const QUICK_STEPS_JSON = "quick-steps/quick-steps.json";
+
+function buildStep(
+  rs: RawStep,
+  files: Map<string, string>,
+  idea: Idea,
+  phase: Phase | null,
+  index: number,
+): Step {
+  const specPath = normPath(rs["spec-file"] ?? "");
+  const text = specPath ? files.get(specPath) : undefined;
+  const specMd = text && text.trim() ? text : null;
+  const slug = rs.slug ?? `step-${index}`;
+  return {
+    kind: "step",
+    number: numberIn(specPath, "step") ?? index,
+    slug,
+    title: firstH1(specMd) || humanize(slug),
+    status: normStatus(rs.status),
+    intent: rs.intent ?? "",
+    description: rs.description ?? "",
+    hvn: !!rs["human-validation-needed"],
+    specPath,
+    specMd,
+    ac: progress(section(specMd, "Acceptance Criteria")),
+    tasks: progress(section(specMd, "Task List")),
+    idea,
+    phase,
+    quick: !phase,
+    labels: idea.labels,
+  };
 }

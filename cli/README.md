@@ -21,13 +21,14 @@ nos help <command>
 nos <command> --help
 ```
 
-| Command         | Description                                                                 |
-| --------------- | --------------------------------------------------------------------------- |
-| `init`          | Create `specs/` and `specs/config.json` if missing                          |
-| `create-domain` | Reserve a domain id and create `specs/domain-<id>-<slug>/idea.md`           |
-| `create-plan`   | Save a `plan.json` in a domain and create its phase folders and step files  |
-| `update-plan`   | Save an updated `plan.json` and create, move or delete phases and steps     |
-| `set-status`    | Change the status of a plan, phase or step in `plan.json`                   |
+| Command             | Description                                                                 |
+| ------------------- | --------------------------------------------------------------------------- |
+| `init`              | Create `specs/` and `specs/config.json` if missing                          |
+| `create-domain`     | Reserve a domain id and create `specs/domain-<id>-<slug>/idea.md`           |
+| `create-plan`       | Save a `plan.json` in a domain and create its phase folders and step files  |
+| `update-plan`       | Save an updated `plan.json` and create, move or delete phases and steps     |
+| `create-quick-step` | Add a quick step (one step outside any plan) to a domain                    |
+| `set-status`        | Change the status of a plan, phase, step or quick step                      |
 
 General rules:
 
@@ -152,6 +153,31 @@ Start from the current `specs/<domain>/plan.json`, edit it, and pass it back. `n
 
 The output lists `created`, `moved` and `deleted` phases and steps. See `nos help update-plan` for an example.
 
+### `create-quick-step`
+
+```sh
+nos create-quick-step --domain <domain-<id>-<slug>> --step <file|-> [--root <dir>]
+```
+
+A quick step is a single step outside any plan, run by the orchestrator through the normal step cycle. The domain must exist (create it with `create-domain` first); it does not need a `plan.json`.
+
+1. Reserves a step id from the shared `step` counter, so ids stay unique across plan and quick steps
+2. Creates an empty `specs/<domain>/quick-steps/step-<id>-<slug>.md`
+3. Appends the step to `specs/<domain>/quick-steps/quick-steps.json` with `spec-file` filled and `status` `open`
+
+The step JSON needs `slug` (kebab-case) and `intent`. `description`, `human-validation-needed` (default `false`) and `review-needed` (default `true`) are optional; other fields are kept as-is.
+
+```sh
+$ echo '{"slug":"fix-login-typo","intent":"Fix the typo on the login button"}' | nos create-quick-step --domain domain-1-user-auth --step -
+{
+  "action": "create-quick-step",
+  "domain": "domain-1-user-auth",
+  "id": 7,
+  "path": "specs/domain-1-user-auth/quick-steps/step-7-fix-login-typo.md",
+  "quick-steps": "specs/domain-1-user-auth/quick-steps/quick-steps.json"
+}
+```
+
 ### `set-status`
 
 ```sh
@@ -163,6 +189,8 @@ nos set-status --domain <domain-<id>-<slug>> [--phase <id>] [--step <id>] --stat
 | `--domain` only           | the plan                                                  |
 | `--phase <id>`            | that phase                                                |
 | `--step <id>`             | that step (`--phase` is optional, but must match if given) |
+
+Without `--phase`, a step id that is not in `plan.json` is looked up in `quick-steps/quick-steps.json` of the domain; this also works for a domain without `plan.json`. The result then has `"plan"` pointing to `quick-steps.json` and `"quick": true`.
 
 The status is checked against `.claude/skills/nos/templates/status.xml` in the project: `<plans>` for the plan, `<phases>` for phases, `<steps>` for steps. An invalid status fails with the list of valid ones, and `plan.json` is left untouched. Only the `status` field is changed. Phase and step ids are read from each step's `spec-file` path.
 
@@ -188,9 +216,12 @@ specs/
 └── domain-1-user-auth/
     ├── idea.md
     ├── plan.json
-    └── phases/
-        └── phase-1-data-model/
-            └── step-1-user-table.md
+    ├── phases/
+    │   └── phase-1-data-model/
+    │       └── step-1-user-table.md
+    └── quick-steps/
+        ├── quick-steps.json
+        └── step-7-fix-login-typo.md
 ```
 
 Ids are global across the project. Phase and step counters are shared by all domains.
@@ -210,5 +241,6 @@ npm run test:watch  # rerun the tests on every change
 | `src/domain.js`  | `create-domain`                                  |
 | `src/plan.js`    | `create-plan`                                    |
 | `src/update-plan.js` | `update-plan`                                |
+| `src/quick-step.js` | `create-quick-step`, `quick-steps.json` access |
 | `src/status.js`  | `set-status` and `status.xml` parsing            |
 | `src/slug.js`    | Slug validation                                  |

@@ -7,7 +7,7 @@ import { renderBacklog } from "../src/views/backlog";
 import { renderBoard } from "../src/views/board";
 import { renderExplore, type ExploreUi } from "../src/views/explore";
 import { filterBar } from "../src/views/filterbar";
-import { fixtureFiles } from "./fixtures";
+import { fixtureFiles, quickFixtureFiles } from "./fixtures";
 
 const model = () => buildModel(fixtureFiles());
 const f = (over: Partial<Filters> = {}): Filters => ({
@@ -246,4 +246,63 @@ test("invalid plan.json shows its error on the idea", () => {
     renderExplore(buildModel(files), parseRoute("#explore/dark-mode"), ui()),
   );
   expect(root.querySelector(".error")?.textContent).toMatch(/plan\.json/);
+});
+
+// ── quick steps ──
+
+const quickExplore = (hash: string, u = ui()) =>
+  mount(renderExplore(buildModel(quickFixtureFiles()), parseRoute(hash), u));
+
+test("tree shows a quick steps node under the idea", () => {
+  const root = quickExplore("#explore/dark-mode/quick-steps/fix-contrast");
+  const quick = root.querySelector<HTMLElement>(
+    '.node[data-toggle="dark-mode/quick-steps"]',
+  )!;
+  expect(quick.textContent).toContain("Quick steps");
+  expect(quick.dataset.href).toBe("#explore/dark-mode/quick-steps");
+  expect(root.querySelector(".node.lvl2.sel")?.textContent).toContain(
+    "Fix contrast",
+  );
+});
+
+test("quick steps detail shows a board of the idea's quick steps", () => {
+  const root = quickExplore("#explore/dark-mode/quick-steps");
+  expect(root.querySelector(".detail h1")?.textContent).toContain(
+    "Quick steps",
+  );
+  const cards = [...root.querySelectorAll(".detail .kcard")];
+  expect(cards).toHaveLength(1);
+  expect(cards[0].querySelector(".quick")).not.toBeNull();
+});
+
+test("quick step detail links back to the quick steps of its idea", () => {
+  const root = quickExplore("#explore/dark-mode/quick-steps/fix-contrast");
+  const crumbs = [...root.querySelectorAll<HTMLAnchorElement>(".crumbs a")];
+  expect(crumbs.map((a) => a.getAttribute("href"))).toStrictEqual([
+    "#explore",
+    "#explore/dark-mode",
+    "#explore/dark-mode/quick-steps",
+  ]);
+  expect(root.querySelector(".detail h1 .quick")).not.toBeNull();
+  expect(root.querySelector(".detail")?.textContent).toContain(
+    "Muted text is readable",
+  );
+});
+
+test("idea without plan but with quick steps offers the steps board", () => {
+  const root = quickExplore("#explore/i18n");
+  const tabs = [...root.querySelectorAll(".subtabs button")].map(
+    (b) => b.textContent,
+  );
+  expect(tabs).toStrictEqual(["Steps", "idea.md"]);
+});
+
+test("board and backlog include quick steps", () => {
+  const m = buildModel(quickFixtureFiles());
+  expect(
+    mount(renderBoard(m, f())).querySelectorAll(".kcard .quick"),
+  ).toHaveLength(2);
+  expect(
+    mount(renderBacklog(m, f())).querySelectorAll("td .quick"),
+  ).toHaveLength(2);
 });

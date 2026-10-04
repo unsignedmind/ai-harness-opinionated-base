@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { asList, resolveDomain, PLAN_FILE } from './plan.js';
+import { quickStepId, quickStepsPath, readQuickSteps, writeQuickSteps } from './quick-step.js';
 
 export const STATUS_FILE_PATH = '.claude/skills/nos/templates/status.xml';
 const CATEGORIES = { plan: 'plans', phase: 'phases', step: 'steps' };
@@ -43,12 +44,24 @@ function findPhase(phases, id) {
   return phase;
 }
 
+function readPlan(planPath) {
+  try {
+    return JSON.parse(readFileSync(planPath, 'utf8'));
+  } catch (err) {
+    throw new Error(`Cannot read ${planPath}: ${err.message}`);
+  }
+}
+
+function hasStep(phases, id) {
+  return phases.some((phase) => asList(phase.steps).some((s) => idsOf(s).step === id));
+}
+
 function findStep(phases, id, inPhase) {
   for (const phase of inPhase ? [inPhase] : phases) {
     const step = asList(phase.steps).find((s) => idsOf(s).step === id);
     if (step) return step;
   }
-  throw new Error(inPhase ? `Step ${id} is not in phase ${phaseId(inPhase)}` : `Step ${id} is not in this plan`);
+  throw new Error(inPhase ? `Step ${id} is not in phase ${phaseId(inPhase)}` : `Step ${id} is not in this plan or its quick steps`);
 }
 
 export function setStatus(root, { domain, phase, step, status } = {}) {
@@ -66,14 +79,23 @@ export function setStatus(root, { domain, phase, step, status } = {}) {
   }
 
   const planPath = path.join(domainDir, PLAN_FILE);
-  if (!existsSync(planPath)) {
-    throw new Error(`Domain ${domain} has no plan.json. Run create-plan first`);
+  const plan = existsSync(planPath) ? readPlan(planPath) : null;
+
+  // A step id without --phase may also be a quick step of the domain (quick-steps/quick-steps.json).
+  if (target === 'step' && !phaseNumber && !(plan && hasStep(asList(plan.phases), stepNumber))) {
+    const quickSteps = readQuickSteps(domainDir);
+    const quick = quickSteps.find((s) => quickStepId(s) === stepNumber);
+    if (quick) {
+      const previous = quick.status;
+      quick.status = status;
+      writeQuickSteps(domainDir, quickSteps);
+      return { domain, planPath: quickStepsPath(domainDir), target, id: stepNumber, slug: quick.slug, previous, status, quick: true };
+    }
+    if (!plan) throw new Error(`Step ${stepNumber} is not a quick step of ${domain} and the domain has no plan.json`);
   }
-  let plan;
-  try {
-    plan = JSON.parse(readFileSync(planPath, 'utf8'));
-  } catch (err) {
-    throw new Error(`Cannot read ${planPath}: ${err.message}`);
+
+  if (!plan) {
+    throw new Error(`Domain ${domain} has no plan.json. Run create-plan first`);
   }
 
   const phases = asList(plan.phases);

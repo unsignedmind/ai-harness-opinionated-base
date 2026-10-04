@@ -172,13 +172,14 @@ test('general help lists every command and points to command help', () => {
     assert.match(out, /init/);
     assert.match(out, /create-domain/);
     assert.match(out, /create-plan/);
+    assert.match(out, /create-quick-step/);
     assert.match(out, /help <command>/);
   }
 });
 
 test('help <command> and <command> --help print the detailed command help', (t) => {
   const root = makeTempRoot(t);
-  for (const name of ['init', 'create-domain', 'create-plan']) {
+  for (const name of ['init', 'create-domain', 'create-plan', 'create-quick-step', 'set-status']) {
     const viaHelp = invoke(['help', name], { cwd: root });
     assert.equal(viaHelp.code, 0);
     assert.match(viaHelp.out, new RegExp(`Usage: nos ${name}`));
@@ -301,4 +302,46 @@ test('update-plan reads the updated plan and supports --dry-run', (t) => {
     deleted: { phases: [], steps: [] },
   });
   assert.ok(existsSync(path.join(root, 'specs/domain-1-auth/phases/phase-1-setup/step-2-add-ci.md')));
+});
+
+test('create-quick-step reads the step from stdin and set-status finds it', (t) => {
+  const root = makeTempRoot(t);
+  writeFile(root, '.claude/skills/nos/templates/status.xml', STATUS_XML);
+  invoke(['create-domain', '--idea', '-', '--slug', 'auth'], { cwd: root, stdin: '# Auth' });
+
+  const created = invoke(['create-quick-step', '--domain', 'domain-1-auth', '--step', '-'], {
+    cwd: root,
+    stdin: JSON.stringify({ slug: 'fix-typo', intent: 'Fix the typo' }),
+  });
+
+  assert.equal(created.err, '');
+  assert.equal(created.code, 0);
+  assert.deepEqual(created.json, {
+    action: 'create-quick-step',
+    domain: 'domain-1-auth',
+    id: 1,
+    path: 'specs/domain-1-auth/quick-steps/step-1-fix-typo.md',
+    'quick-steps': 'specs/domain-1-auth/quick-steps/quick-steps.json',
+  });
+
+  const set = invoke(['set-status', '--domain', 'domain-1-auth', '--step', '1', '--status', 'in-review'], { cwd: root });
+  assert.equal(set.code, 0);
+  assert.deepEqual(set.json, {
+    action: 'set-status',
+    domain: 'domain-1-auth',
+    plan: 'specs/domain-1-auth/quick-steps/quick-steps.json',
+    target: 'step',
+    id: 1,
+    slug: 'fix-typo',
+    previous: 'open',
+    status: 'in-review',
+    quick: true,
+  });
+});
+
+test('create-quick-step without --step is a usage error', (t) => {
+  const root = makeTempRoot(t);
+  const { code, err } = invoke(['create-quick-step', '--domain', 'domain-1-auth'], { cwd: root });
+  assert.equal(code, 2);
+  assert.match(err, /missing input: --step/i);
 });

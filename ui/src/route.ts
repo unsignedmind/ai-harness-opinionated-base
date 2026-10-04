@@ -1,4 +1,4 @@
-// Hash routes: #explore[/idea[/phase[/step]]], #board?<filters>, #backlog?<filters>, #docs[/path/in/docs].
+// Hash routes: #explore[/idea[/phase[/step]]] (quick steps: #explore/idea/quick-steps[/step]), #board?<filters>, #backlog?<filters>, #docs[/path/in/docs].
 import { DEFAULT_FILTERS, parseQuery, toQuery, type Filters } from "./filter";
 import type { Idea, Phase, Step } from "./model";
 
@@ -42,10 +42,17 @@ export function parseRoute(hash: string): Route {
 
 const seg = encodeURIComponent;
 
+// Route segment in place of the phase slug for the quick steps of an idea
+export const QUICK_SEGMENT = "quick-steps";
+
+export const hrefOfQuick = (idea: Idea) =>
+  `#explore/${seg(idea.slug)}/${QUICK_SEGMENT}`;
+
 export function hrefOf(x: Idea | Phase | Step): string {
   if (x.kind === "idea") return `#explore/${seg(x.slug)}`;
   if (x.kind === "phase") return `#explore/${seg(x.idea.slug)}/${seg(x.slug)}`;
-  return `#explore/${seg(x.idea.slug)}/${seg(x.phase.slug)}/${seg(x.slug)}`;
+  const group = x.phase ? seg(x.phase.slug) : QUICK_SEGMENT;
+  return `#explore/${seg(x.idea.slug)}/${group}/${seg(x.slug)}`;
 }
 
 export const hrefOfDoc = (path: string) =>

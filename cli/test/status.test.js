@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createDomain } from '../src/domain.js';
 import { createPlan } from '../src/plan.js';
+import { createQuickStep } from '../src/quick-step.js';
 import { readValidStatuses, setStatus, STATUS_FILE_PATH } from '../src/status.js';
 import { makeTempRoot, readJson, writeFile, STATUS_XML } from './helpers.js';
 
@@ -134,4 +135,34 @@ test('rejects missing inputs, domains without a plan and a missing status.xml', 
   const bare = makeTempRoot(t);
   createDomain(bare, { idea: '# X', slug: 'x' });
   assert.throws(() => setStatus(bare, { domain: 'domain-1-x', status: 'open' }), /missing .*status\.xml/i);
+});
+
+test('sets the status of a quick step, also in a domain without plan.json', (t) => {
+  const root = makeTempRoot(t);
+  writeFile(root, STATUS_FILE_PATH, STATUS_XML);
+  const { folder: domain } = createDomain(root, { idea: '# Auth', slug: 'auth' });
+  createQuickStep(root, { domain, step: { slug: 'fix-typo', intent: 'Fix' } });
+
+  const result = setStatus(root, { domain, step: '1', status: 'specified' });
+
+  assert.deepEqual(
+    [result.target, result.id, result.slug, result.previous, result.status, result.quick],
+    ['step', 1, 'fix-typo', 'open', 'specified', true],
+  );
+  assert.equal(result.planPath, path.join(root, 'specs', domain, 'quick-steps', 'quick-steps.json'));
+  assert.equal(readJson(root, `specs/${domain}/quick-steps/quick-steps.json`)[0].status, 'specified');
+  assert.throws(() => setStatus(root, { domain, step: '9', status: 'open' }), /not a quick step.*no plan\.json/i);
+  assert.throws(() => setStatus(root, { domain, status: 'open' }), /has no plan\.json/);
+});
+
+test('plan steps and quick steps of one domain are told apart by id', (t) => {
+  const { root, domain, read } = setup(t);
+  createQuickStep(root, { domain, step: { slug: 'quick', intent: 'Quick' } });
+
+  setStatus(root, { domain, step: '4', status: 'implemented' });
+  setStatus(root, { domain, step: '1', status: 'specified' });
+
+  assert.equal(readJson(root, `specs/${domain}/quick-steps/quick-steps.json`)[0].status, 'implemented');
+  assert.equal(read().phases[0].steps[0].status, 'specified');
+  assert.throws(() => setStatus(root, { domain, phase: '1', step: '4', status: 'open' }), /step 4 is not in phase 1/i);
 });

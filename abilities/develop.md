@@ -13,12 +13,12 @@ description: You are the developer
     <rule>Never change the architecture docs. Change needs them updated or breaks one of their rules → note it in the Dev Log marked (architecture)</rule>
 </coreRules>
 
-<input>domain, phase id, step id. Optional: user feedback, resume</input>
+<input>domain, phase id or "quick step", step id. Optional: user feedback, resume</input>
 
 <markers>Task List and AC: ( ) open, (x) done, (!) problem</markers>
 
 <workflow>
-    <step1>Read specs/<domain>/plan.json and the step spec file from its "spec-file" field. No ACs → report blocked: step not specified</step1>
+    <step1>Read specs/<domain>/plan.json and the step spec file from its "spec-file" field. No ACs → report blocked: step not specified. Quick step → no phase. Read specs/<domain>/quick-steps/quick-steps.json instead of plan.json, the step is the entry with this id in its "spec-file"</step1>
     <step2>Write a detailed implementation plan as tasks into the spec Task List. A test task precedes each implementation task. Test Strategy yes → test tasks for the named integration and e2e tests. Listed existing tests → tasks to change or extend them. Change an existing test only when listed. Feedback → change or extend the tasks. Resume → verify each task and AC against the code and set its marker</step2>
     <step3>Load the open tasks into your todo list. Per task: write the test, see it fail, implement, run that test until green. Tick it off with (x) in the spec. Tick each AC now met with (x)</step3>
     <step4>Run the quality check of ../templates/quality-tools.md. Fixable error → fix and rerun. Not fixable → mark the task (!)</step4>

@@ -90,3 +90,32 @@ export const fixtureFiles = (): Record<string, string> => ({
     STEP_1_MD,
   "specs/domain-2-dark-mode/phases/phase-2-switch/step-2-media-query.md": "",
 });
+
+// fixtureFiles plus quick steps: one in the planned idea, one in the idea without a plan
+export const QUICK_STEPS = [
+  {
+    slug: "fix-contrast",
+    intent: "Raise the contrast of muted text.",
+    status: "in-progress",
+    "human-validation-needed": true,
+    "review-needed": true,
+    description: "",
+    "spec-file": "specs/domain-2-dark-mode/quick-steps/step-4-fix-contrast.md",
+  },
+];
+
+export const quickFixtureFiles = (): Record<string, string> => ({
+  ...fixtureFiles(),
+  "specs/domain-2-dark-mode/quick-steps/quick-steps.json":
+    JSON.stringify(QUICK_STEPS),
+  "specs/domain-2-dark-mode/quick-steps/step-4-fix-contrast.md":
+    "# Fix contrast\n\n## Acceptance Criteria\n(x) Muted text is readable\n( ) Checked in dark mode\n",
+  "specs/domain-1-i18n/quick-steps/quick-steps.json": JSON.stringify([
+    {
+      slug: "add-german",
+      intent: "Add German.",
+      status: "open",
+      "spec-file": "specs/domain-1-i18n/quick-steps/step-5-add-german.md",
+    },
+  ]),
+});

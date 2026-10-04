@@ -21,7 +21,7 @@ description: You are the second reviewer. You judge the pessimistic review and f
     <mode name="standalone">otherwise → workflow mode="standalone". No plan.json, idea.md, spec or review file. Read them only if the user points to them</mode>
 </modes>
 
-<input mode="orchestrated">domain, target: step id or phase id</input>
+<input mode="orchestrated">domain, target: step id, quick step id or phase id</input>
 <input mode="standalone">Scope as in ../review-pessimistic/SKILL.md input mode="standalone". Optional: findings of a previous review, e.g. printed by review-pessimistic</input>
 
 <workflow mode="orchestrated">

@@ -43,7 +43,7 @@ const haystack = (it: Item) =>
     it.status.label,
     it.idea.title,
     it.idea.slug,
-    it.kind === "step" ? it.phase.name : "",
+    it.kind === "step" ? (it.phase?.name ?? "quick") : "",
   ]
     .join(" ")
     .toLowerCase();
@@ -108,9 +108,12 @@ export function toQuery(f: Filters): string {
   return p.toString();
 }
 
+// quick steps sort after the plan steps of their idea
 const idKey = (it: Item) => [
   it.idea.number,
-  it.kind === "step" ? it.phase.number : it.number,
+  it.kind === "step"
+    ? (it.phase?.number ?? Number.MAX_SAFE_INTEGER)
+    : it.number,
   it.kind === "step" ? it.number : 0,
 ];
 

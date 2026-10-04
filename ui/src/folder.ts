@@ -60,6 +60,13 @@ export async function readSpecsFolder(
         await read(h, path);
       else if (h.kind === "directory" && h.name === "phases")
         await walkPhases(h, path);
+      else if (h.kind === "directory" && h.name === "quick-steps")
+        for (const q of await children(h))
+          if (
+            q.kind === "file" &&
+            (q.name === "quick-steps.json" || q.name.endsWith(".md"))
+          )
+            await read(q, `${path}/${q.name}`);
     }
   }
   return files;

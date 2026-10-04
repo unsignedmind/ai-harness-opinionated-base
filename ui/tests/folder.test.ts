@@ -40,15 +40,22 @@ const specs: Tree = {
     phases: {
       "phase-1-x": { "step-1-a.md": "# A", "draft.txt": "skip" },
     },
+    "quick-steps": {
+      "quick-steps.json": "[]",
+      "step-2-q.md": "# Q",
+      "notes.txt": "skip",
+    },
   },
   "domain-2-dark": { "idea.md": "# Idea: dark" },
 };
 
-test("reads idea.md, plan.json and phase markdown of every domain folder", async () => {
+test("reads idea.md, plan.json, phase markdown and quick steps of every domain folder", async () => {
   expect(await readSpecsFolder(dir("specs", specs))).toStrictEqual({
     "specs/domain-1-i18n/idea.md": "# Idea: i18n",
     "specs/domain-1-i18n/plan.json": "{}",
     "specs/domain-1-i18n/phases/phase-1-x/step-1-a.md": "# A",
+    "specs/domain-1-i18n/quick-steps/quick-steps.json": "[]",
+    "specs/domain-1-i18n/quick-steps/step-2-q.md": "# Q",
     "specs/domain-2-dark/idea.md": "# Idea: dark",
   });
 });

@@ -3,7 +3,7 @@ import { test, expect, beforeEach } from "vitest";
 import { buildModel } from "../src/model";
 import { kanban } from "../src/views/kanban";
 import { itemId, pill, rollup } from "../src/views/parts";
-import { fixtureFiles } from "./fixtures";
+import { fixtureFiles, quickFixtureFiles } from "./fixtures";
 
 const model = () => buildModel(fixtureFiles());
 const mount = (html: string) => {
@@ -125,4 +125,27 @@ test("rollup counts items per status in lifecycle order", () => {
     [...root.querySelectorAll(".pill")].map((p) => p.textContent),
   ).toStrictEqual(["1 in review", "1 done", "1 other"]);
   expect(mount(rollup([])).textContent).toBe("no steps");
+});
+
+test("quick step cards carry a quick badge and a Quick path", () => {
+  const root = mount(
+    kanban(buildModel(quickFixtureFiles()).steps, { where: true }),
+  );
+  const cards = [...root.querySelectorAll<HTMLElement>(".kcard")];
+  const quick = cards.filter((c) => c.querySelector(".quick"));
+  expect(quick.map((c) => c.querySelector(".id")?.textContent)).toStrictEqual([
+    "S5",
+    "S4",
+  ]);
+  const contrast = quick.find((c) => c.textContent?.includes("Fix contrast"))!;
+  expect(contrast.closest<HTMLElement>(".col")?.dataset.status).toBe(
+    "in-progress",
+  );
+  expect(contrast.querySelector(".path")?.textContent).toBe(
+    "Dark mode › Quick",
+  );
+  expect(contrast.dataset.href).toBe(
+    "#explore/dark-mode/quick-steps/fix-contrast",
+  );
+  expect(cards.length - quick.length).toBe(3);
 });

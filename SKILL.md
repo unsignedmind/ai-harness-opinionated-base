@@ -28,6 +28,10 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
             <description>this skill plans a rough idea into phases(collection of steps) and saves it to a plan.json</description>
             <skill>./abilities/plan.md</skill>
         </ability>
+        <ability name="quick-step">
+            <description>this skill creates a quick step: one step without a plan, allocated to an existing or new domain</description>
+            <skill>./abilities/quick-step.md</skill>
+        </ability>
         <ability name="specify">
             <description>this skill writes the description and acceptance criteria of a step</description>
             <skill>./abilities/specify.md</skill>

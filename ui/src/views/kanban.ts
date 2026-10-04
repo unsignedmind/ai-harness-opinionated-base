@@ -12,6 +12,7 @@ import {
   dots,
   hvnBadge,
   itemId,
+  quickBadge,
   keyPill,
   labelChips,
   pill,
@@ -27,11 +28,14 @@ export type KanbanOptions = {
 
 const path = (it: Item) =>
   it.kind === "step"
-    ? `${it.idea.title} › P${it.phase.number} ${it.phase.name}`
+    ? it.phase
+      ? `${it.idea.title} › P${it.phase.number} ${it.phase.name}`
+      : `${it.idea.title} › Quick`
     : it.idea.title;
 
 function card(it: Item, o: KanbanOptions) {
   const meta = [
+    it.kind === "step" ? quickBadge(it.quick) : "",
     it.status.flagged ? pill(it.status) : "",
     it.kind === "step" ? progressText("AC", it.ac, "ac") : dots(it.steps),
     hvnBadge(it.hvn),

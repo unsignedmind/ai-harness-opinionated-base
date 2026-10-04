@@ -53,6 +53,11 @@ export const hvnBadge = (on: boolean) =>
     ? '<span class="hvn" title="human validation needed">👁 human check</span>'
     : "";
 
+export const quickBadge = (on: boolean) =>
+  on
+    ? '<span class="quick" title="quick step: a single step outside the plan">⚡ quick</span>'
+    : "";
+
 export const plural = (n: number, word: string) =>
   `${n} ${word}${n === 1 ? "" : "s"}`;
 

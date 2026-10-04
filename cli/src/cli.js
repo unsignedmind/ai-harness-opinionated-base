@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import { ensureSpecs } from './config.js';
 import { createDomain } from './domain.js';
 import { createPlan } from './plan.js';
+import { createQuickStep } from './quick-step.js';
 import { setStatus } from './status.js';
 import { updatePlan } from './update-plan.js';
 
@@ -12,15 +13,16 @@ export const USAGE = `nos - file manager for the nos harness
 Usage: nos <command> [options]
 
 Commands:
-  init            Create specs/ and specs/config.json if missing
-  create-domain   Reserve a domain id and create specs/domain-<id>-<slug>/idea.md
-  create-plan     Save a plan.json in a domain and create its phase folders and step files
-  update-plan     Save an updated plan.json and create, move or delete phase folders and step files
-  set-status      Change the status of a plan, phase or step in plan.json
-  help <command>  Show detailed help for a command
+  init               Create specs/ and specs/config.json if missing
+  create-domain      Reserve a domain id and create specs/domain-<id>-<slug>/idea.md
+  create-plan        Save a plan.json in a domain and create its phase folders and step files
+  update-plan        Save an updated plan.json and create, move or delete phase folders and step files
+  create-quick-step  Add a quick step (no plan) to specs/<domain>/quick-steps/
+  set-status         Change the status of a plan, phase, step or quick step
+  help <command>     Show detailed help for a command
 
 Options:
-  -h, --help      Show help (after a command: help for that command)
+  -h, --help         Show help (after a command: help for that command)
 
 Slugs are never generated: they must be lowercase kebab-case (e.g. user-auth).
 Pass "-" to read an input from stdin. Results are printed as JSON.
@@ -156,14 +158,49 @@ Example:
     }
   }`;
 
+const CREATE_QUICK_STEP_HELP = `Usage: nos create-quick-step --domain <domain-<id>-<slug>> --step <file|-> [--root <dir>]
+
+Add a quick step to an existing domain. A quick step is a single step outside any plan.
+
+  1. Reserves a step id (same counter as plan steps, so ids stay unique)
+  2. Creates specs/<domain>/quick-steps/step-<id>-<slug>.md (empty)
+  3. Appends the step to specs/<domain>/quick-steps/quick-steps.json with its "spec-file"
+     filled and status "open"
+
+Options:
+  --domain <name>  Domain folder name, e.g. domain-1-user-auth        (required)
+  --step <file|->  Quick step JSON file, or "-" to read it from stdin (required)
+  --root <dir>     Project root containing specs/ (default: current directory)
+
+Quick step JSON ("slug" and "intent" required, other fields are kept as-is):
+  {
+    "slug": "fix-login-typo",
+    "intent": "Fix the typo on the login button",
+    "description": "",
+    "human-validation-needed": false,
+    "review-needed": true
+  }
+
+Example:
+  nos create-quick-step --domain domain-1-user-auth --step -
+  {
+    "action": "create-quick-step",
+    "domain": "domain-1-user-auth",
+    "id": 7,
+    "path": "specs/domain-1-user-auth/quick-steps/step-7-fix-login-typo.md",
+    "quick-steps": "specs/domain-1-user-auth/quick-steps/quick-steps.json"
+  }`;
+
 const SET_STATUS_HELP = `Usage: nos set-status --domain <domain-<id>-<slug>> [--phase <id>] [--step <id>] --status <status> [--root <dir>]
 
-Change a status in specs/<domain>/plan.json.
+Change a status in specs/<domain>/plan.json or of a quick step.
 
   --domain only           sets the status of the plan
   --phase <id>            sets the status of that phase
   --step <id>             sets the status of that step (ids are unique, --phase is optional;
                           when given, the step must belong to that phase)
+                          without --phase, a step not in plan.json is looked up in
+                          specs/<domain>/quick-steps/quick-steps.json ("quick": true in the result)
 
 The status must be listed in .claude/skills/nos/templates/status.xml:
 <plans> for the plan, <phases> for phases, <steps> for steps.
@@ -266,6 +303,21 @@ const COMMANDS = {
       };
     },
   },
+  'create-quick-step': {
+    help: CREATE_QUICK_STEP_HELP,
+    options: { domain: { type: 'string' }, step: { type: 'string' }, root: { type: 'string' } },
+    required: ['domain', 'step'],
+    execute(values, io, root) {
+      const result = createQuickStep(root, { domain: values.domain, step: readInput(values.step, io) });
+      return {
+        action: 'create-quick-step',
+        domain: result.domain,
+        id: result.id,
+        path: rel(root, result.path),
+        'quick-steps': rel(root, result.quickStepsPath),
+      };
+    },
+  },
   'set-status': {
     help: SET_STATUS_HELP,
     options: {
@@ -287,6 +339,7 @@ const COMMANDS = {
         ...(result.slug !== undefined && { slug: result.slug }),
         previous: result.previous ?? null,
         status: result.status,
+        ...(result.quick && { quick: true }),
       };
     },
   },

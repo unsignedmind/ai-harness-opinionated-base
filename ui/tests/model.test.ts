@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
 
 import { buildModel } from "../src/model";
-import { fixtureFiles } from "./fixtures";
+import { fixtureFiles, quickFixtureFiles } from "./fixtures";
 
 const model = () => buildModel(fixtureFiles());
 const dark = () => model().ideas.find((i) => i.slug === "dark-mode")!;
@@ -61,7 +61,8 @@ test("steps are numbered from their spec file, else by position in the plan", ()
 
 test("steps link back to their phase and idea and inherit plan labels", () => {
   const s = dark().steps[1];
-  expect(s.phase.slug).toBe("switch");
+  expect(s.phase?.slug).toBe("switch");
+  expect(s.quick).toBe(false);
   expect(s.idea.slug).toBe("dark-mode");
   expect(s.labels).toStrictEqual(["ui", "css"]);
 });
@@ -137,4 +138,37 @@ test("an idea folder with only plan.json takes its title from the plan", () => {
   const files = fixtureFiles();
   delete files["specs/domain-2-dark-mode/idea.md"];
   expect(buildModel(files).ideas[1].title).toBe("Dark mode");
+});
+
+test("quick steps belong to their idea without a phase and sort into the steps", () => {
+  const m = buildModel(quickFixtureFiles());
+  const [i18n, dark] = m.ideas;
+  const q = dark.quickSteps[0];
+  expect([q.number, q.slug, q.title, q.quick, q.phase]).toStrictEqual([
+    4,
+    "fix-contrast",
+    "Fix contrast",
+    true,
+    null,
+  ]);
+  expect([q.status.key, q.hvn, q.ac]).toStrictEqual([
+    "in-progress",
+    true,
+    { done: 1, total: 2 },
+  ]);
+  expect(dark.steps.map((s) => s.number)).toStrictEqual([1, 2, 3, 4]);
+  expect(dark.phases.flatMap((p) => p.steps)).not.toContain(q);
+  expect(q.labels).toStrictEqual(["ui", "css"]);
+  expect(i18n.plan).toBeNull();
+  expect(i18n.quickSteps.map((s) => s.slug)).toStrictEqual(["add-german"]);
+  expect(m.steps).toHaveLength(5);
+});
+
+test("invalid quick-steps.json shows as an error on the idea", () => {
+  const m = buildModel({
+    "specs/domain-1-x/idea.md": "# X",
+    "specs/domain-1-x/quick-steps/quick-steps.json": "{",
+  });
+  expect(m.ideas[0].error).toMatch(/^quick-steps\.json: /);
+  expect(m.ideas[0].quickSteps).toStrictEqual([]);
 });

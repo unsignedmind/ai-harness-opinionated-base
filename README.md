@@ -45,7 +45,7 @@ open ──► in-specification ──► specified ──► in-progress ──
 ```
 - The orchestrator is the backbone of the loop capability. It enables full implementation runs with dozens of contexts to be run overnight. 
 - The Specs UI is an addition to the Orchestrator Chat, allowing users to browse and track their current progress.
-- This process is designed for larger implementations; for quick fixes, it is overkill.
+- This process is designed for larger implementations. For small changes use a quick step (QUICK): one step without idea and plan, through the same specify → develop → review cycle.
 
 ### Customizable
 - This readme explains how this harness works and what its components are.
@@ -106,9 +106,10 @@ The orchestrator asks:
 What do you want to do?
 A - Document an idea [IDEA]
 B - Create a plan from an idea [PLAN]
-C - Run or continue a plan [RUN]
-D - Improve project quality and docs: architecture docs, guardrails, tests [ARCHITECT]
-E - Set up or update nos for this project: specs folder, config, quality tools [SETUP]
+C - Run or continue a plan or quick step [RUN]
+D - Quick step: one small change straight to specify, develop, review [QUICK]
+E - Improve project quality and docs: architecture docs, guardrails, tests [ARCHITECT]
+F - Set up or update nos for this project: specs folder, config, quality tools [SETUP]
 ```
 
 Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
@@ -128,7 +129,19 @@ Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
    ```
    nos now works through every step and phase.
 
-Each option can also be started on its own. PLAN lists ideas without a plan. RUN lists all plans that are not done.
+Each option can also be started on its own. PLAN lists ideas without a plan. RUN lists all plans and quick steps that are not done.
+
+### Quick step (QUICK)
+
+Outside the typical path. For a small change that needs no idea and no plan. A quick step is one step ticket in a domain's `quick-steps/` folder that runs through the normal step cycle: specify + spec-review → develop → reviews → done.
+
+1. QUICK offers to continue an unfinished quick step, or to create a new one.
+2. Tell nos what you want. A rough intent is enough; specify works out the details with you.
+3. Choose the mode:
+   - **AUTO**: nos picks the best fitting domain (or creates one) and runs the quick step in AUTO mode.
+   - **MANUAL**: nos shows the matching domains with a suggestion and `NEW` (with a suggested name you can change). You choose. Then you choose AUTO or MANUAL for the run.
+4. A new domain gets an `idea.md` with your intent and a note that the quick step flow generated it.
+5. The quick step runs like a plan step: same statuses, parks, `human-validation-needed` and `review-needed`. There is no phase and no phase review. PAUSE keeps the status; continue later via QUICK or RUN.
 
 ### Project quality and docs (ARCHITECT)
 
@@ -178,7 +191,7 @@ D - Pause the plan [PAUSE]
 - **REJECT (specified step)**: the step goes back to `in-specification`. Specify reworks the description and ACs with your feedback, then spec-review checks them.
 - **REJECT (reviewed step, or implemented step without review)**: the step goes back to `in-specification` with your feedback. Specify updates the ACs if needed and spec-review checks them, then develop runs again, and both reviews too when `review-needed` is `true`.
 - **REJECT (phase)**: the planner adds a new **fix phase** directly after it, made from your feedback. The fix phase runs the full cycle and always asks you to validate it.
-- **PAUSE**: the plan becomes `on-hold`. Start it again later with RUN.
+- **PAUSE**: the plan becomes `on-hold`. Start it again later with RUN. A quick step keeps its status; continue it with QUICK or RUN.
 
 ### Interruptions
 
@@ -200,10 +213,13 @@ specs/
 └── domain-1-user-auth/
     ├── idea.md                          the idea
     ├── plan.json                        phases, steps, statuses
-    └── phases/
-        └── phase-1-data-model/
-            ├── step-1-user-table.md     spec: description, ACs, spec log, test strategy, tasks, dev log, review
-            └── review.md                phase review
+    ├── phases/
+    │   └── phase-1-data-model/
+    │       ├── step-1-user-table.md     spec: description, ACs, spec log, test strategy, tasks, dev log, review
+    │       └── review.md                phase review
+    └── quick-steps/
+        ├── quick-steps.json             quick steps and their statuses
+        └── step-7-fix-typo.md           quick step spec, same structure as a step spec
 ```
 
 ```
@@ -231,6 +247,7 @@ The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Ch
 ├── abilities/                      abilities, each run as its own subagent
 │   ├── setup.md
 │   ├── idea.md
+│   ├── quick-step.md
 │   ├── plan.md
 │   ├── specify.md
 │   ├── spec-review.md
@@ -308,6 +325,10 @@ Not part of the run cycle. Started from the menu (SETUP), or offered at start wh
 ### abilities/idea.md: idea 💡
 
 Asks you focused questions until the idea is ready for planning. It generates a slug and saves the idea with `nos create-domain`, which creates `specs/domain-<id>-<slug>/idea.md`. It reports the domain folder. Its questions reach you through the orchestrator. Optional input: a starting context, e.g. tech debt entries handed over by the architect.
+
+### abilities/quick-step.md: quick step ⚡
+
+Not part of the plan flow. Started from the menu (QUICK). Gets your intent (a rough one is fine, it only has to be clear enough to pick a domain) and asks AUTO or MANUAL. AUTO: picks the best fitting domain itself, or creates one. MANUAL: lists the matching domains with a suggestion plus `NEW`, and you choose; then asks the mode of the run. A new domain is created with `nos create-domain` and an `idea.md` holding the intent and a "generated by the quick step flow" note. Saves the step with `nos create-quick-step`. Returns domain, step id and run mode; the orchestrator then runs the step cycle for it. specify, spec-review, develop and both reviewers read `quick-steps/quick-steps.json` instead of `plan.json` for a quick step.
 
 ### abilities/plan.md: implementation architect and planner 🏗️
 
@@ -434,14 +455,15 @@ Used in ACs, the Task List and review findings:
 | `nos init` | setup | creates `specs/` and `specs/config.json` if missing | new domain id, folder, `idea.md` |
 | `nos create-plan --domain <d> --plan <file>` | plan (create) | saves `plan.json`, creates phase folders and step files |
 | `nos update-plan --domain <d> --plan <file>` | plan (extend, revise) | saves the changed plan, creates/moves/deletes phases and steps |
-| `nos set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | orchestrator | changes one status, checked against the matching `status.xml` section |
+| `nos create-quick-step --domain <d> --step <file>` | quick-step | new step id, quick step file, entry in `quick-steps/quick-steps.json` |
+| `nos set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | orchestrator | changes one status, checked against the matching `status.xml` section. A step id not in `plan.json` is looked up in the quick steps |
 
 ### Who may do what
 
 | Role | Writes code | Writes spec | Changes status | Commits |
 | --- | --- | --- | --- | --- |
 | orchestrator | no | no | yes (nos) | no |
-| idea / plan | no | idea / plan (nos) | no | no |
+| idea / plan / quick-step | no | idea / plan / quick step (nos) | no | no |
 | specify | no | Description, ACs, Spec Log, Test Strategy. Read-only once done | no | no |
 | spec-review | no | Description, ACs, Spec Log, Test Strategy | no | no |
 | develop | yes | Task List, AC ticks, Dev Log | no | yes (incl. spec) |
@@ -461,12 +483,13 @@ Used in ACs, the Task List and review findings:
 | Block | Purpose |
 | --- | --- |
 | `<rules>` | Every ability runs in a new subagent. Statuses change only via `nos set-status`. Questions from subagents are relayed to you and the answers sent back to the same subagent. Reports use simple language. Every question uses the `A - text [KEY]` format |
-| `<start>` | The IDEA / PLAN / RUN / ARCHITECT menu |
+| `<start>` | The IDEA / PLAN / RUN / QUICK / ARCHITECT / SETUP menu |
 | `<option name="idea">` | Runs idea, then offers PLAN |
 | `<option name="architect">` | Runs architect. Tech debt handed over → offers an idea for all bugs or one per bug |
 | `<option name="plan">` | Picks a domain without a plan, runs plan (create), then offers RUN |
+| `<option name="quick">` | Continues an unfinished quick step or runs quick-step for a new one, then runs the step cycle for it |
 | `<modes>` | Defines AUTO and MANUAL through the `mode` attribute on each `<park>` |
-| `<option name="run">` | Picks a plan and a mode, sets the plan `in-progress`, runs every unfinished phase, sets the plan `done` |
+| `<option name="run">` | Picks a plan or quick step and a mode. Quick step → step cycle only. Plan → sets the plan `in-progress`, runs every unfinished phase, sets the plan `done` |
 | `<cycle name="phase">` | Runs all steps, then reviews the phase as a whole |
 | `<cycle name="step">` | specify → spec-review → develop → review-pessimistic → review-fixing |
 | `<park>` | Stop, explain, and ask GO / switch mode / REJECT / PAUSE |
@@ -631,18 +654,18 @@ This serves `dev.html` on http://localhost:5180. The server reads `specs/` and t
 
 | View | Shows |
 | --- | --- |
-| **Explore** | Tree of ideas → phases → steps on the left. On the right: details (idea.md, rendered spec, AC/task progress) and a kanban per idea or phase |
+| **Explore** | Tree of ideas → phases → steps on the left, plus a "Quick steps" node per idea that has quick steps. On the right: details (idea.md, rendered spec, AC/task progress) and a kanban per idea, phase or the quick steps of an idea |
 | **Board** | One kanban of all steps or phases across all ideas. There is one column per status. Step boards include `in specification` and `specified`; phase boards only show them when used. `on-hold` and unknown statuses appear only when used |
 | **Backlog** | The same items as a sortable table (id, title, where, status, AC progress) with status tiles |
 | **Docs** | The docs folder (`"spec-ui": { "docs-folder": "docs" }` in `specs/config.json`, relative to the repo root) as a tree of its own folders and text files. Markdown is rendered, and relative links between docs work. Other text is shown as code. A folder shows its `index.md`/`README.md` and its contents |
 
-Board and Backlog can be filtered by label, status, idea and free text. Values of one kind combine with OR, different kinds with AND. Filters live in the URL hash (`#board?status=in-review&labels=ui`), so every view can be bookmarked. Cards show AC and task progress, which is counted from the `( )`/`(x)` markers, and a badge for human validation. Unknown statuses are flagged.
+Board and Backlog can be filtered by label, status, idea and free text. Values of one kind combine with OR, different kinds with AND. Filters live in the URL hash (`#board?status=in-review&labels=ui`), so every view can be bookmarked. Cards show AC and task progress, which is counted from the `( )`/`(x)` markers, a badge for human validation and a ⚡ quick badge for quick steps. Quick steps show in every step kanban and in the backlog next to plan steps (path `<idea> › Quick`). Unknown statuses are flagged.
 
 ### How it works
 
 | File | Role |
 | --- | --- |
-| `src/model.ts` | Pure: turns `path → text` of `specs/` into ideas → phases → steps. Parses `plan.json`, reads the spec sections, counts markers |
+| `src/model.ts` | Pure: turns `path → text` of `specs/` into ideas → phases → steps. Parses `plan.json` and `quick-steps/quick-steps.json` (quick steps: `phase` null, `quick` true), reads the spec sections, counts markers |
 | `src/status.ts` | The statuses from `templates/status.xml` and their board order |
 | `src/serve-specs.ts` + `src/main.ts` | Dev server: a Vite plugin reads `specs/` on the host with `readSpecsFolder` and serves it at `/__specs` (`/` is `dev.html`); `/__docs` serves the docs folder (`readDocs`); it pushes `specs:changed` / `docs:changed` when a file changes, and the page fetches again |
 | `src/folder.ts` + `src/handle-store.ts` + `src/standalone.ts` | Standalone: reads the picked folder (specs and docs) and remembers the handle in IndexedDB |
@@ -697,7 +720,8 @@ Without linking: `node bin/nos.js <command>`. Help: `nos help <command>` or `nos
 | `init` | creates `specs/` and `specs/config.json` if missing. Never changes an existing config | a domain id, creates `specs/domain-<id>-<slug>/idea.md` (and `specs/config.json` if missing) |
 | `create-plan --domain <d> --plan <file\|->` | saves `plan.json`, creates phase folders and empty step files, fills `spec-file`. One plan per domain |
 | `update-plan --domain <d> --plan <file\|-> [--dry-run] [--force]` | saves a changed plan, creates/moves/deletes phases and steps. Deleting files with content needs `--force` |
-| `set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | changes one status. Plan, phase or step depends on the arguments. Checked against `templates/status.xml` |
+| `create-quick-step --domain <d> --step <file\|->` | reserves a step id, creates `quick-steps/step-<id>-<slug>.md` and adds the step to `quick-steps/quick-steps.json` |
+| `set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | changes one status. Plan, phase or step depends on the arguments. A step not in `plan.json` (without `--phase`) is looked up in the quick steps. Checked against `templates/status.xml` |
 
 ### Rules
 

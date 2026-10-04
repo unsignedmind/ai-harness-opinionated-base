@@ -2,8 +2,14 @@ import { test, expect } from "vitest";
 
 import { DEFAULT_FILTERS } from "../src/filter";
 import { buildModel } from "../src/model";
-import { hrefOf, hrefOfDoc, parseRoute, viewHref } from "../src/route";
-import { fixtureFiles } from "./fixtures";
+import {
+  hrefOf,
+  hrefOfDoc,
+  hrefOfQuick,
+  parseRoute,
+  viewHref,
+} from "../src/route";
+import { fixtureFiles, quickFixtureFiles } from "./fixtures";
 
 test("empty or unknown hash opens explore overview", () => {
   for (const h of ["", "#", "#nope/x"])
@@ -45,6 +51,14 @@ test("hrefOf links ideas, phases and steps into explore", () => {
   expect(hrefOf(idea)).toBe("#explore/dark-mode");
   expect(hrefOf(idea.phases[1])).toBe("#explore/dark-mode/switch");
   expect(hrefOf(idea.steps[1])).toBe("#explore/dark-mode/switch/media-query");
+});
+
+test("quick steps link into the quick-steps segment of their idea", () => {
+  const idea = buildModel(quickFixtureFiles()).ideas[1];
+  expect(hrefOf(idea.quickSteps[0])).toBe(
+    "#explore/dark-mode/quick-steps/fix-contrast",
+  );
+  expect(hrefOfQuick(idea)).toBe("#explore/dark-mode/quick-steps");
 });
 
 test("viewHref appends a query only when filters differ from default", () => {
