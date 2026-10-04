@@ -1,6 +1,11 @@
 import { test, expect } from "vitest";
 
-import { readSpecsFolder, type DirLike } from "../src/folder";
+import {
+  locateSpecs,
+  readDocs,
+  readSpecsFolder,
+  type DirLike,
+} from "../src/folder";
 
 // In-memory stand-in for a File System Access directory handle: nested objects are folders,
 // strings are files.
@@ -63,4 +68,66 @@ test("an empty specs/ folder is fine and yields no files", async () => {
   expect(
     await readSpecsFolder(dir("specs", { "config.json": "{}" })),
   ).toStrictEqual({});
+});
+
+// ── docs ──
+
+const repo = (config: object | null) =>
+  dir("repo", {
+    specs: config ? { ...specs, "config.json": JSON.stringify(config) } : specs,
+    docs: {
+      "index.md": "# Docs",
+      "logo.png": "binary",
+      ".obsidian": { "x.json": "{}" },
+      node_modules: { "a.md": "" },
+      guides: { "setup.md": "# Setup", "diagram.pdf": "binary" },
+      images: { "a.png": "binary" },
+    },
+    handbook: { team: { "rules.txt": "be nice" } },
+  });
+const docsOf = async (picked: DirLike) => {
+  const { specs, root } = await locateSpecs(picked);
+  return readDocs(specs, root);
+};
+
+test("reads the text files under docs/ by default and skips the rest", async () => {
+  expect(await docsOf(repo(null))).toStrictEqual({
+    folder: "docs",
+    files: { "guides/setup.md": "# Setup", "index.md": "# Docs" },
+  });
+});
+
+test("spec-ui.docs-folder names the folder, nested and with either slash", async () => {
+  expect(
+    await docsOf(repo({ "spec-ui": { "docs-folder": "./handbook\\team/" } })),
+  ).toStrictEqual({
+    folder: "handbook/team",
+    files: { "rules.txt": "be nice" },
+  });
+});
+
+test("a missing docs folder is reported, not thrown", async () => {
+  const d = await docsOf(repo({ "spec-ui": { "docs-folder": "wiki" } }));
+  expect(d.files).toStrictEqual({});
+  expect(d.error).toMatch(/No wiki\/ folder in repo\//);
+});
+
+test("docs-folder may not leave the repo", async () => {
+  const d = await docsOf(repo({ "spec-ui": { "docs-folder": "../other" } }));
+  expect(d.error).toMatch(/inside the repo/);
+});
+
+test("with specs/ picked on its own the docs are out of reach", async () => {
+  expect((await docsOf(dir("specs", specs))).error).toMatch(
+    /Open the repo root/,
+  );
+});
+
+test("a broken config.json falls back to docs/", async () => {
+  const d = await readDocs(
+    dir("specs", { ...specs, "config.json": "{nope" }),
+    repo(null),
+  );
+  expect(d.folder).toBe("docs");
+  expect(d.error).toBeUndefined();
 });

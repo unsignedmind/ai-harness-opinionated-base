@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { test, expect } from "vitest";
 
-import { readSpecsFolder } from "../src/folder";
+import { readDocs, readSpecsFolder } from "../src/folder";
 import { buildModel } from "../src/model";
 import { nodeDir } from "../src/serve-specs";
 
@@ -24,4 +24,11 @@ test("every step names a known status and its spec file exists", async () => {
     expect(s.status.flagged, `${s.idea.folder}/${s.slug}`).toBe(false);
     if (s.specPath) expect(files[s.specPath], s.specPath).toBeDefined();
   }
+});
+
+test("the docs folder named in specs/config.json loads", async () => {
+  const repo = resolve(import.meta.dirname, "../../../../..");
+  const docs = await readDocs(nodeDir(resolve(repo, "specs")), nodeDir(repo));
+  expect(docs.error).toBeUndefined();
+  expect(Object.keys(docs.files).length).toBeGreaterThan(0);
 });

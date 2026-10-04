@@ -1,15 +1,18 @@
 // DOM wiring: render the routed view into #main, delegate clicks, keep nav and search in sync.
+import { buildDocs, type Docs } from "./docs";
 import { DEFAULT_FILTERS, type Filters } from "./filter";
 import type { Model } from "./model";
 import { parseRoute, viewHref, type View } from "./route";
 import { renderBacklog } from "./views/backlog";
 import { renderBoard } from "./views/board";
+import { renderDocs } from "./views/docs";
 import { renderExplore, type ExploreUi } from "./views/explore";
 import { plural } from "./views/parts";
 
 export type App = {
   render: () => void;
   setModel: (m: Model) => void;
+  setDocs: (d: Docs) => void;
   // html shown above the view (e.g. "reopen the folder"), null clears it
   setNotice: (html: string | null) => void;
   // name of the folder the data came from; reveals #reload
@@ -30,6 +33,7 @@ export function mountApp(
   opts: AppOptions = {},
 ): App {
   let model = initial;
+  let docs = buildDocs(null);
   let notice: string | null = null;
   const main = root.querySelector<HTMLElement>("#main")!;
   const ui: ExploreUi = {
@@ -38,10 +42,12 @@ export function mountApp(
     canPick: opts.canPick,
   };
   let lastFilters: Filters = DEFAULT_FILTERS;
+  // only board and backlog carry filters
+  const filtered = (v: View) => v === "board" || v === "backlog";
 
   function render() {
     const r = parseRoute(location.hash);
-    if (r.view !== "explore") lastFilters = r.filters;
+    if (filtered(r.view)) lastFilters = r.filters;
 
     const q =
       document.activeElement?.id === "q"
@@ -55,14 +61,16 @@ export function mountApp(
         ? renderBoard(model, r.filters)
         : r.view === "backlog"
           ? renderBacklog(model, r.filters)
-          : renderExplore(model, r, ui));
+          : r.view === "docs"
+            ? renderDocs(docs, r, ui)
+            : renderExplore(model, r, ui));
 
     for (const a of root.querySelectorAll<HTMLAnchorElement>(
       "#nav a[data-view]",
     )) {
       const v = a.dataset.view as View;
       a.classList.toggle("active", v === r.view);
-      if (v !== "explore") a.setAttribute("href", viewHref(v, lastFilters));
+      if (filtered(v)) a.setAttribute("href", viewHref(v, lastFilters));
     }
     const status = root.querySelector("#status");
     if (status)
@@ -102,7 +110,7 @@ export function mountApp(
     const t = e.target as HTMLInputElement;
     if (t.id !== "q") return;
     const r = parseRoute(location.hash);
-    if (r.view === "explore") return;
+    if (!filtered(r.view)) return;
     history.replaceState(
       null,
       "",
@@ -120,6 +128,10 @@ export function mountApp(
     render,
     setModel(m) {
       model = m;
+      render();
+    },
+    setDocs(d) {
+      docs = d;
       render();
     },
     setNotice(html) {

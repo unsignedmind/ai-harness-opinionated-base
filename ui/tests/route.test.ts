@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 
 import { DEFAULT_FILTERS } from "../src/filter";
 import { buildModel } from "../src/model";
-import { hrefOf, parseRoute, viewHref } from "../src/route";
+import { hrefOf, hrefOfDoc, parseRoute, viewHref } from "../src/route";
 import { fixtureFiles } from "./fixtures";
 
 test("empty or unknown hash opens explore overview", () => {
@@ -52,4 +52,18 @@ test("viewHref appends a query only when filters differ from default", () => {
   expect(viewHref("backlog", { ...DEFAULT_FILTERS, q: "x" })).toBe(
     "#backlog?q=x",
   );
+});
+
+test("docs paths name a file or folder inside the docs folder", () => {
+  expect(parseRoute("#docs")).toStrictEqual({
+    view: "docs",
+    filters: DEFAULT_FILTERS,
+  });
+  expect(parseRoute("#docs/guides/my%20notes.md")).toStrictEqual({
+    view: "docs",
+    doc: "guides/my notes.md",
+    filters: DEFAULT_FILTERS,
+  });
+  expect(hrefOfDoc("guides/my notes.md")).toBe("#docs/guides/my%20notes.md");
+  expect(hrefOfDoc("")).toBe("#docs");
 });

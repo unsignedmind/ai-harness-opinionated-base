@@ -1,12 +1,13 @@
 import { test, expect, beforeEach, afterEach } from "vitest";
 
 import { mountApp, type App, type AppOptions } from "../src/app";
+import { buildDocs } from "../src/docs";
 import { buildModel } from "../src/model";
 import { fixtureFiles } from "./fixtures";
 
 const shell = (files = fixtureFiles(), opts: AppOptions = {}) => {
   document.body.innerHTML = `
-    <nav id="nav"><a data-view="explore" href="#explore">Explore</a><a data-view="board" href="#board">Board</a><a data-view="backlog" href="#backlog">Backlog</a></nav>
+    <nav id="nav"><a data-view="explore" href="#explore">Explore</a><a data-view="board" href="#board">Board</a><a data-view="backlog" href="#backlog">Backlog</a><a data-view="docs" href="#docs">Docs</a></nav>
     <span id="status"></span>
     <span id="source"></span>
     <button id="pick" data-action="pick">Open folder</button>
@@ -183,4 +184,32 @@ test("with no ideas there is no empty tree panel", () => {
   shell({}, { canPick: true });
   expect(main().querySelector(".tree")).toBeNull();
   expect(main().querySelector(".explore.solo")).not.toBeNull();
+});
+
+test("docs view renders the loaded docs, its nav link keeps no filters", () => {
+  const app = shell();
+  go(app, "#board?labels=ui");
+  app.setDocs(
+    buildDocs({
+      folder: "docs",
+      files: { "guide/a.md": "# A guide", "notes/b.md": "# B" },
+    }),
+  );
+  go(app, "#docs/guide");
+  const nav = (v: string) =>
+    document.querySelector<HTMLAnchorElement>(`#nav a[data-view="${v}"]`)!;
+  expect(nav("docs").classList.contains("active")).toBe(true);
+  expect(nav("docs").getAttribute("href")).toBe("#docs");
+  expect(nav("board").getAttribute("href")).toBe("#board?labels=ui");
+  expect(main().querySelector(".detail .card h3")?.textContent).toBe("A guide");
+  expect(
+    main().querySelector('.node[data-href="#docs/guide/a.md"]'),
+  ).not.toBeNull();
+  main()
+    .querySelector<HTMLElement>('.node[data-toggle="docs:notes"] .tw')!
+    .click();
+  expect(window.location.hash).toBe("#docs/guide");
+  expect(
+    main().querySelector('.node[data-href="#docs/notes/b.md"]'),
+  ).not.toBeNull();
 });

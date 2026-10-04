@@ -13,6 +13,7 @@ import {
   plural,
   progressText,
   rollup,
+  treeNode,
 } from "./parts";
 
 // UI state that survives re-renders: expanded tree nodes (`idea` / `idea/phase`) and the chosen
@@ -55,21 +56,10 @@ function tree(
   ui: ExploreUi,
 ) {
   let out = "";
-  const node = (
-    href: string,
-    cls: string,
-    twisty: string,
-    id: string,
-    label: string,
-    tail: string,
-    toggle = "",
-  ) =>
-    `<div class="node ${cls}" data-href="${esc(href)}"${toggle ? ` data-toggle="${esc(toggle)}"` : ""}>
-      <span class="tw">${twisty}</span><span class="id mono">${esc(id)}</span><span class="lbl">${esc(label)}</span>${tail}</div>`;
   for (const idea of model.ideas) {
     const open = sel.idea === idea || ui.expanded.has(idea.slug);
     const isSel = sel.idea === idea && !sel.phase;
-    out += node(
+    out += treeNode(
       hrefOf(idea),
       isSel ? "sel" : "",
       idea.phases.length ? (open ? "▾" : "▸") : "·",
@@ -81,7 +71,7 @@ function tree(
     if (!open) continue;
     for (const p of idea.phases) {
       const popen = sel.phase === p || ui.expanded.has(phaseKey(p));
-      out += node(
+      out += treeNode(
         hrefOf(p),
         `lvl1${sel.phase === p && !sel.step ? " sel" : ""}`,
         p.steps.length ? (popen ? "▾" : "▸") : "·",
@@ -92,7 +82,7 @@ function tree(
       );
       if (!popen) continue;
       for (const s of p.steps)
-        out += node(
+        out += treeNode(
           hrefOf(s),
           `lvl2${sel.step === s ? " sel" : ""}`,
           "",

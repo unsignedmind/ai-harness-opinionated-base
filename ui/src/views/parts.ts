@@ -62,3 +62,17 @@ export const crumbs = (...parts: [string, string?][]) =>
       href ? `<a href="${esc(href)}">${esc(label)}</a>` : esc(label),
     )
     .join(" › ")}</div>`;
+
+// One row of a .tree: `twisty` ▸/▾ expands the `toggle` key (see app.ts), `style` e.g. an indent
+export const treeNode = (
+  href: string,
+  cls: string,
+  twisty: string,
+  id: string,
+  label: string,
+  tail: string,
+  toggle = "",
+  style = "",
+) =>
+  `<div class="node ${cls}" data-href="${esc(href)}"${toggle ? ` data-toggle="${esc(toggle)}"` : ""}${style ? ` style="${esc(style)}"` : ""}>
+      <span class="tw">${twisty}</span><span class="id mono">${esc(id)}</span><span class="lbl">${esc(label)}</span>${tail}</div>`;

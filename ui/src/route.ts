@@ -1,18 +1,20 @@
-// Hash routes: #explore[/idea[/phase[/step]]], #board?<filters>, #backlog?<filters>.
+// Hash routes: #explore[/idea[/phase[/step]]], #board?<filters>, #backlog?<filters>, #docs[/path/in/docs].
 import { DEFAULT_FILTERS, parseQuery, toQuery, type Filters } from "./filter";
 import type { Idea, Phase, Step } from "./model";
 
-export type View = "explore" | "board" | "backlog";
+export type View = "explore" | "board" | "backlog" | "docs";
 
 export type Route = {
   view: View;
   idea?: string;
   phase?: string;
   step?: string;
+  // docs: path inside the docs folder
+  doc?: string;
   filters: Filters;
 };
 
-const VIEWS: readonly View[] = ["explore", "board", "backlog"];
+const VIEWS: readonly View[] = ["explore", "board", "backlog", "docs"];
 
 export function parseRoute(hash: string): Route {
   const raw = hash.replace(/^#/, "");
@@ -23,6 +25,12 @@ export function parseRoute(hash: string): Route {
   const view = VIEWS.includes(parts[0] as View)
     ? (parts[0] as View)
     : "explore";
+  if (view === "docs") {
+    const doc = parts.slice(1).join("/");
+    return doc
+      ? { view, doc, filters: DEFAULT_FILTERS }
+      : { view, filters: DEFAULT_FILTERS };
+  }
   if (view !== "explore") return { view, filters: parseQuery(query) };
   if (parts[0] !== "explore") return { view, filters: DEFAULT_FILTERS };
   const r: Route = { view, filters: DEFAULT_FILTERS };
@@ -39,6 +47,9 @@ export function hrefOf(x: Idea | Phase | Step): string {
   if (x.kind === "phase") return `#explore/${seg(x.idea.slug)}/${seg(x.slug)}`;
   return `#explore/${seg(x.idea.slug)}/${seg(x.phase.slug)}/${seg(x.slug)}`;
 }
+
+export const hrefOfDoc = (path: string) =>
+  "#docs" + (path ? "/" + path.split("/").map(seg).join("/") : "");
 
 export function viewHref(
   view: View,

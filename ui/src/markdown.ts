@@ -10,15 +10,32 @@ export const esc = (s: unknown): string =>
       ]!,
   );
 
-export function inline(s: string): string {
+// Turns a relative link into an in-app href, or null to leave it as plain text.
+// Gets the raw href; its result is escaped.
+export type LinkResolver = (href: string) => string | null;
+
+const unesc = (s: string) =>
+  s.replace(
+    /&(amp|lt|gt|quot|#39);/g,
+    (_, e: string) =>
+      ({ amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" })[e]!,
+  );
+
+export function inline(s: string, link?: LinkResolver): string {
   let t = esc(s);
   t = t.replace(/`([^`]+)`/g, (_, c: string) => `<code>${c}</code>`);
   t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   t = t.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, "$1<em>$2</em>");
-  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label: string, href: string) =>
-    /^https?:\/\//.test(href)
-      ? `<a href="${href}" target="_blank" rel="noopener">${label}</a>`
-      : `<span class="link" title="${href}">${label}</span>`,
+  t = t.replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    (_, label: string, href: string) => {
+      if (/^https?:\/\//.test(href))
+        return `<a href="${href}" target="_blank" rel="noopener">${label}</a>`;
+      const to = link?.(unesc(href));
+      return to
+        ? `<a href="${esc(to)}">${label}</a>`
+        : `<span class="link" title="${href}">${label}</span>`;
+    },
   );
   return t;
 }
@@ -41,13 +58,17 @@ export function tableRows(text: string): string[][] {
 const CHECK = /^\s*(?:[-*]\s+)?[([]([ xX])[)\]]\s*(.*)$/;
 const ITEM = /^\s*([-*]|\d+\.)\s+/;
 
-export function renderMd(md: string | null | undefined): string {
+export function renderMd(
+  md: string | null | undefined,
+  link?: LinkResolver,
+): string {
+  const inl = (s: string) => inline(s, link);
   const lines = (md ?? "").replace(/\r\n?/g, "\n").split("\n");
   let out = "";
   let i = 0;
   const para: string[] = [];
   const flush = () => {
-    if (para.length) out += `<p>${inline(para.join(" "))}</p>`;
+    if (para.length) out += `<p>${inl(para.join(" "))}</p>`;
     para.length = 0;
   };
   while (i < lines.length) {
@@ -62,7 +83,7 @@ export function renderMd(md: string | null | undefined): string {
       i = j + 1;
     } else if ((m = /^(#{1,6})\s+(.*)$/.exec(L))) {
       flush();
-      out += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`;
+      out += `<h${m[1].length}>${inl(m[2])}</h${m[1].length}>`;
       i++;
     } else if (/^\s*(-{3,}|\*{3,})\s*$/.test(L)) {
       flush();
@@ -77,7 +98,7 @@ export function renderMd(md: string | null | undefined): string {
         out += `<div class="tw"><table>${cells
           .map((r, ri) => {
             const tag = ri === 0 ? "th" : "td";
-            return `<tr>${r.map((c) => `<${tag}>${inline(c)}</${tag}>`).join("")}</tr>`;
+            return `<tr>${r.map((c) => `<${tag}>${inl(c)}</${tag}>`).join("")}</tr>`;
           })
           .join("")}</table></div>`;
     } else if (CHECK.test(L)) {
@@ -85,7 +106,7 @@ export function renderMd(md: string | null | undefined): string {
       let items = "";
       while (i < lines.length && (m = CHECK.exec(lines[i]))) {
         const done = m[1] !== " ";
-        items += `<li class="check${done ? " done" : ""}"><span class="box">${done ? "✓" : ""}</span><span class="txt">${inline(m[2])}</span></li>`;
+        items += `<li class="check${done ? " done" : ""}"><span class="box">${done ? "✓" : ""}</span><span class="txt">${inl(m[2])}</span></li>`;
         i++;
       }
       out += `<ul class="checks">${items}</ul>`;
@@ -105,13 +126,13 @@ export function renderMd(md: string | null | undefined): string {
         items.push(item);
       }
       const tag = ordered ? "ol" : "ul";
-      out += `<${tag}>${items.map((it) => `<li>${inline(it)}</li>`).join("")}</${tag}>`;
+      out += `<${tag}>${items.map((it) => `<li>${inl(it)}</li>`).join("")}</${tag}>`;
     } else if (/^\s*>/.test(L)) {
       flush();
       const q: string[] = [];
       while (i < lines.length && /^\s*>/.test(lines[i]))
         q.push(lines[i++].replace(/^\s*>\s?/, ""));
-      out += `<blockquote>${inline(q.join(" "))}</blockquote>`;
+      out += `<blockquote>${inl(q.join(" "))}</blockquote>`;
     } else if (!L.trim()) {
       flush();
       i++;

@@ -551,6 +551,13 @@ table.list td .label {
   padding-left: 44px;
   font-size: 13px;
 }
+/* docs: indent is set per node, the empty id column is dropped */
+.docs .tree .node .id:empty {
+  display: none;
+}
+.docs .tree .node.dir .lbl {
+  font-weight: 600;
+}
 .detail {
   background: var(--panel);
   border: 1px solid var(--line);
