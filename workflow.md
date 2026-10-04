@@ -18,7 +18,6 @@
         <choice key="IDEA">Document an idea</choice>
         <choice key="PLAN">Create a plan from an idea</choice>
         <choice key="RUN">Run or continue a plan</choice>
-        <choice key="QUICK">Quickly try out an idea in a proof of concept</choice>
         <choice key="ARCHITECT">Improve project quality and docs: architecture docs, guardrails, tests</choice>
         <choice key="SETUP">Set up or update nos for this project: specs folder, config, quality tools</choice>
     </question>
@@ -40,12 +39,6 @@
     <step3>
         <do>When the plan is created and the cli commands are done: in the spec-ui folder start the dev server via dev-to-lan npm task and provide the network url e.g. 192.168.XXX.XXX:XXXX</do>
     </step3>
-</option>
-
-<option name="quick">
-    <step1>No idea given → ask for it</step1>
-    <step2>Run ability "quick-dev" with the idea in one subagent. Relay all its questions to the user and the answers back. Report preview urls</step2>
-    <step3>verdict save → Run ability "idea" with the quick-dev doc as starting context → continue like option "idea" step2. verdict drop → Report and stop</step3>
 </option>
 
 <option name="architect">

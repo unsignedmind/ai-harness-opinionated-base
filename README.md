@@ -45,7 +45,7 @@ open ──► in-specification ──► specified ──► in-progress ──
 ```
 - The orchestrator is the backbone of the loop capability. It enables full implementation runs with dozens of contexts to be run overnight. 
 - The Specs UI is an addition to the Orchestrator Chat, allowing users to browse and track their current progress.
-- This process is designed for larger implementations; for quick fixes, it is overkill. For trying out ideas fast use the quick-dev ability (QUICK).
+- This process is designed for larger implementations; for quick fixes, it is overkill.
 
 ### Customizable
 - This readme explains how this harness works and what its components are.
@@ -107,9 +107,8 @@ What do you want to do?
 A - Document an idea [IDEA]
 B - Create a plan from an idea [PLAN]
 C - Run or continue a plan [RUN]
-D - Quickly try out an idea in a proof of concept [QUICK]
-E - Improve project quality and docs: architecture docs, guardrails, tests [ARCHITECT]
-F - Set up or update nos for this project: specs folder, config, quality tools [SETUP]
+D - Improve project quality and docs: architecture docs, guardrails, tests [ARCHITECT]
+E - Set up or update nos for this project: specs folder, config, quality tools [SETUP]
 ```
 
 Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
@@ -130,18 +129,6 @@ Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
    nos now works through every step and phase.
 
 Each option can also be started on its own. PLAN lists ideas without a plan. RUN lists all plans that are not done.
-
-### Quick proof of concept (QUICK)
-
-Outside the typical path. For testing ideas fast. No plan, no specs, no reviews.
-
-1. Creates a worktree with branch `poc/<slug>` and implements the idea there.
-2. Asks once how you preview: `LOCAL` (dev server on your machine, hot reload) or `REMOTE` (`deploy-test` command from `specs/config.json`, for remote sessions). Only configured modes are offered. Reports the url.
-3. Loops: request a change → implement → preview again. Offers each time to end the loop or switch the preview mode.
-4. At the end it writes one doc: the idea, your change requests, the learnings and the code changes. Then asks `SAVE` (hand it to the idea ability) or `DROP`.
-5. Removes the worktree first, then saves or drops. The `poc/<slug>` branch stays.
-
-Works standalone too: tell Claude to follow `abilities/quick-dev/SKILL.md` with your idea.
 
 ### Project quality and docs (ARCHITECT)
 
@@ -250,8 +237,7 @@ The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Ch
 │   ├── develop.md
 │   ├── review-pessimistic/SKILL.md  also runs standalone
 │   ├── review-fixing/SKILL.md       also runs standalone
-│   ├── architect.md
-│   └── quick-dev/SKILL.md          also runs standalone
+│   └── architect.md
 ├── templates/
 │   ├── config.json                 initial id counters, empty quality tools and project commands, docs folder `docs`
 │   ├── plan.json                   plan structure
@@ -270,7 +256,7 @@ All skill files are written in minimal pseudo-XML: `<coreRules>`, `<input>`, and
 
 ### SKILL.md: the orchestrator
 
-Defines the main session's role. It only delegates, orchestrates and reports. It never implements or verifies. It must read `workflow.md` first and must not read an ability file until the workflow calls for it. It lists the abilities: setup, idea, plan, specify, spec-review, develop, review-pessimistic, review-fixing, architect, quick-dev.
+Defines the main session's role. It only delegates, orchestrates and reports. It never implements or verifies. It must read `workflow.md` first and must not read an ability file until the workflow calls for it. It lists the abilities: setup, idea, plan, specify, spec-review, develop, review-pessimistic, review-fixing, architect.
 
 #### Step and phase cycle
 
@@ -318,10 +304,6 @@ The status change of the resumed step is skipped because it already happened. Th
 ### abilities/setup.md: setup 🔧
 
 Not part of the run cycle. Started from the menu (SETUP), or offered at start when `specs/config.json` has no `quality-tools`. Runs `nos init`, detects the project's tooling, lets you confirm the commands, runs them once and writes `quality-tools` and `project-commands`. Never touches the id counters.
-
-### abilities/quick-dev/SKILL.md: prototyper ⚡
-
-Not part of the run cycle. Started from the menu (QUICK) or standalone. Works in a `poc/<slug>` worktree, skips specify and reviews, only requires the configured typecheck. Previews via the configured dev server or deploy-test command. Loops on your change requests, then documents idea and learnings. SAVE → idea ability with the doc as starting context (standalone: runs it itself; via orchestrator: the orchestrator runs it). Removes the worktree before saving or dropping.
 
 ### abilities/idea.md: idea 💡
 
@@ -465,7 +447,6 @@ Used in ACs, the Task List and review findings:
 | develop | yes | Task List, AC ticks, Dev Log | no | yes (incl. spec) |
 | review-pessimistic | no | Review | no | no |
 | review-fixing | yes | Review marks, Dev Log | no | yes |
-| quick-dev | yes, in a `poc/*` worktree | no | no | yes (`poc:`) |
 | architect | tests and test tooling only | no. Writes architecture template and doc, guardrails | no | yes (`architect`) |
 
 ### Known limitations
