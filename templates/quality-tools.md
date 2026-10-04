@@ -15,6 +15,9 @@ Project specific commands live in `specs/config.json`. The setup ability fills t
   "install": "npm install",
   "dev": "npm run dev",
   "deploy-test": "npm run deploy:test"
+},
+"spec-ui": {
+  "docs-folder": "docs"
 }
 ```
 
@@ -31,6 +34,7 @@ Project specific commands live in `specs/config.json`. The setup ability fills t
 | project-commands | install      | installs dependencies, e.g. in a fresh worktree                   |
 | project-commands | dev          | starts the local dev server                                       |
 | project-commands | deploy-test  | deploys to a test environment and prints a url                    |
+| spec-ui          | docs-folder  | docs folder shown in the spec UI (Docs), relative to the repo root |
 
 `null` or missing key → tool not available.
 

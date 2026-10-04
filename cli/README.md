@@ -184,7 +184,7 @@ $ nos set-status --domain domain-1-user-auth --step 1 --status in-review
 
 ```
 specs/
-├── config.json                 # "id-counters" (managed by nos), "quality-tools" and "project-commands" (setup ability)
+├── config.json                 # "id-counters" (managed by nos), "quality-tools", "project-commands" and "spec-ui" (setup ability)
 └── domain-1-user-auth/
     ├── idea.md
     ├── plan.json

@@ -72,7 +72,7 @@ open ──► in-specification ──► specified ──► in-progress ──
 2. Detects the tooling: package manager, `package.json` scripts, Makefile, pyproject, go.mod, …
 3. Proposes the commands per key and asks you to confirm or adjust.
 4. Runs each quality command once and reports pass or fail.
-5. Writes `quality-tools` and `project-commands` into `specs/config.json` and commits.
+5. Writes `quality-tools`, `project-commands` and `spec-ui` (docs folder for the viewer) into `specs/config.json` and commits.
 
 ```json
 "quality-tools": {
@@ -209,7 +209,7 @@ In `plan.json`, every phase and step has `"review-needed"` (missing counts as `t
 
 ```
 specs/
-├── config.json                          id counters (managed by nos), quality tools, project commands (setup)
+├── config.json                          id counters (managed by nos), quality tools, project commands, spec-ui docs folder (setup)
 └── domain-1-user-auth/
     ├── idea.md                          the idea
     ├── plan.json                        phases, steps, statuses
@@ -253,7 +253,7 @@ The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Ch
 │   ├── architect.md
 │   └── quick-dev/SKILL.md          also runs standalone
 ├── templates/
-│   ├── config.json                 initial id counters, empty quality tools and project commands
+│   ├── config.json                 initial id counters, empty quality tools and project commands, docs folder `docs`
 │   ├── plan.json                   plan structure
 │   ├── status.xml                  valid statuses
 │   ├── step-spec-template.md       structure of a step spec file
@@ -422,7 +422,7 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
 
 ### Templates
 
-- **config.json**: initial id counters for domain, phase and step, plus empty `quality-tools` and `project-commands`. `nos` copies it to `specs/config.json`. Ids are global across all domains.
+- **config.json**: initial id counters for domain, phase and step, plus empty `quality-tools` and `project-commands`, and `spec-ui.docs-folder` (`docs`, the folder the viewer's Docs view shows). `nos` copies it to `specs/config.json`. Ids are global across all domains.
 - **plan.json**: plan structure. It has a name, status, labels and phases. Phases have a name, status, intent, `human-validation-needed`, `review-needed`, a description and steps. Steps have an intent, status, `human-validation-needed`, `review-needed`, a description and `spec-file`, and every phase and step also has a slug. `spec-file` is filled by `nos`.
 - **status.xml**: valid statuses. `nos set-status` rejects anything else.
   - Plans: `open`, `in-progress`, `on-hold`, `done`.
@@ -627,13 +627,13 @@ during the fix phase review. Which statuses are set, and where does it resume?
 
 ## Part 5: Spec UI (viewer)
 
-`ui/` is a read-only browser viewer for `specs/`. It shows what nos is doing without opening JSON or markdown files. It never changes anything. Statuses change only through `nos set-status`.
+`ui/` is a read-only browser viewer for `specs/` and the project docs. It shows what nos is doing without opening JSON or markdown files. It never changes anything. Statuses change only through `nos set-status`.
 
 ### Use it
 
 **Without a server (standalone):**
 1. Open `.claude/skills/nos/ui/index.html` straight from disk in Chrome or Edge. These browsers support the File System Access API.
-2. Click **Open folder…** and pick `specs/` or the repo root.
+2. Click **Open folder…** and pick the repo root (or `specs/`, then Docs stays empty).
 3. The folder is remembered, so the next visit takes one click (**Reopen**). **↻ Reload** reads the folder again.
 
 **With live reload (dev server):**
@@ -642,7 +642,7 @@ cd .claude/skills/nos/ui
 npm install      # once
 npm run dev           # or: npm run dev-to-lan
 ```
-This serves `dev.html` on http://localhost:5180. The server reads `specs/` from disk and the page fetches it (`/__specs`). When a spec changes the page refreshes by itself; **↻ Reload** fetches again. It is handy for watching a run in AUTO mode.
+This serves `dev.html` on http://localhost:5180. The server reads `specs/` and the docs folder from disk and the page fetches them (`/__specs`, `/__docs`). When a spec or doc changes the page refreshes by itself; **↻ Reload** fetches again. It is handy for watching a run in AUTO mode.
 
 `npm run dev-to-lan` does the same, but also listens on the network. Other devices open the printed `Network` URL (`http://<host-ip>:5180/`) and see the host's `specs/` without picking a folder. Windows may ask to let Node through the firewall.
 
@@ -653,6 +653,7 @@ This serves `dev.html` on http://localhost:5180. The server reads `specs/` from 
 | **Explore** | Tree of ideas → phases → steps on the left. On the right: details (idea.md, rendered spec, AC/task progress) and a kanban per idea or phase |
 | **Board** | One kanban of all steps or phases across all ideas. There is one column per status. Step boards include `in specification` and `specified`; phase boards only show them when used. `on-hold` and unknown statuses appear only when used |
 | **Backlog** | The same items as a sortable table (id, title, where, status, AC progress) with status tiles |
+| **Docs** | The docs folder (`"spec-ui": { "docs-folder": "docs" }` in `specs/config.json`, relative to the repo root) as a tree of its own folders and text files. Markdown is rendered, and relative links between docs work. Other text is shown as code. A folder shows its `index.md`/`README.md` and its contents |
 
 Board and Backlog can be filtered by label, status, idea and free text. Values of one kind combine with OR, different kinds with AND. Filters live in the URL hash (`#board?status=in-review&labels=ui`), so every view can be bookmarked. Cards show AC and task progress, which is counted from the `( )`/`(x)` markers, and a badge for human validation. Unknown statuses are flagged.
 
@@ -662,10 +663,11 @@ Board and Backlog can be filtered by label, status, idea and free text. Values o
 | --- | --- |
 | `src/model.ts` | Pure: turns `path → text` of `specs/` into ideas → phases → steps. Parses `plan.json`, reads the spec sections, counts markers |
 | `src/status.ts` | The statuses from `templates/status.xml` and their board order |
-| `src/serve-specs.ts` + `src/main.ts` | Dev server: a Vite plugin reads `specs/` on the host with `readSpecsFolder` and serves it at `/__specs` (`/` is `dev.html`); it pushes `specs:changed` when a file changes, and the page fetches again |
-| `src/folder.ts` + `src/handle-store.ts` + `src/standalone.ts` | Standalone: reads the picked folder and remembers the handle in IndexedDB |
+| `src/serve-specs.ts` + `src/main.ts` | Dev server: a Vite plugin reads `specs/` on the host with `readSpecsFolder` and serves it at `/__specs` (`/` is `dev.html`); `/__docs` serves the docs folder (`readDocs`); it pushes `specs:changed` / `docs:changed` when a file changes, and the page fetches again |
+| `src/folder.ts` + `src/handle-store.ts` + `src/standalone.ts` | Standalone: reads the picked folder (specs and docs) and remembers the handle in IndexedDB |
+| `src/docs.ts` | Pure: turns `path → text` of the docs folder into a folder tree, resolves relative links |
 | `src/route.ts`, `src/filter.ts` | Hash routes and filters |
-| `src/app.ts`, `src/views/*` | Rendering: explore, board, backlog, kanban, filter bar |
+| `src/app.ts`, `src/views/*` | Rendering: explore, board, backlog, docs, kanban, filter bar |
 | `src/markdown.ts` | Minimal markdown renderer. Escapes first, so no raw HTML is rendered |
 | `bundle/viewer.js` | Built standalone script (IIFE, because `file://` pages can't load modules). Commit it with source changes |
 | `tests/` | Vitest tests. `real-specs.test.ts` checks that the real `specs/` (repo root) parse |

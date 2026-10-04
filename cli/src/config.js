@@ -15,6 +15,7 @@ export const DEFAULT_CONFIG = Object.freeze({
     additional: Object.freeze([]),
   }),
   'project-commands': Object.freeze({ install: null, dev: null, 'deploy-test': null }),
+  'spec-ui': Object.freeze({ 'docs-folder': 'docs' }),
 });
 
 export function specsDir(root) {

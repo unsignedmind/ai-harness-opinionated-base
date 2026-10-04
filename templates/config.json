@@ -16,5 +16,8 @@
     "install": null,
     "dev": null,
     "deploy-test": null
+  },
+  "spec-ui": {
+    "docs-folder": "docs"
   }
 }
