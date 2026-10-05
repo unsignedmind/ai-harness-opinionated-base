@@ -677,11 +677,21 @@ gesture closes. Messages carry the spec you look at as `[context: …]`; detail 
 (specify, develop, review, plan) that prefill a message. `"chat": { "runner": false }` in `specs/config.json` switches
 to relay: a terminal session answers with `nos chat await` / `reply`.
 
-- From the couch: `npm run dev-to-lan` prints a pairing link per network address. Open it once on the phone (sets a
-  30-day cookie). Without it, other devices get "device not paired". `nos chat pair --rotate` unpairs all devices.
-- Plain HTTP: someone sniffing the home Wi-Fi could read messages and the token.
-- Anyone holding a paired device can make Claude Code act in the project (auto mode). `"permissionMode"` in
-  `"chat"` sets another mode, e.g. `acceptEdits` or `plan`.
+From the couch (`npm run dev-to-lan`):
+
+- **HTTPS**: the dev server uses a self-signed certificate made once and kept in `specs/.chat/tls/`. Each phone shows a
+  warning once; compare the fingerprint the terminal prints with the one the phone shows, then accept.
+- **Pairing**: the terminal prints a one-time link and QR code (also "Pair a device" in the chat panel's **Devices**,
+  or `nos chat pair`). A link works **once, within 10 minutes**. The phone then shows a 4-digit number; allow the
+  device on the PC only if the PC shows the same number (toast, Devices panel, or `nos chat devices --approve <id>`).
+- **Per device**: each device gets its own cookie (30 days idle, only a hash is stored). Revoke one in **Devices** or
+  with `nos chat devices --revoke <id>` (`--revoke-all` for all); its open chat stops at once.
+- **Whole spec-ui gated**: other devices see nothing (specs, docs, promote, live reload) before they are paired. This
+  PC needs no pairing.
+- **Audit log**: `specs/.chat/audit.log` records pairing, approvals and every chat action with the device. Everything in
+  `specs/.chat/` is gitignored.
+- Anyone holding a paired device can make Claude Code act in the project (auto mode). `"permissionMode"` in `"chat"`
+  sets another mode, e.g. `acceptEdits` or `plan`.
 - Design: `ui/requirements/Concept spec-ui chat integration.md`.
 
 ### How it works

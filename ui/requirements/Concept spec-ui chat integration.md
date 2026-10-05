@@ -73,16 +73,28 @@ Claude Code session (`cli/src/chat/runner.js`).
 - CLI version 0.2.0, so a running 0.1.0 server is replaced on the next `nos chat open`.
 
 ## LAN use (couch mode) + security
-Goal: instruct agents from phone/tablet on home network via `npm run dev-to-lan` network URL. Anyone on the LAN who reaches the port could otherwise drive Claude Code (= shell on the machine), so LAN access is gated by a pairing token instead of a localhost restriction.
-- Chat server itself stays on 127.0.0.1 with spec guard unchanged. **LAN entry point = vite proxy** (already LAN-bound via `--host`); proxy rewrites Host/Origin to loopback before forwarding.
-- **Pairing token**: random 32-byte token created on first `nos chat open`, stored in state dir (`token` file, mode 600). `dev-to-lan` startup / `nos chat open` print network URL `http://<lan-ip>:5180/?pair=<token>`, plus QR code in terminal optional later.
-- `GET /?pair=<token>` → vite middleware validates (constant-time compare), sets cookie `nos_chat=<token>; HttpOnly; SameSite=Strict; Max-Age=30d`, redirects to `/` (token gone from URL bar).
-- Every `/__chat/*` request: loopback socket address AND loopback Host → allowed without cookie (Host alone is spoofable from the LAN); otherwise requires valid cookie, else 401 → drawer shows "Open the pairing link from the terminal".
-- CSRF: mutating `/__chat/*` POSTs require `Origin` host == request `Host` (same-origin), else 403.
-- `nos chat token --rotate` invalidates paired devices.
-- Plain HTTP on LAN → token + messages readable by someone sniffing home Wi-Fi. Acceptable for home network; documented in Limits. (Later option: vite `server.https` with self-signed cert.)
-- No Claude token/credential reads (spec rule).
-- Permission prompts still only in terminal (spec limit) → on couch, page shows "thinking" forever. Recommend pre-allowing the tools nos abilities need in project settings; documented.
+Goal: instruct the agents from a phone on the home network via `npm run dev-to-lan`, with auto mode and dedicated
+sessions kept. "A paired device" means: a device approved on the PC, over an encrypted connection, revocable.
+- **This machine** = loopback socket and loopback Host (`:authority` over HTTP/2) — needs no pairing.
+- **HTTPS** (`vite --host --mode lan`): self-signed certificate made once with `selfsigned`, kept in `specs/.chat/tls`
+  (SAN: localhost, hostname, 127.0.0.1, the LAN IPs; 2 years; remade only when a new IP is not covered). Its short
+  SHA-256 fingerprint is printed in the banner and on the pairing page (trust on first use). Vite serves HTTP/2.
+- **One-time pairing** (`cli/src/chat/devices.js`, shared with the dev server through `devices.d.ts`): a code (24
+  random bytes, 10 min, single use, stored as hash) from the banner (with an ASCII QR code), "Pair a device" in the chat
+  panel (SVG QR code, `qrcode-generator`) or `nos chat pair`. Opening it uses the code up and creates a *pending*
+  device with a 4-digit number (pending cookie, 10 min); the phone waits on `/__pair` and polls `/__pair/status`.
+- **Approval on the PC**: toast and Devices panel (this machine only) or `nos chat devices --approve`; allow only when
+  the numbers match. The next poll hands the device its own secret once: cookie `nos_device=<id>.<secret>`
+  (`HttpOnly; SameSite=Strict; Secure` on HTTPS, 30 days idle); only `sha256(secret)` is stored.
+- **Gate** (`ui/src/access.ts`): every request — pages, `/__specs`, `/__docs`, `/__promote`, `/__chat/*` — and the HMR
+  websocket upgrade need this machine or a paired device; unpaired pages redirect to `/__pair`, the rest gets 401.
+- **Per device**: list, approve, deny, revoke (open event streams are cut at once), rename — this machine only
+  (`/__chat/devices…`, same-origin POSTs). `nos chat devices [--approve|--deny|--revoke <id>] [--revoke-all]`.
+- **Audit**: `specs/.chat/audit.log` — pair requests, approvals, revokes, open, new tab, message, stop, close, rename,
+  with device id. Gitignored with the rest of `specs/.chat/`.
+- CSRF: mutating POSTs need `Origin` host == Host. Runs stay unrestricted (auto mode, no disallowed tools).
+- Not done on purpose: passkeys/WebAuthn (need a domain and a trusted certificate, not a LAN IP), own WebCrypto key per
+  device (no gain over the HttpOnly per-device cookie), password login (sniffable, phishable, shared secret).
 
 ## Chat UI (desktop drawer, mobile dialog)
 One component, `<dialog id="chat">` in `dev.html`. Layout and modality depend on screen width.

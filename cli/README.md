@@ -243,12 +243,14 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 | `nos chat typing [--state thinking\|typing\|idle]` | Presence shown in the page |
 | `nos chat pending` | Sessions with undelivered messages, read from disk |
 | `nos chat end` / `nos chat stop` | End the chat as the agent / shut the server down |
-| `nos chat pair [--rotate]` | Pairing links for phones on the home network (spec-ui `dev-to-lan`) |
+| `nos chat pair` | One-time pairing link for a phone (10 min, single use; approve the device on the PC) |
+| `nos chat devices [--approve id] [--deny id] [--revoke id] [--revoke-all]` | Paired devices |
 | `nos chat server [--port n]` | Run the server in the foreground |
 | `nos chat hook` | Stop hook: hands queued messages to Claude Code |
 
 - The project root is the nearest folder with `specs/` from the current directory (or `--root`).
-- State: `specs/.chat/` (`sessions.json`, `server.json`, `server.log`, `token`, and a `.gitignore` of `*`).
+- State: `specs/.chat/` (`sessions.json`, `server.json`, `server.log`, `devices.json`, `audit.log`, `tls/`, and a
+  `.gitignore` of `*`). `src/chat/devices.js` (with `devices.d.ts`) is shared with the spec-ui dev server.
 - One server per project on 127.0.0.1, port `"chat": { "port" }` in `specs/config.json` (default 4611);
   a port held by another project's server gives a free port, recorded in `server.json`.
 - `"chat"` in `specs/config.json`: `port`, `runner` (default true), `permissionMode` (default `auto`), `model`,

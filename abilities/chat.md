@@ -12,7 +12,7 @@ description: Open the local chat of the project (spec-ui chat button, desktop or
 
 <workflow>
     <step1>Open: "nos chat open --no-open". Tell the user: chat button in the spec-ui header (start it with "npm run dev" in .claude/skills/nos/ui), or the printed url</step1>
-    <step2>On the phone: the user starts the spec-ui with "npm run dev-to-lan" and opens the pairing link of the real network adapter printed there (or by "nos chat pair", which the user runs themselves)</step2>
+    <step2>On the phone: the user starts the spec-ui with "npm run dev-to-lan" (HTTPS), accepts the certificate once (fingerprint printed in the terminal), and scans the one-time pairing QR code / link printed there (or "Pair a device" in the chat panel). The user allows the device on the PC when both show the same number. Never pair or approve devices for the user</step2>
     <step3>Tell the user: each tab ("+") is its own Claude Code session; "Stop" ends the current run; a tab's tooltip shows "claude --resume <id>" to continue it in a terminal</step3>
 </workflow>
 
@@ -33,6 +33,6 @@ description: Open the local chat of the project (spec-ui chat button, desktop or
 
 <limits>
     <limit>Runner: nobody can answer permission prompts. Auto mode decides; what it refuses is refused. Allow more in .claude/settings.json if needed</limit>
-    <limit>Runner: anyone holding a paired device can make Claude Code act in the project with auto mode. Pairing over plain HTTP; "nos chat pair --rotate" unpairs all devices</limit>
+    <limit>Runner: anyone holding a paired device can make Claude Code act in the project with auto mode. Lost device → "nos chat devices --revoke <id>" or Devices in the chat panel</limit>
     <limit>No streaming: a reply appears whole; the chat shows the current tool call meanwhile</limit>
 </limits>
