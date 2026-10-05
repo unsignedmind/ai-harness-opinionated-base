@@ -1535,17 +1535,8 @@ dialog.chat::backdrop {
 .chat-agents-empty {
   margin: 4px 0;
 }
-.agent-group + .agent-group {
-  margin-top: 8px;
-}
-.agent-tab {
-  font-size: 11.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agent-group ul {
-  margin: 2px 0 0;
+.chat-agents ul {
+  margin: 0;
   padding: 0;
   list-style: none;
 }

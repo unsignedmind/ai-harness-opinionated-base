@@ -196,14 +196,14 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
 
   // chevron at the end of the tab bar: number of running subagents, the list when expanded
   function drawAgents() {
-    const n = runningAgents(tabs);
+    const n = runningAgents(current());
     const badge = agentsBtn.querySelector<HTMLElement>('.badge')!;
     badge.hidden = n === 0;
     badge.textContent = String(n);
     agentsBtn.dataset.running = String(n > 0);
     agentsBtn.title = n ? `Subagents: ${n} running` : 'Subagents';
     agentsBtn.setAttribute('aria-expanded', String(!agentsBox.hidden));
-    if (!agentsBox.hidden) agentsBox.innerHTML = renderAgents(tabs, active);
+    if (!agentsBox.hidden) agentsBox.innerHTML = renderAgents(current());
   }
 
   function setNotice(html: string | null) {
@@ -679,7 +679,7 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
   }, 10000);
   // time taken of the running subagents
   const tick = setInterval(() => {
-    if (isOpen && !agentsBox.hidden && runningAgents(tabs)) drawAgents();
+    if (isOpen && !agentsBox.hidden && runningAgents(current())) drawAgents();
   }, 1000);
 
   return {

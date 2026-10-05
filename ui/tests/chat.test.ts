@@ -281,21 +281,22 @@ const agent = (id: string, extra: Partial<SubAgent> = {}): SubAgent => ({
   ...extra,
 });
 
-test('renderAgents: active tab first, escaped, status, current tool, tool count and time', () => {
+test('renderAgents: escaped, status, current tool, tool count and time', () => {
   const box = document.createElement('div');
-  box.innerHTML = renderAgents([], A);
+  box.innerHTML = renderAgents(null);
+  expect(box.textContent).toContain('No subagents');
+  box.innerHTML = renderAgents(tabOf(A), 0);
   expect(box.textContent).toContain('No subagents');
   box.innerHTML = renderAgents(
-    [
-      tabOf(A, { agents: [agent('1', { status: 'done', activity: null, tools: 1, endedAt: 75000 })] }),
-      tabOf(B, { agents: [agent('2', { description: '<img src=x>' })] }),
-      tabOf('cccccccccccc'),
-    ],
-    B,
+    tabOf(A, {
+      agents: [
+        agent('2', { description: '<img src=x>' }),
+        agent('1', { status: 'done', activity: null, tools: 1, endedAt: 75000 }),
+      ],
+    }),
     12000,
   );
   expect(box.querySelector('img')).toBeNull();
-  expect([...box.querySelectorAll('.agent-tab')].map((t) => t.textContent)).toEqual(['Second', 'Chat']);
   const [run, done] = box.querySelectorAll<HTMLElement>('.agent');
   expect(run.dataset.status).toBe('running');
   expect(run.querySelector('.agent-desc')!.textContent).toBe('<img src=x>');
@@ -326,6 +327,22 @@ test('subagents: the chevron counts the running ones and expands their list', as
   expect(box.querySelectorAll('.agent[data-status="done"]').length).toBe(1);
   chev.click();
   expect(box.hidden).toBe(true);
+});
+
+test('subagents: only those of the active tab count and show', async () => {
+  const { toggle, dialog } = setup({ state: { key: A, server: true, runner: true, tabs: [tabOf(A)] } });
+  await tick();
+  const es = FakeES.last!;
+  toggle.click();
+  es.emit('sessions', { sessions: [tabOf(A), tabOf(B, { running: true, agents: [agent('b1')] })], runner: true });
+  const chev = dialog.querySelector<HTMLElement>('[data-chat="agents"]')!;
+  const box = dialog.querySelector<HTMLElement>('.chat-agents')!;
+  chev.click();
+  expect(chev.querySelector<HTMLElement>('.badge')!.hidden).toBe(true);
+  expect(box.querySelectorAll('.agent').length).toBe(0);
+  dialog.querySelector<HTMLElement>(`[data-chat="tab"][data-key="${B}"]`)!.click();
+  expect(chev.querySelector('.badge')!.textContent).toBe('1');
+  expect(box.querySelectorAll('.agent').length).toBe(1);
 });
 
 test('every tab has its own close button; closing a background tab keeps the active one', async () => {

@@ -66,29 +66,21 @@ const took = (ms: number) => {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
 };
 
-export const runningAgents = (tabs: ChatTab[]) =>
-  tabs.reduce((n, t) => n + (t.agents ?? []).filter((a) => a.status === 'running').length, 0);
+export const runningAgents = (tab: ChatTab | null) => (tab?.agents ?? []).filter((a) => a.status === 'running').length;
 
-// The subagents behind the chevron of the tab bar: per tab (the active one first), one row each
-// with status, type, task, current tool call, tool calls so far and time taken.
-export function renderAgents(tabs: ChatTab[], active: string | null, now = Date.now()): string {
-  const withAgents = tabs
-    .filter((t) => t.agents?.length)
-    .sort((a, b) => Number(b.key === active) - Number(a.key === active));
-  if (!withAgents.length) return '<p class="muted chat-agents-empty">No subagents in the last run of any chat.</p>';
-  return withAgents
-    .map(
-      (t) =>
-        `<div class="agent-group"><div class="agent-tab muted">${esc(t.title)}</div><ul>${(t.agents ?? [])
-          .map((a) => {
-            const status = AGENT_STATUS.includes(a.status) ? a.status : 'done';
-            const what = a.status === 'running' ? (a.activity ?? 'starting…') : status;
-            const n = `${a.tools} tool${a.tools === 1 ? '' : 's'} · ${took((a.endedAt ?? now) - a.startedAt)}`;
-            return `<li class="agent" data-status="${esc(status)}"><span class="dot" aria-hidden="true"></span><div class="agent-main"><div class="agent-head"><strong>${esc(a.type)}</strong><span class="agent-desc">${esc(a.description)}</span></div><div class="agent-now mono" title="${esc(what)}">${esc(what)}</div></div><span class="agent-n muted">${esc(n)}</span></li>`;
-          })
-          .join('')}</ul></div>`,
-    )
-    .join('');
+// The subagents of the active tab behind the chevron of the tab bar: one row each with status,
+// type, task, current tool call, tool calls so far and time taken.
+export function renderAgents(tab: ChatTab | null, now = Date.now()): string {
+  const agents = tab?.agents ?? [];
+  if (!agents.length) return '<p class="muted chat-agents-empty">No subagents in the last run of this chat.</p>';
+  return `<ul>${agents
+    .map((a) => {
+      const status = AGENT_STATUS.includes(a.status) ? a.status : 'done';
+      const what = a.status === 'running' ? (a.activity ?? 'starting…') : status;
+      const n = `${a.tools} tool${a.tools === 1 ? '' : 's'} · ${took((a.endedAt ?? now) - a.startedAt)}`;
+      return `<li class="agent" data-status="${esc(status)}"><span class="dot" aria-hidden="true"></span><div class="agent-main"><div class="agent-head"><strong>${esc(a.type)}</strong><span class="agent-desc">${esc(a.description)}</span></div><div class="agent-now mono" title="${esc(what)}">${esc(what)}</div></div><span class="agent-n muted">${esc(n)}</span></li>`;
+    })
+    .join('')}</ul>`;
 }
 
 // One tab: select button with presence dot and unread badge, and its own close button.
