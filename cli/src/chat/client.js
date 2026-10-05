@@ -111,5 +111,15 @@ export async function ensureServer(root, stateDir, { env = process.env, log = ()
   throw new Error(`chat server did not start, see ${files(stateDir).log}`);
 }
 
+// Shut the running server of this project down (its runs stop) and start a fresh one. Returns its port.
+export async function restartServer(root, stateDir, opts = {}) {
+  const live = await liveServer(root, stateDir);
+  if (live) {
+    await request(live.port, 'POST', '/shutdown', {}).catch(() => {});
+    for (let i = 0; i < 50 && (await health(live.port, 200)); i++) await sleep(100);
+  }
+  return ensureServer(root, stateDir, opts);
+}
+
 export const sessionsFile = (stateDir) => files(stateDir).sessions;
 export const hasState = (stateDir) => existsSync(path.join(stateDir, 'sessions.json'));

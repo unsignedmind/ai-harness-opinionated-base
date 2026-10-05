@@ -6,7 +6,7 @@ import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { createDeviceStore } from './devices.js';
-import { ensureServer, liveServer, removeServerJson, request, VERSION, writeServerJson } from './client.js';
+import { ensureServer, liveServer, removeServerJson, request, restartServer, VERSION, writeServerJson } from './client.js';
 import { runHook } from './hook.js';
 import { launchBrowser } from './launch.js';
 import {
@@ -41,6 +41,7 @@ Commands:
   pending           Sessions with undelivered messages (read from disk)
   end               End the chat as the agent                      [--name n]
   stop              Shut the server down
+  restart           Shut the server down (running Claude Code runs stop) and start a fresh one
   pair              One-time pairing link for a phone or tablet (10 min, single use; the device
                     still needs approval on the PC: spec-ui chat panel or "nos chat devices")
   devices           Paired devices      [--approve id] [--deny id] [--revoke id] [--revoke-all]
@@ -228,6 +229,12 @@ export async function runChat(argv, io = {}) {
           specUi: `http://localhost:${SPEC_UI_PORT}/ (chat button in the header)`,
           next_step: 'Run `nos chat await` in the background now.',
         });
+        return 0;
+      }
+      case 'restart': {
+        const port = await restartServer(root, stateDir, { env, log: (m) => stderr.write(`nos chat: ${m}
+`) });
+        print({ status: 'restarted', server: `http://127.0.0.1:${port}/` });
         return 0;
       }
       case 'pending': {

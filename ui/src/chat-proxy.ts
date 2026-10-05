@@ -131,6 +131,22 @@ function get(port: number, path: string): Promise<{ code: number; body: unknown 
   });
 }
 
+// `nos chat restart`: the chat server of the project, fresh (its running Claude Code runs stop).
+// Resolves with the server address, or rejects with why it did not start.
+export function restartChatServer(root: string, cli = nosCli()): Promise<string> {
+  return new Promise((done, fail) =>
+    execFile(process.execPath, [cli, 'chat', 'restart', '--root', root], { timeout: 20000 }, (err, stdout) => {
+      try {
+        const out = JSON.parse(stdout);
+        if (out.server) return done(String(out.server));
+        fail(new Error(out.error ?? 'nos chat restart failed'));
+      } catch {
+        fail(new Error(err?.message ?? 'nos chat restart failed'));
+      }
+    }),
+  );
+}
+
 export type ChatHandlerOptions = {
   cli?: string;
   stateDir?: string;

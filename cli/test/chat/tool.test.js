@@ -112,3 +112,24 @@ test('hook: queued message and no server gives a block decision and empties the 
   writeFileSync(files(dir).sessions, '{bad');
   assert.equal(await runHook(JSON.stringify({ cwd: root }), { env: ENV }), null);
 });
+
+test('restart: a fresh server process, the tabs survive', async (t) => {
+  const root = project(t);
+  t.after(() => nos(['stop'], { cwd: root }));
+  const serverJson = () => JSON.parse(readFileSync(files(path.join(root, 'specs', '.chat')).server, 'utf8'));
+  const open = await nos(['open', '--no-open'], { cwd: root });
+  const before = serverJson();
+  const r = await nos(['restart'], { cwd: root });
+  assert.equal(r.json.status, 'restarted');
+  const after = serverJson();
+  assert.notEqual(after.pid, before.pid);
+  assert.equal(r.json.server, `http://127.0.0.1:${after.port}/`);
+  const tabs = (await request(after.port, 'GET', '/api/sessions')).body.tabs;
+  assert.deepEqual(
+    tabs.map((x) => x.key),
+    [open.json.key],
+  );
+  // no server yet: restart just starts one
+  await nos(['stop'], { cwd: root });
+  assert.equal((await nos(['restart'], { cwd: root })).json.status, 'restarted');
+});

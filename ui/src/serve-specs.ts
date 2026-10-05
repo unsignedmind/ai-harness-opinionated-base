@@ -5,7 +5,9 @@
 // when a file under either changes. `POST /__promote?domain=<folder>` runs
 // `nos create-plan --domain <folder> --hollow` (Manual promote on the Ideas page). `/__chat/*` is the
 // chat with Claude Code in the project (src/chat-proxy.ts). Every request, the HMR websocket
-// included, passes src/access.ts first: this machine, or a paired device.
+// included, passes src/access.ts first: this machine, or a paired device. Every start of the dev
+// server restarts the project's chat server, so it runs the current nos code (not on vite's own
+// restarts after a config change: once per process).
 import { execFile } from 'node:child_process';
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
@@ -14,7 +16,7 @@ import qrcode from 'qrcode-generator';
 import type { Connect, Plugin } from 'vite';
 
 import { createAccess } from './access.ts';
-import { chatHandler, stateDirOf } from './chat-proxy.ts';
+import { chatHandler, restartChatServer, stateDirOf } from './chat-proxy.ts';
 import { readDocs, readSpecsFolder, type DirLike, type FileLike } from './folder.ts';
 
 // A folder on disk in the shape of a File System Access handle, so readSpecsFolder reads it
@@ -146,6 +148,14 @@ export function serveSpecs(specsDir: string, serveOpts: ServeOptions = {}): Plug
 
       // couch mode (`npm run dev-to-lan`): a one-time pairing link (and QR code) for a phone
       server.httpServer?.once('listening', () => {
+        const g = globalThis as { __nosChatRestarted?: boolean };
+        if (!process.env.VITEST && !g.__nosChatRestarted) {
+          g.__nosChatRestarted = true;
+          restartChatServer(root).then(
+            (url) => server.config.logger.info(`  ➜  Chat server: ${url} (restarted)`),
+            (e: Error) => server.config.logger.warn(`  ➜  Chat server did not start: ${e.message}`),
+          );
+        }
         const addr = server.httpServer?.address();
         link = {
           port: typeof addr === 'object' && addr ? addr.port : 5180,
