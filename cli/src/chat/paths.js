@@ -1,6 +1,6 @@
 // Where the chat of a project lives: the project root (the folder with specs/), its state folder
 // specs/.chat/ and the session key. Everything is per project, so two projects never share a chat.
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -82,30 +82,5 @@ export const files = (dir) => ({
   sessions: path.join(dir, 'sessions.json'),
   server: path.join(dir, 'server.json'),
   log: path.join(dir, 'server.log'),
-  token: path.join(dir, 'token'),
 });
 
-// Pairing token for devices on the home network (spec-ui couch mode). 32 random bytes as hex.
-export function readToken(dir) {
-  try {
-    const t = readFileSync(files(dir).token, 'utf8').trim();
-    return /^[a-f0-9]{64}$/.test(t) ? t : null;
-  } catch {
-    return null;
-  }
-}
-
-export function ensureToken(dir, rotate = false) {
-  const current = rotate ? null : readToken(dir);
-  if (current) return current;
-  ensureStateDir(dir);
-  const t = randomBytes(32).toString('hex');
-  writeFileSync(files(dir).token, t + '\n', { mode: 0o600 });
-  return t;
-}
-
-export function sameToken(a, b) {
-  const x = Buffer.from(String(a ?? ''));
-  const y = Buffer.from(String(b ?? ''));
-  return x.length === y.length && x.length > 0 && timingSafeEqual(x, y);
-}

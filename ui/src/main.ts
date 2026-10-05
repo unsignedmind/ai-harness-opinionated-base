@@ -63,3 +63,5 @@ async function promote(folder: string) {
 void refresh();
 import.meta.hot?.on('specs:changed', () => void refresh());
 import.meta.hot?.on('docs:changed', () => void refresh());
+// a device asks to pair, or was allowed / revoked (src/access.ts)
+import.meta.hot?.on('chat:devices', () => chat.refreshDevices());

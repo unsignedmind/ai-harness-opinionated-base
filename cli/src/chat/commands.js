@@ -1,14 +1,17 @@
 // `nos chat <command>`: the only thing Claude Code runs for the local chat. Acts on the chat of the
 // project around the current directory (the folder with specs/), so no command takes an id.
+import { X509Certificate } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
+import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { createDeviceStore } from './devices.js';
 import { ensureServer, liveServer, removeServerJson, request, VERSION, writeServerJson } from './client.js';
 import { runHook } from './hook.js';
 import { launchBrowser } from './launch.js';
 import {
   chatConfig,
   ensureStateDir,
-  ensureToken,
   files,
   findRoot,
   keyOf,
@@ -38,7 +41,9 @@ Commands:
   pending           Sessions with undelivered messages (read from disk)
   end               End the chat as the agent                      [--name n]
   stop              Shut the server down
-  pair              Pairing links for devices on the home network  [--rotate]
+  pair              One-time pairing link for a phone or tablet (10 min, single use; the device
+                    still needs approval on the PC: spec-ui chat panel or "nos chat devices")
+  devices           Paired devices      [--approve id] [--deny id] [--revoke id] [--revoke-all]
   server            Run the server in the foreground               [--port n]
   hook              Stop hook: hand queued messages to Claude Code (reads hook JSON on stdin)
 
@@ -54,6 +59,8 @@ const NEXT = {
   userEnded: 'The user closed the chat. Stop listening and do not reopen it unless asked.',
   waiting: 'No message yet. Run `nos chat await` again.',
   agentEnded: 'The chat was ended. Stop listening.',
+  runner:
+    'The chat answers itself with its own Claude Code sessions (tabs in the spec-ui). Do not listen; set "chat": { "runner": false } in specs/config.json to answer from this terminal instead.',
   noServer: 'The chat server is not running. Run `nos chat open` if the user wants to chat.',
 };
 
@@ -66,7 +73,10 @@ const OPTIONS = {
   text: { type: 'string' },
   state: { type: 'string' },
   port: { type: 'string' },
-  rotate: { type: 'boolean' },
+  approve: { type: 'string' },
+  deny: { type: 'string' },
+  revoke: { type: 'string' },
+  'revoke-all': { type: 'boolean' },
 };
 
 export function withNextStep(r) {
@@ -81,15 +91,26 @@ export function withNextStep(r) {
 // adapters of VMs, WSL and containers: a phone cannot reach them
 const VIRTUAL = /vEthernet|WSL|Hyper-V|VirtualBox|vboxnet|VMware|vmnet|docker|br-|veth|utun|tailscale|zerotier/i;
 
-// pairing links: one per IPv4 address of this machine, to the spec-ui dev server; real adapters first
-export function pairUrls(token, nets = networkInterfaces(), port = SPEC_UI_PORT) {
+// pairing links: one per IPv4 address of this machine, to the spec-ui dev server (https with
+// `npm run dev-to-lan`); real adapters first
+export function pairUrls(code, nets = networkInterfaces(), port = SPEC_UI_PORT, scheme = 'https') {
   return Object.entries(nets)
     .flatMap(([name, list]) =>
       (list ?? [])
         .filter((n) => n.family === 'IPv4' && !n.internal)
-        .map((n) => ({ interface: name, virtual: VIRTUAL.test(name), url: `http://${n.address}:${port}/?pair=${token}` })),
+        .map((n) => ({ interface: name, virtual: VIRTUAL.test(name), url: `${scheme}://${n.address}:${port}/?pair=${code}` })),
     )
     .sort((a, b) => Number(a.virtual) - Number(b.virtual));
+}
+
+// short SHA-256 fingerprint of the spec-ui's certificate (specs/.chat/tls), to compare on the phone
+export function tlsFingerprint(stateDir) {
+  try {
+    const fp = new X509Certificate(readFileSync(path.join(stateDir, 'tls', 'cert.pem'))).fingerprint256;
+    return fp.split(':').slice(0, 8).join(':');
+  } catch {
+    return null;
+  }
 }
 
 function idleOf(env) {
@@ -217,13 +238,23 @@ export async function runChat(argv, io = {}) {
         return 0;
       }
       case 'pair': {
-        const token = ensureToken(stateDir, values.rotate === true);
+        const { code, expiresAt } = createDeviceStore({ dir: stateDir }).createCode();
         print({
           status: 'ok',
-          rotated: values.rotate === true,
-          urls: pairUrls(token),
-          note: 'Open the link of the network the phone is on (not a virtual adapter) while the spec-ui runs with `npm run dev-to-lan`. --rotate unpairs every device.',
+          urls: pairUrls(code),
+          expiresAt: new Date(expiresAt).toISOString(),
+          fingerprint: tlsFingerprint(stateDir),
+          note: 'Open the link of the network the phone is on (not a virtual adapter) once, within 10 minutes, while the spec-ui runs with `npm run dev-to-lan`. Then approve the device on the PC (same 4-digit number): spec-ui chat panel or `nos chat devices --approve <id>`.',
         });
+        return 0;
+      }
+      case 'devices': {
+        const store = createDeviceStore({ dir: stateDir });
+        if (values.approve) print({ status: store.approve(values.approve) ? 'approved' : 'not-found' });
+        else if (values.deny) print({ status: store.revoke(values.deny) ? 'denied' : 'not-found' });
+        else if (values.revoke) print({ status: store.revoke(values.revoke) ? 'revoked' : 'not-found' });
+        else if (values['revoke-all']) print({ status: 'revoked', count: store.revokeAll() });
+        else print({ devices: store.list() });
         return 0;
       }
     }

@@ -62,6 +62,80 @@ export function renderTabs(tabs: ChatTab[], active: string | null, unread: Recor
   );
 }
 
+// paired devices (cli/src/chat/devices.js), as the dev server lists them to this machine
+export type PairedDevice = {
+  id: string;
+  name: string;
+  status: 'pending' | 'active';
+  approved: boolean;
+  confirm?: string;
+  createdAt: number;
+  lastSeen: number | null;
+};
+
+// a fresh one-time pairing link, from "Pair a device"
+export type PairLink = {
+  urls: { interface: string; virtual: boolean; url: string }[];
+  expiresAt: number;
+  fingerprint: string | null;
+  // QR code of the first real (not virtual) link, as SVG
+  qr: string;
+};
+
+const ago = (t: number | null, now: number) => {
+  if (!t) return 'never';
+  const m = Math.round((now - t) / 60000);
+  return m < 1
+    ? 'just now'
+    : m < 60
+      ? `${m} min ago`
+      : m < 1440
+        ? `${Math.round(m / 60)} h ago`
+        : `${Math.round(m / 1440)} d ago`;
+};
+
+// waiting devices: allow only when the device shows the same number
+export function renderPending(devices: PairedDevice[]): string {
+  return devices
+    .filter((d) => d.status === 'pending' && !d.approved)
+    .map(
+      (d) => `<div class="pair-ask" data-id="${esc(d.id)}">
+  <div><strong>${esc(d.name)}</strong> wants to pair. Number on the device: <span class="pair-num">${esc(d.confirm ?? '')}</span></div>
+  <div class="row"><button type="button" class="primary" data-chat="dev-approve" data-id="${esc(d.id)}">Allow</button><button type="button" data-chat="dev-deny" data-id="${esc(d.id)}">Deny</button></div>
+</div>`,
+    )
+    .join('');
+}
+
+export function renderDevices(devices: PairedDevice[], link: PairLink | null, now = Date.now()): string {
+  const active = devices.filter((d) => d.status === 'active');
+  const phone = link?.urls.find((u) => !u.virtual) ?? link?.urls[0];
+  return `<div class="chat-devices-head"><strong>Devices</strong><button type="button" class="primary" data-chat="dev-pair">Pair a device</button></div>
+${
+  link && !link.urls.length
+    ? '<p class="pair-off">The spec-ui runs on this PC only. Start it with <code>npm run dev-to-lan</code> to pair a phone.</p>'
+    : link
+      ? `<div class="pair-link">
+  ${link.qr}
+  <div><p>Scan or open on the phone, <strong>once</strong>, within 10 minutes. Then allow it here.</p>
+  ${phone ? `<p class="mono pair-url">${esc(phone.url)}</p>` : '<p class="muted">No network address found.</p>'}
+  ${link.fingerprint ? `<p class="muted">Certificate: <span class="mono">${esc(link.fingerprint)}</span></p>` : ''}</div>
+</div>`
+      : ''
+}
+${renderPending(devices)}
+${
+  active.length
+    ? `<ul class="dev-list">${active
+        .map(
+          (d) =>
+            `<li><span>${esc(d.name)}</span><span class="muted">${ago(d.lastSeen, now)}</span><button type="button" data-chat="dev-revoke" data-id="${esc(d.id)}">Revoke</button></li>`,
+        )
+        .join('')}</ul>`
+    : '<p class="muted">No paired devices. This PC needs none.</p>'
+}`;
+}
+
 // what the user looks at, as a spec path Claude can open
 export function contextOf(model: Model, r: Route): ChatContext | null {
   if (r.view !== 'domains' && r.view !== 'ideas') return null;
@@ -142,11 +216,13 @@ export const CHAT_SHELL = `<div class="chat-bar">
   <strong>Claude</strong>
   <span class="chat-presence" data-presence="off"><span class="dot"></span><span class="lbl"></span></span>
   <span class="grow"></span>
+  <button type="button" data-chat="devices" hidden title="Phones and tablets paired with this PC">&#128241; Devices</button>
   <button type="button" data-chat="rename" hidden title="Rename this chat">&#9998; Rename</button>
   <button type="button" data-chat="stop" hidden title="Stop what Claude is doing">&#9632; Stop</button>
   <button type="button" class="chat-x" data-chat="close" aria-label="Close chat">&#10005;</button>
 </div>
 <div class="chat-tabs" role="tablist" aria-label="Chats"></div>
+<section class="chat-devices" hidden aria-label="Devices"></section>
 <form class="chat-rename-row" hidden>
   <input class="chat-rename" maxlength="60" aria-label="Chat name" enterkeyhint="done" autocomplete="off">
   <button type="submit" class="primary">Save</button>

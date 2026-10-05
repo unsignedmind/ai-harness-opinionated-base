@@ -1471,3 +1471,117 @@ dialog.chat::backdrop {
 [data-chat='stop'] {
   color: var(--other);
 }
+
+/* paired devices (this machine only): list, pairing link with QR code, approval toast */
+.chat-devices {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.chat-devices[hidden] {
+  display: none;
+}
+.chat-devices-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.pair-link {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  align-items: start;
+  margin: 8px 0;
+}
+.pair-link svg {
+  width: 140px;
+  height: 140px;
+  background: #fff;
+  border-radius: 6px;
+}
+.pair-link p {
+  margin: 0 0 6px;
+}
+.pair-url {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.pair-ask {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  margin: 8px 0;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.pair-ask .row {
+  display: flex;
+  gap: 8px;
+}
+.pair-ask button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  cursor: pointer;
+}
+.pair-ask button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.pair-num {
+  font:
+    600 18px/1 ui-monospace,
+    Consolas,
+    monospace;
+  letter-spacing: 0.15em;
+  color: var(--accent);
+}
+.dev-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.dev-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+.dev-list button,
+.chat-devices-head button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 10px;
+  background: var(--panel);
+  cursor: pointer;
+}
+.chat-devices-head button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.pair-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 30;
+  max-width: 360px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+}
+.pair-toast[hidden] {
+  display: none;
+}
+.chat-bar button {
+  white-space: nowrap;
+}
+body.chat-docked .pair-toast {
+  right: calc(var(--chat-w, 420px) + 16px);
+}

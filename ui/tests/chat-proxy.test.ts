@@ -1,20 +1,33 @@
 // @vitest-environment node
-// The dev server's chat routes against a real `nos chat` server in a temp project.
+// The dev server's access layer and chat routes against a real `nos chat` server in a temp project.
+// Requests from "another device" come from 127.0.0.1 with a LAN Host header: not this machine.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
+import http2 from 'node:http2';
+import https from 'node:https';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 
-import { authorized, chatHandler, COOKIE, keyOf, pairHandler, stateDirOf } from '../src/chat-proxy';
+import { createAccess, DEVICE_COOKIE, isLocal, PENDING_COOKIE, type Access } from '../src/access';
+import { chatHandler, keyOf, stateDirOf } from '../src/chat-proxy';
+import { loadTls } from '../src/tls';
 
 // tests run inside ui/, the CLI sits next to it
 const CLI = resolve('../cli/bin/nos.js');
 let root = '';
 let state = '';
+let access: Access;
 let server: http.Server;
 let port = 0;
+let changes = 0;
+
+function handler(req: http.IncomingMessage, res: http.ServerResponse) {
+  if (access.handle(req, res)) return;
+  if (req.url?.startsWith('/__chat/')) return void chatHandler(root, { cli: CLI, stateDir: state, access })(req, res);
+  res.end(req.url === '/__specs' ? '{"specs":true}' : '<!doctype html>specs');
+}
 
 beforeAll(async () => {
   process.env.NOS_CHAT_PORT = '0';
@@ -23,14 +36,12 @@ beforeAll(async () => {
   // relay mode: these tests never start Claude Code (runner mode is covered in cli/test/chat)
   writeFileSync(join(root, 'specs', 'config.json'), JSON.stringify({ chat: { runner: false } }));
   state = stateDirOf(root);
-  mkdirSync(state, { recursive: true });
-  writeFileSync(join(state, 'token'), 'a'.repeat(64) + '\n');
-  const chat = chatHandler(root, { cli: CLI });
-  const pair = pairHandler(state);
-  server = http.createServer((req, res) => {
-    if (pair(req, res)) return;
-    void chat(req, res);
+  access = createAccess({
+    stateDir: state,
+    onChange: () => changes++,
+    link: () => ({ port, scheme: 'http' }),
   });
+  server = http.createServer(handler);
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   port = (server.address() as { port: number }).port;
 });
@@ -49,6 +60,7 @@ type Out = { status: number; body: string; headers: http.IncomingHttpHeaders };
 function call(method: string, path: string, headers: Record<string, string> = {}, body?: unknown): Promise<Out> {
   return new Promise((done, fail) => {
     const data = body === undefined ? undefined : JSON.stringify(body);
+    const host = headers.host ?? `localhost:${port}`;
     const req = http.request(
       {
         host: '127.0.0.1',
@@ -56,8 +68,8 @@ function call(method: string, path: string, headers: Record<string, string> = {}
         method,
         path,
         headers: {
-          host: `localhost:${port}`,
-          ...(method === 'POST' && { origin: `http://localhost:${port}` }),
+          host,
+          ...(method === 'POST' && { origin: `http://${host}` }),
           ...(data && { 'content-type': 'application/json' }),
           ...headers,
         },
@@ -74,81 +86,220 @@ function call(method: string, path: string, headers: Record<string, string> = {}
 }
 
 const LAN = { host: '192.168.1.20:5180' };
+const cookieFrom = (h: http.IncomingHttpHeaders, name: string) =>
+  ([] as string[])
+    .concat(h['set-cookie'] ?? [])
+    .map((c) => c.split(';')[0])
+    .find((c) => c.startsWith(name + '=') && c.length > name.length + 1) ?? '';
+const codeOf = (url: string) => new URL(url).searchParams.get('pair')!;
 
-test('a faked loopback Host from the network is not local: the socket address counts too', () => {
+// pairs a device: link → pending → approve on this machine → cookie
+async function pairDevice() {
+  const code = codeOf(access.newLink().urls[0]?.url ?? `http://x/?pair=${access.store.createCode().code}`);
+  const opened = await call('GET', `/?pair=${code}`, LAN);
+  const pending = cookieFrom(opened.headers, PENDING_COOKIE);
+  const status = JSON.parse((await call('GET', '/__pair/status', { ...LAN, cookie: pending })).body);
+  const id = pending.split('=')[1].split('.')[0];
+  expect((await call('POST', `/__chat/devices/approve?id=${id}`)).status).toBe(200);
+  const done = await call('GET', '/__pair/status', { ...LAN, cookie: pending });
+  return {
+    id,
+    code,
+    status,
+    opened,
+    done,
+    cookie: cookieFrom(done.headers, DEVICE_COOKIE),
+  };
+}
+
+test('this machine = loopback socket and loopback Host; a faked Host from the network is not', () => {
   const req = (remoteAddress: string, host: string) => ({ socket: { remoteAddress }, headers: { host } }) as never;
-  expect(authorized(req('192.168.1.5', 'localhost:5180'), state)).toBe(false);
-  expect(authorized(req('127.0.0.1', 'evil.example'), state)).toBe(false);
-  expect(authorized(req('::ffff:127.0.0.1', 'localhost:5180'), state)).toBe(true);
+  expect(isLocal(req('192.168.1.5', 'localhost:5180'))).toBe(false);
+  expect(isLocal(req('127.0.0.1', 'evil.example'))).toBe(false);
+  expect(isLocal(req('::ffff:127.0.0.1', 'localhost:5180'))).toBe(true);
 });
 
-test('the key matches the CLI: sha256 of the project root', () => {
-  expect(keyOf(root)).toMatch(/^[a-f0-9]{12}$/);
-});
-
-test('state before the chat is started: no server, no session', async () => {
-  const r = await call('GET', '/__chat/state');
-  expect(r.status).toBe(200);
-  expect(JSON.parse(r.body)).toEqual({ key: keyOf(root), server: false, runner: false, tabs: [] });
-  expect((await call('POST', '/__chat/messages', {}, { text: 'x' })).status).toBe(503);
-});
-
-test('another device needs the pairing cookie; a cross-origin POST is refused', async () => {
+test('unpaired devices: pages lead to the pairing page, everything else is 401', async () => {
+  const page = await call('GET', '/', { ...LAN, accept: 'text/html' });
+  expect(page.status).toBe(302);
+  expect(page.headers.location).toBe('/__pair');
+  expect((await call('GET', '/__specs', LAN)).status).toBe(401);
+  expect((await call('POST', '/__promote?domain=domain-1-x', LAN)).status).toBe(401);
   expect((await call('GET', '/__chat/state', LAN)).status).toBe(401);
-  // POSTs only from the page itself (Origin host == Host)
-  expect((await call('POST', '/__chat/open', { origin: 'http://evil.example' })).status).toBe(403);
-  expect((await call('POST', '/__chat/open', { origin: '' })).status).toBe(403);
-
-  const bad = await call('GET', '/?pair=' + 'b'.repeat(64), LAN);
-  expect(bad.status).toBe(403);
-  const ok = await call('GET', '/?pair=' + 'a'.repeat(64), LAN);
-  expect(ok.status).toBe(302);
-  expect(ok.headers.location).toBe('/');
-  const cookie = String(ok.headers['set-cookie']).split(';')[0];
-  expect(cookie).toBe(`${COOKIE}=${'a'.repeat(64)}`);
-  expect(String(ok.headers['set-cookie'])).toMatch(/HttpOnly; SameSite=Strict/);
-  expect((await call('GET', '/__chat/state', { ...LAN, cookie })).status).toBe(200);
+  expect((await call('GET', '/__pair', LAN)).body).toContain('Pair this device');
+  // this machine needs nothing
+  expect((await call('GET', '/__specs')).body).toBe('{"specs":true}');
 });
 
-test('open starts the project chat server; messages go through, the event stream is passed on', async () => {
+test('pairing: one-time code → waiting with a number → approved on this machine → own cookie', async () => {
+  const before = changes;
+  const p = await pairDevice();
+  expect(p.opened.status).toBe(302);
+  expect(p.opened.headers.location).toBe('/__pair');
+  expect(String(p.opened.headers['set-cookie'])).toMatch(/HttpOnly; SameSite=Strict/);
+  expect(p.status).toMatchObject({
+    status: 'pending',
+    confirm: expect.stringMatching(/^\d{4}$/),
+  });
+  expect(JSON.parse(p.done.body)).toEqual({ status: 'paired' });
+  expect(p.cookie).toMatch(new RegExp(`^${DEVICE_COOKIE}=${p.id}\\.`));
+  expect(changes).toBeGreaterThan(before);
+
+  // the same link a second time: refused
+  expect((await call('GET', `/?pair=${p.code}`, LAN)).status).toBe(403);
+  // the device now reaches the specs and the chat, but not the device admin
+  expect((await call('GET', '/__specs', { ...LAN, cookie: p.cookie })).status).toBe(200);
+  const st = await call('GET', '/__chat/state', { ...LAN, cookie: p.cookie });
+  expect(JSON.parse(st.body)).toMatchObject({ local: false });
+  expect((await call('GET', '/__chat/devices', { ...LAN, cookie: p.cookie })).status).toBe(403);
+  expect(
+    (
+      await call('POST', `/__chat/devices/revoke?id=${p.id}`, {
+        ...LAN,
+        cookie: p.cookie,
+      })
+    ).status,
+  ).toBe(403);
+
+  // revoked on this machine: out at once
+  expect((await call('POST', `/__chat/devices/revoke?id=${p.id}`)).status).toBe(200);
+  expect((await call('GET', '/__specs', { ...LAN, cookie: p.cookie })).status).toBe(401);
+});
+
+test('a pending device cannot do anything; only this machine approves; deny drops it', async () => {
+  const code = access.store.createCode().code;
+  const opened = await call('GET', `/?pair=${code}`, LAN);
+  const pending = cookieFrom(opened.headers, PENDING_COOKIE);
+  const id = pending.split('=')[1].split('.')[0];
+  expect((await call('GET', '/__specs', { ...LAN, cookie: pending })).status).toBe(401);
+  expect(
+    (
+      await call('POST', `/__chat/devices/approve?id=${id}`, {
+        ...LAN,
+        cookie: pending,
+      })
+    ).status,
+  ).toBe(401);
+  const list = JSON.parse((await call('GET', '/__chat/devices')).body).devices;
+  expect(list.find((d: { id: string }) => d.id === id)).toMatchObject({
+    status: 'pending',
+    approved: false,
+  });
+  expect((await call('POST', `/__chat/devices/deny?id=${id}`)).status).toBe(200);
+  expect(JSON.parse((await call('GET', '/__pair/status', { ...LAN, cookie: pending })).body)).toEqual({
+    status: 'gone',
+  });
+  // admin calls from another site are refused even on this machine
+  expect(
+    (
+      await call('POST', `/__chat/devices/pair`, {
+        origin: 'http://evil.example',
+      })
+    ).status,
+  ).toBe(403);
+});
+
+test('chat: open starts the project chat server; messages go through and into the audit log', async () => {
   const opened = await call('POST', '/__chat/open');
   expect(opened.status).toBe(200);
-  expect(JSON.parse(opened.body)).toMatchObject({ status: 'open', key: keyOf(root) });
+  expect(JSON.parse(opened.body)).toMatchObject({
+    status: 'open',
+    key: keyOf(root),
+  });
   expect(readFileSync(join(state, '.gitignore'), 'utf8')).toBe('*\n');
 
-  const sent = await call('POST', '/__chat/messages', {}, { text: 'hello from the couch' });
+  const p = await pairDevice();
+  const sent = await call('POST', '/__chat/messages', { ...LAN, cookie: p.cookie }, { text: 'hello from the couch' });
   expect(sent.status).toBe(200);
-  expect(JSON.parse(sent.body)).toMatchObject({ status: 'queued', presence: 'queued' });
-
-  const st = JSON.parse((await call('GET', '/__chat/state')).body);
-  expect(st.server).toBe(true);
-  expect(st.tabs.map((t: { key: string }) => t.key)).toEqual([keyOf(root)]);
+  expect(JSON.parse(sent.body)).toMatchObject({ status: 'queued' });
+  const log = readFileSync(join(state, 'audit.log'), 'utf8');
+  expect(log).toMatch(new RegExp(`\\t${p.id}\\tmessage\\t${keyOf(root)}\\thello from the couch`));
 
   // a second tab, addressed by ?key=
   const tab = JSON.parse((await call('POST', '/__chat/new', {}, { title: 'Review' })).body).key;
-  expect(tab).toMatch(/^[a-f0-9]{12}$/);
   expect((await call('POST', `/__chat/messages?key=${tab}`, {}, { text: 'in tab two' })).status).toBe(200);
-  expect(JSON.parse((await call('POST', `/__chat/stop?key=${tab}`)).body).status).toBe('idle');
   expect((await call('POST', '/__chat/messages?key=../../x', {}, { text: 'x' })).status).toBe(400);
-  const tabs = JSON.parse((await call('GET', '/__chat/state')).body).tabs;
-  // relay mode names no tab by its first message (the runner does)
-  expect(tabs.map((t: { title: string }) => t.title)).toEqual(['New chat', 'Review']);
-
-  const first = await new Promise<string>((done) => {
-    const req = http.get({ host: '127.0.0.1', port, path: '/__chat/events', headers: { host: 'localhost' } }, (res) => {
-      expect(res.headers['content-type']).toMatch(/text\/event-stream/);
-      res.once('data', (c) => {
-        done(String(c));
-        req.destroy();
-      });
-    });
-  });
-  expect(first).toContain('event: sessions');
-
-  // only the user's side of the API: no reply, no await through the dev server
   expect((await call('POST', '/__chat/reply', {}, { text: 'x' })).status).toBe(404);
-  expect((await call('POST', '/__chat/end')).status).toBe(200);
-  const reopened = JSON.parse((await call('POST', '/__chat/open')).body);
-  expect(reopened.status).toBe('user-ended');
-  expect(JSON.parse((await call('POST', '/__chat/open?reopen=1')).body).status).toBe('open');
+  expect((await call('POST', '/__chat/open', { origin: 'http://evil.example' })).status).toBe(403);
+
+  // the device's event stream is cut the moment it is revoked
+  const closed = new Promise<string>((done) => {
+    const req = http.get(
+      {
+        host: '127.0.0.1',
+        port,
+        path: '/__chat/events',
+        headers: { ...LAN, cookie: p.cookie },
+      },
+      (res) => {
+        expect(res.headers['content-type']).toMatch(/text\/event-stream/);
+        res.once('data', () => void call('POST', `/__chat/devices/revoke?id=${p.id}`));
+        res.on('close', () => done('closed'));
+        res.on('error', () => done('closed'));
+      },
+    );
+    req.on('error', () => done('closed'));
+  });
+  expect(await closed).toBe('closed');
+});
+
+test('https: the certificate is made once and reused; cookies are Secure', { timeout: 60000 }, async () => {
+  const tls = await loadTls(state, ['192.168.1.20'], 'test-host');
+  const again = await loadTls(state, ['192.168.1.20'], 'test-host');
+  expect(again.fingerprint).toBe(tls.fingerprint);
+  expect(tls.fingerprint).toMatch(/^([0-9A-F]{2}:){7}[0-9A-F]{2}$/);
+  const other = await loadTls(state, ['10.0.0.9'], 'test-host');
+  expect(other.fingerprint).not.toBe(tls.fingerprint);
+
+  const secure = https.createServer({ key: other.key, cert: other.cert }, handler);
+  await new Promise<void>((r) => secure.listen(0, '127.0.0.1', r));
+  const sport = (secure.address() as { port: number }).port;
+  const code = access.store.createCode().code;
+  const res = await new Promise<http.IncomingMessage>((done, fail) =>
+    https
+      .get(
+        {
+          host: '127.0.0.1',
+          port: sport,
+          path: `/?pair=${code}`,
+          headers: LAN,
+          rejectUnauthorized: false,
+        },
+        done,
+      )
+      .on('error', fail),
+  );
+  res.resume();
+  secure.close();
+  expect(String(res.headers['set-cookie'])).toMatch(/; Secure/);
+});
+
+// vite serves HTTPS as HTTP/2 (with HTTP/1 fallback): the host arrives as ":authority"
+test('over HTTP/2 this machine is still this machine, and same-origin POSTs pass', { timeout: 60000 }, async () => {
+  const tls = await loadTls(state, ['10.0.0.9'], 'test-host');
+  const h2 = http2.createSecureServer({ key: tls.key, cert: tls.cert, allowHTTP1: true }, handler as never);
+  await new Promise<void>((r) => h2.listen(0, '127.0.0.1', r));
+  const p2 = (h2.address() as { port: number }).port;
+  const client = http2.connect(`https://localhost:${p2}`, { rejectUnauthorized: false });
+  const ask = (headers: Record<string, string>) =>
+    new Promise<number>((done, fail) => {
+      const r = client.request(headers);
+      r.on('response', (h) => done(Number(h[':status'])));
+      r.on('error', fail);
+      r.resume();
+      r.end();
+    });
+  try {
+    expect(await ask({ ':path': '/__chat/devices' })).toBe(200);
+    expect(await ask({ ':path': '/__specs' })).toBe(200);
+    expect(
+      await ask({ ':method': 'POST', ':path': '/__chat/devices/approve?id=nope', origin: `https://localhost:${p2}` }),
+    ).toBe(404);
+    expect(
+      await ask({ ':method': 'POST', ':path': '/__chat/devices/approve?id=nope', origin: 'https://evil.example' }),
+    ).toBe(403);
+  } finally {
+    client.close();
+    h2.close();
+  }
 });

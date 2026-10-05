@@ -16,7 +16,12 @@ import {
   type ChatEntry,
   type ChatTab,
   type Presence,
+  renderDevices,
+  renderPending,
+  type PairedDevice,
+  type PairLink,
 } from './views/chat';
+import qrcode from 'qrcode-generator';
 
 export const MOBILE = '(max-width: 860px)';
 const COARSE = '(pointer: coarse)';
@@ -44,6 +49,8 @@ export type Chat = {
   readonly presence: Presence;
   readonly isOpen: boolean;
   readonly active: string | null;
+  // devices changed on the dev server (pairing request, approval, revoke): this machine reloads them
+  refreshDevices: () => void;
   destroy: () => void;
 };
 
@@ -66,7 +73,7 @@ function store(storage: Storage | null | undefined) {
   };
 }
 
-type State = { key: string; server: boolean; runner: boolean; tabs: ChatTab[] };
+type State = { key: string; server: boolean; runner: boolean; tabs: ChatTab[]; local?: boolean };
 
 export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
   const f = deps.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
@@ -92,6 +99,14 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
   const chip = $('.chat-context');
   const stopBtn = $<HTMLButtonElement>('[data-chat="stop"]');
   const renameBtn = $<HTMLButtonElement>('[data-chat="rename"]');
+  const devicesBtn = $<HTMLButtonElement>('[data-chat="devices"]');
+  const devicesBox = $('.chat-devices');
+  // pairing requests show on the page even with the chat closed (this machine only)
+  const toast = document.createElement('div');
+  toast.className = 'pair-toast';
+  toast.setAttribute('role', 'alert');
+  toast.hidden = true;
+  root.append(toast);
   const renameRow = $<HTMLFormElement>('.chat-rename-row');
   const renameInput = $<HTMLInputElement>('.chat-rename');
   const form = $<HTMLFormElement>('.chat-composer');
@@ -113,6 +128,12 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
   let destroyed = false;
   // the first look at the server is done (tabs known)
   let synced = false;
+  // this machine (not a paired device): may pair, allow and revoke devices
+  let local = false;
+  let devices: PairedDevice[] = [];
+  let link: PairLink | null = null;
+  // when the link was made: a device asking after that has used it
+  let linkAt = 0;
 
   const width = Number(ls.get(KEY_WIDTH));
   if (width >= 320) root.style.setProperty('--chat-w', `${width}px`);
@@ -140,6 +161,12 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
     pill.querySelector('.lbl')!.textContent = PRESENCE_LABEL[p];
     stopBtn.hidden = !tab?.running;
     renameBtn.hidden = !tab || status !== null;
+    devicesBtn.hidden = !local;
+    if (!local) devicesBox.hidden = true;
+    // the requests show in the toast, unless the devices panel already shows them
+    const asks = local && !(isOpen && !devicesBox.hidden) ? renderPending(devices) : '';
+    toast.innerHTML = asks;
+    toast.hidden = !asks;
     if (!tab && !renameRow.hidden) renameRow.hidden = true;
     activityLine.hidden = !tab?.running || !tab.activity;
     activityLine.textContent = tab?.activity ? `⚙ ${tab.activity}` : '';
@@ -219,6 +246,10 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
       }
       if (!r.ok) throw new Error();
       const s = (await r.json()) as State;
+      if (s.local && !local) {
+        local = true;
+        void refreshDevices();
+      }
       defaultKey = s.key;
       if (s.server) {
         connect();
@@ -453,6 +484,54 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
     }
   }
 
+  async function refreshDevices() {
+    if (!local) return;
+    try {
+      const r = await f('/__chat/devices');
+      if (!r.ok) return;
+      devices = ((await r.json()) as { devices: PairedDevice[] }).devices;
+      // a link works once: hide it as soon as a device asked after it was made
+      if (link && devices.some((d) => d.status === 'pending' && d.createdAt >= linkAt)) link = null;
+      if (!devicesBox.hidden) devicesBox.innerHTML = renderDevices(devices, link);
+      draw();
+    } catch {
+      // dev server gone: nothing to show
+    }
+  }
+
+  async function pairDevice() {
+    const r = await f('/__chat/devices/pair', { method: 'POST' });
+    if (!r.ok) return;
+    const out = (await r.json()) as Omit<PairLink, 'qr'>;
+    const phone = out.urls.find((u) => !u.virtual) ?? out.urls[0];
+    let qr = '';
+    if (phone) {
+      const q = qrcode(0, 'L');
+      q.addData(phone.url);
+      q.make();
+      qr = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    }
+    link = { ...out, qr };
+    linkAt = Date.now();
+    devicesBox.hidden = false;
+    devicesBox.innerHTML = renderDevices(devices, link);
+  }
+
+  async function deviceAction(action: 'approve' | 'deny' | 'revoke', id: string) {
+    const d = devices.find((x) => x.id === id);
+    if (action === 'revoke' && !ask(`Revoke "${d?.name ?? id}"? It loses access at once.`)) return;
+    await f(`/__chat/devices/${action}?id=${encodeURIComponent(id)}`, { method: 'POST' });
+    await refreshDevices();
+  }
+
+  // the toast lives outside the dialog
+  const onToastClick = (e: MouseEvent) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-chat]');
+    const a = el?.dataset.chat;
+    if ((a === 'dev-approve' || a === 'dev-deny') && el?.dataset.id)
+      void deviceAction(a === 'dev-approve' ? 'approve' : 'deny', el.dataset.id);
+  };
+
   // events
   const onToggle = () => (isOpen ? close() : open());
   const onPop = () => {
@@ -491,6 +570,13 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
     else if (a === 'close-tab' && el?.dataset.key) closeTab(el.dataset.key);
     else if (a === 'rename') startRename();
     else if (a === 'rename-cancel') endRename(false);
+    else if (a === 'devices') {
+      devicesBox.hidden = !devicesBox.hidden;
+      draw();
+      if (!devicesBox.hidden) void refreshDevices();
+    } else if (a === 'dev-pair') void pairDevice();
+    else if (a?.startsWith('dev-') && el?.dataset.id)
+      void deviceAction(a.slice(4) as 'approve' | 'deny' | 'revoke', el.dataset.id);
     else if (a === 'new') void newTab();
     else if (a === 'stop') void post('stop');
     else if (a === 'drop-context') {
@@ -538,6 +624,7 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
   };
 
   toggle?.addEventListener('click', onToggle);
+  toast.addEventListener('click', onToastClick);
   dialog.addEventListener('click', onClick);
   dialog.addEventListener('keydown', onKey);
   dialog.addEventListener('cancel', onCancel);
@@ -571,6 +658,7 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
       text.setSelectionRange(t.length, t.length);
     },
     refreshContext,
+    refreshDevices: () => void refreshDevices(),
     get presence() {
       return presenceNow();
     },
@@ -592,6 +680,7 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
       document.documentElement.classList.remove('chat-modal');
       root.classList.remove('chat-docked');
       dialog.remove();
+      toast.remove();
     },
   };
 }

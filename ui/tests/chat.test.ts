@@ -156,6 +156,15 @@ function setup(opts: { mobile?: boolean; state?: unknown; status?: number } = {}
     if (url === '/__chat/new') return reply(200, { status: 'open', key: B });
     if (url.startsWith('/__chat/messages')) return reply(200, { status: 'queued', presence: 'thinking' });
     if (url.startsWith('/__chat/stop') || url.startsWith('/__chat/end')) return reply(200, { status: 'ok' });
+    if (url === '/__chat/devices')
+      return reply(200, { devices: (globalThis as { __devices?: unknown[] }).__devices ?? [] });
+    if (url === '/__chat/devices/pair')
+      return reply(200, {
+        urls: [{ interface: 'Wi-Fi', virtual: false, url: 'https://192.168.1.2:5180/?pair=abc' }],
+        expiresAt: 0,
+        fingerprint: 'AA:BB:CC:DD:EE:FF:00:11',
+      });
+    if (url.startsWith('/__chat/devices/')) return reply(200, { status: 'ok' });
     return reply(404, {});
   }) as typeof fetch;
   const mq = (matches: boolean) =>
@@ -357,4 +366,53 @@ test('a closed chat is never revived: opening after the last tab was closed star
   expect(calls.map((c) => c.url)).toEqual(['/__chat/state', '/__chat/open', '/__chat/new']);
   expect(chat!.active).toBe(B);
   delete (globalThis as { __ended?: boolean }).__ended;
+});
+
+test('this machine: devices panel, pairing link with QR code, approval toast even with the chat closed', async () => {
+  const pending = {
+    id: 'dev12345',
+    name: 'Android · Chrome',
+    status: 'pending',
+    approved: false,
+    confirm: '4821',
+    lastSeen: null,
+  };
+  const phone = { id: 'dev99999', name: 'iPhone · Safari', status: 'active', approved: true, lastSeen: Date.now() };
+  (globalThis as { __devices?: unknown[] }).__devices = [pending, phone];
+  const { calls, toggle, dialog } = setup({
+    state: { key: A, server: true, runner: true, tabs: [tabOf(A)], local: true },
+  });
+  await ticks(4);
+  // the toast shows while the chat is closed
+  const toast = document.querySelector<HTMLElement>('.pair-toast')!;
+  expect(toast.hidden).toBe(false);
+  expect(toast.textContent).toContain('4821');
+  toast.querySelector<HTMLElement>('[data-chat="dev-approve"]')!.click();
+  await tick();
+  expect(calls.some((c) => c.url === '/__chat/devices/approve?id=dev12345')).toBe(true);
+
+  toggle.click();
+  const btn = dialog.querySelector<HTMLElement>('[data-chat="devices"]')!;
+  expect(btn.hidden).toBe(false);
+  btn.click();
+  await ticks();
+  const box = dialog.querySelector<HTMLElement>('.chat-devices')!;
+  expect(box.textContent).toContain('iPhone · Safari');
+  box.querySelector<HTMLElement>('[data-chat="dev-pair"]')!.click();
+  await ticks();
+  expect(box.querySelector('svg')).not.toBeNull();
+  expect(box.textContent).toContain('https://192.168.1.2:5180/?pair=abc');
+  expect(box.textContent).toContain('AA:BB:CC:DD:EE:FF:00:11');
+  box.querySelector<HTMLElement>('[data-chat="dev-revoke"]')!.click();
+  await tick();
+  expect(calls.some((c) => c.url === '/__chat/devices/revoke?id=dev99999')).toBe(true);
+  delete (globalThis as { __devices?: unknown[] }).__devices;
+});
+
+test('a paired device sees no device admin', async () => {
+  const { toggle, dialog } = setup({ state: { key: A, server: true, runner: true, tabs: [tabOf(A)], local: false } });
+  await ticks();
+  toggle.click();
+  expect(dialog.querySelector<HTMLElement>('[data-chat="devices"]')!.hidden).toBe(true);
+  expect(document.querySelector<HTMLElement>('.pair-toast')!.hidden).toBe(true);
 });

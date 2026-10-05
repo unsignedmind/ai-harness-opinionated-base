@@ -73,16 +73,21 @@ test('open, await, message, reply, pending, end, stop', async (t) => {
   assert.equal((await nos(['open', '--no-open', '--reopen'], { cwd: root })).json.status, 'open');
 });
 
-test('pair creates a token once and rotates on demand', async (t) => {
+test('pair prints a one-time https link; devices lists, approves and revokes', async (t) => {
   const root = project(t);
   const a = (await nos(['pair'], { cwd: root })).json;
   const b = (await nos(['pair'], { cwd: root })).json;
-  const c = (await nos(['pair', '--rotate'], { cwd: root })).json;
-  const token = readFileSync(path.join(root, 'specs', '.chat', 'token'), 'utf8').trim();
-  assert.match(token, /^[a-f0-9]{64}$/);
-  assert.deepEqual(a.urls, b.urls);
-  for (const u of c.urls) assert.ok(u.url.endsWith(`?pair=${token}`));
-  assert.equal(c.rotated, true);
+  const codeOf = (r) => (r.urls[0] ? new URL(r.urls[0].url).searchParams.get('pair') : null);
+  if (a.urls.length) {
+    assert.match(a.urls[0].url, /^https:\/\//);
+    assert.notEqual(codeOf(a), codeOf(b));
+  }
+  // the plain code is never stored
+  const stored = readFileSync(path.join(root, 'specs', '.chat', 'devices.json'), 'utf8');
+  if (codeOf(a)) assert.ok(!stored.includes(codeOf(a)));
+  assert.deepEqual((await nos(['devices'], { cwd: root })).json, { devices: [] });
+  assert.equal((await nos(['devices', '--approve', 'nope'], { cwd: root })).json.status, 'not-found');
+  assert.equal((await nos(['devices', '--revoke-all'], { cwd: root })).json.status, 'revoked');
 });
 
 test('hook: queued message and no server gives a block decision and empties the queue', async (t) => {
