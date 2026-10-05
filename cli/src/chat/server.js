@@ -79,6 +79,7 @@ export function createChatServer({
   const lastPresence = new Map();
   const running = new Map(); // key -> run handle (runner mode)
   const activity = new Map(); // key -> last tool call of the run
+  const agents = new Map(); // key -> subagents of the last run (runner.js agentTracker)
   const allStreams = new Set(); // project-wide streams (spec-ui tabs)
   let lastActive = Date.now();
   let stopping = false;
@@ -112,6 +113,7 @@ export function createChatServer({
         presence: presenceFor(s.key),
         running: running.has(s.key),
         activity: activity.get(s.key) ?? null,
+        agents: agents.get(s.key) ?? [],
         messages: s.messages,
         claudeSession: s.claudeSession,
         updatedAt: s.updatedAt,
@@ -153,6 +155,7 @@ export function createChatServer({
     }
     if (!s.claudeSession) store.update(key, { claudeSession: randomUUID(), claudeStarted: false });
     const cur = store.get(key);
+    if (agents.delete(key)) each(key, 'agents', { agents: [] });
     let handle;
     try {
       handle = runner.run({
@@ -164,6 +167,10 @@ export function createChatServer({
           activity.set(key, text);
           each(key, 'activity', { text });
           broadcastSessions();
+        },
+        onAgents: (list) => {
+          agents.set(key, list);
+          each(key, 'agents', { agents: list });
         },
       });
     } catch (err) {

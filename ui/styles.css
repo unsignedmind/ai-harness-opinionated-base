@@ -1320,19 +1320,25 @@ dialog.chat::backdrop {
   }
 }
 
-/* chat tabs: one per Claude Code session */
+/* chat tabs: one per Claude Code session; the chevron for the subagents stays at the right end */
+.chat-tabs-row {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+.chat-tabs-row[hidden] {
+  display: none;
+}
 .chat-tabs {
   display: flex;
+  flex: 1;
+  min-width: 0;
   gap: 4px;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--line);
   overflow-x: auto;
   scrollbar-width: none;
 }
 .chat-tabs::-webkit-scrollbar {
-  display: none;
-}
-.chat-tabs[hidden] {
   display: none;
 }
 .chat-tab {
@@ -1470,6 +1476,136 @@ dialog.chat::backdrop {
 }
 [data-chat='stop'] {
   color: var(--other);
+}
+
+/* subagents of the runs, behind the chevron of the tab bar */
+.chat-agents-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  min-width: 34px;
+  min-height: 34px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.chat-agents-toggle[data-running='true'] {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.chat-agents-toggle .chev {
+  display: inline-block;
+  line-height: 1;
+  transform: translateY(-3px);
+  transition: transform 0.15s;
+}
+.chat-agents-toggle[aria-expanded='true'] .chev {
+  transform: translateY(3px) rotate(180deg);
+}
+.chat-agents-toggle .badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 10.5px;
+  line-height: 16px;
+  text-align: center;
+}
+.chat-agents-toggle .badge[hidden] {
+  display: none;
+}
+.chat-agents {
+  max-height: 40vh;
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid var(--line);
+  overflow-y: auto;
+  font-size: 13px;
+}
+.chat-agents[hidden] {
+  display: none;
+}
+.chat-agents-empty {
+  margin: 4px 0;
+}
+.agent-group + .agent-group {
+  margin-top: 8px;
+}
+.agent-tab {
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-group ul {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.agent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+}
+.agent + .agent {
+  border-top: 1px dashed var(--line);
+}
+.agent .dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--done);
+  flex: none;
+}
+.agent[data-status='running'] .dot {
+  background: var(--accent);
+  animation: chat-pulse 1.2s ease-in-out infinite;
+}
+.agent[data-status='failed'] .dot {
+  background: var(--other);
+}
+.agent[data-status='stopped'] .dot {
+  background: var(--muted);
+}
+.agent-main {
+  flex: 1;
+  min-width: 0;
+}
+.agent-head {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.agent-head strong {
+  flex: none;
+  font-weight: 600;
+}
+.agent-desc,
+.agent-now {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-now {
+  color: var(--muted);
+  font-size: 12px;
+}
+.agent[data-status='failed'] .agent-now {
+  color: var(--other);
+}
+.agent-n {
+  flex: none;
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 
 /* paired devices (this machine only): list, pairing link with QR code, approval toast */

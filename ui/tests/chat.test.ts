@@ -7,6 +7,7 @@ import { parseRoute } from '../src/route';
 import {
   askPrompt,
   contextOf,
+  renderAgents,
   renderLog,
   renderTabs,
   splitContext,
@@ -14,6 +15,7 @@ import {
   withContext,
   type ChatEntry,
   type ChatTab,
+  type SubAgent,
 } from '../src/views/chat';
 import { fixtureFiles } from './fixtures';
 
@@ -265,6 +267,65 @@ test('a running tab shows the activity and a stop button; closing a tab posts en
   expect(calls.at(-1)!.url).toBe(`/__chat/stop?key=${A}`);
   es.emit('sessions', { sessions: [tabOf(A)], runner: true });
   expect(dialog.querySelector<HTMLElement>('[data-chat="stop"]')!.hidden).toBe(true);
+});
+
+const agent = (id: string, extra: Partial<SubAgent> = {}): SubAgent => ({
+  id,
+  type: 'Explore',
+  description: 'Find the routes',
+  status: 'running',
+  activity: 'Grep: route',
+  tools: 3,
+  startedAt: 0,
+  endedAt: null,
+  ...extra,
+});
+
+test('renderAgents: active tab first, escaped, status, current tool, tool count and time', () => {
+  const box = document.createElement('div');
+  box.innerHTML = renderAgents([], A);
+  expect(box.textContent).toContain('No subagents');
+  box.innerHTML = renderAgents(
+    [
+      tabOf(A, { agents: [agent('1', { status: 'done', activity: null, tools: 1, endedAt: 75000 })] }),
+      tabOf(B, { agents: [agent('2', { description: '<img src=x>' })] }),
+      tabOf('cccccccccccc'),
+    ],
+    B,
+    12000,
+  );
+  expect(box.querySelector('img')).toBeNull();
+  expect([...box.querySelectorAll('.agent-tab')].map((t) => t.textContent)).toEqual(['Second', 'Chat']);
+  const [run, done] = box.querySelectorAll<HTMLElement>('.agent');
+  expect(run.dataset.status).toBe('running');
+  expect(run.querySelector('.agent-desc')!.textContent).toBe('<img src=x>');
+  expect(run.querySelector('.agent-now')!.textContent).toBe('Grep: route');
+  expect(run.querySelector('.agent-n')!.textContent).toBe('3 tools · 12s');
+  expect(done.querySelector('.agent-now')!.textContent).toBe('done');
+  expect(done.querySelector('.agent-n')!.textContent).toBe('1 tool · 1m 15s');
+});
+
+test('subagents: the chevron counts the running ones and expands their list', async () => {
+  const { toggle, dialog } = setup({ state: { key: A, server: true, runner: true, tabs: [tabOf(A)] } });
+  await tick();
+  const es = FakeES.last!;
+  toggle.click();
+  const chev = dialog.querySelector<HTMLElement>('[data-chat="agents"]')!;
+  const box = dialog.querySelector<HTMLElement>('.chat-agents')!;
+  expect(chev.querySelector<HTMLElement>('.badge')!.hidden).toBe(true);
+  expect(box.hidden).toBe(true);
+  es.emit('sessions', { sessions: [tabOf(A, { running: true })], runner: true });
+  es.emit('agents', { key: A, agents: [agent('1'), agent('2', { status: 'failed' })] });
+  expect(chev.querySelector('.badge')!.textContent).toBe('1');
+  chev.click();
+  expect(box.hidden).toBe(false);
+  expect(chev.getAttribute('aria-expanded')).toBe('true');
+  expect(box.querySelectorAll('.agent').length).toBe(2);
+  es.emit('agents', { key: A, agents: [agent('1', { status: 'done' }), agent('2', { status: 'failed' })] });
+  expect(chev.querySelector<HTMLElement>('.badge')!.hidden).toBe(true);
+  expect(box.querySelectorAll('.agent[data-status="done"]').length).toBe(1);
+  chev.click();
+  expect(box.hidden).toBe(true);
 });
 
 test('every tab has its own close button; closing a background tab keeps the active one', async () => {

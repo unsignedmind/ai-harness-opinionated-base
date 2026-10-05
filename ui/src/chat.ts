@@ -9,8 +9,10 @@
 import {
   CHAT_SHELL,
   PRESENCE_LABEL,
+  renderAgents,
   renderLog,
   renderTabs,
+  runningAgents,
   withContext,
   type ChatContext,
   type ChatEntry,
@@ -28,6 +30,7 @@ const COARSE = '(pointer: coarse)';
 const KEY_OPEN = 'nos-chat-open';
 const KEY_WIDTH = 'nos-chat-width';
 const KEY_TAB = 'nos-chat-tab';
+const KEY_AGENTS = 'nos-chat-agents';
 
 export type ChatDeps = {
   fetch?: typeof fetch;
@@ -92,6 +95,10 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
   const $ = <T extends HTMLElement>(sel: string) => dialog.querySelector<T>(sel)!;
   const log = $('.chat-log');
   const tabBar = $('.chat-tabs');
+  const tabRow = $('.chat-tabs-row');
+  const agentsBtn = $<HTMLButtonElement>('[data-chat="agents"]');
+  const agentsBox = $('.chat-agents');
+  agentsBox.hidden = ls.get(KEY_AGENTS) !== '1';
   const activityLine = $('.chat-activity');
   const text = $<HTMLTextAreaElement>('textarea');
   const line = $('.chat-line');
@@ -155,7 +162,8 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
     const tab = current();
     renderLog(log, (active && chats[active]) || [], p);
     tabBar.innerHTML = renderTabs(tabs, active, unread);
-    tabBar.hidden = status === 'unpaired' || (!tabs.length && status !== null);
+    tabRow.hidden = status === 'unpaired' || (!tabs.length && status !== null);
+    drawAgents();
     const pill = $('.chat-presence');
     pill.dataset.presence = p;
     pill.querySelector('.lbl')!.textContent = PRESENCE_LABEL[p];
@@ -184,6 +192,18 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
         badge.textContent = String(total);
       }
     }
+  }
+
+  // chevron at the end of the tab bar: number of running subagents, the list when expanded
+  function drawAgents() {
+    const n = runningAgents(tabs);
+    const badge = agentsBtn.querySelector<HTMLElement>('.badge')!;
+    badge.hidden = n === 0;
+    badge.textContent = String(n);
+    agentsBtn.dataset.running = String(n > 0);
+    agentsBtn.title = n ? `Subagents: ${n} running` : 'Subagents';
+    agentsBtn.setAttribute('aria-expanded', String(!agentsBox.hidden));
+    if (!agentsBox.hidden) agentsBox.innerHTML = renderAgents(tabs, active);
   }
 
   function setNotice(html: string | null) {
@@ -220,6 +240,12 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
       const { key, state } = data<{ key: string; state: Presence }>(e);
       const t = tabOf(key);
       if (t) t.presence = state;
+      draw();
+    });
+    es.addEventListener('agents', (e) => {
+      const { key, agents } = data<{ key: string; agents: ChatTab['agents'] }>(e);
+      const t = tabOf(key);
+      if (t) t.agents = agents;
       draw();
     });
     es.addEventListener('activity', (e) => {
@@ -570,7 +596,11 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
     else if (a === 'close-tab' && el?.dataset.key) closeTab(el.dataset.key);
     else if (a === 'rename') startRename();
     else if (a === 'rename-cancel') endRename(false);
-    else if (a === 'devices') {
+    else if (a === 'agents') {
+      agentsBox.hidden = !agentsBox.hidden;
+      ls.set(KEY_AGENTS, agentsBox.hidden ? '0' : '1');
+      drawAgents();
+    } else if (a === 'devices') {
       devicesBox.hidden = !devicesBox.hidden;
       draw();
       if (!devicesBox.hidden) void refreshDevices();
@@ -647,6 +677,10 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
   const recheck = setInterval(() => {
     if (!es && !sending && status !== 'unpaired') void sync();
   }, 10000);
+  // time taken of the running subagents
+  const tick = setInterval(() => {
+    if (isOpen && !agentsBox.hidden && runningAgents(tabs)) drawAgents();
+  }, 1000);
 
   return {
     open,
@@ -671,6 +705,7 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
     destroy() {
       destroyed = true;
       clearInterval(recheck);
+      clearInterval(tick);
       es?.close();
       toggle?.removeEventListener('click', onToggle);
       window.removeEventListener('popstate', onPop);
@@ -692,6 +727,7 @@ const emptyTab = (key: string): ChatTab => ({
   running: false,
   activity: null,
   claudeSession: null,
+  agents: [],
 });
 
 function safeLocalStorage(): Storage | null {

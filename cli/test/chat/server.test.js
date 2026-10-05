@@ -190,8 +190,13 @@ test('runner: a message starts a run, the result becomes the reply, the session 
   await call('POST', `/api/session/${key}/messages`, { text: 'and lint' });
   assert.equal(runner.runs.length, 1);
   first.onActivity('Bash: npm test');
+  first.onAgents([{ id: 'toolu_1', type: 'Explore', status: 'running' }]);
+  const tabs = async () => (await call('GET', '/api/sessions')).body.tabs;
+  assert.deepEqual((await tabs())[0].agents, [{ id: 'toolu_1', type: 'Explore', status: 'running' }]);
   runner.runs[0].finish({ text: 'All 42 pass.' });
   await sleep(10);
+  // the next run starts with no subagents
+  assert.deepEqual((await tabs())[0].agents, []);
   assert.equal(store.get(key).chat.find((m) => m.role === 'agent').text, 'All 42 pass.');
   assert.equal(runner.runs.length, 2);
   assert.equal(runner.runs[1].opts.resume, true);

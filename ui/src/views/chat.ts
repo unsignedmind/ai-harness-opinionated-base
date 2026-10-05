@@ -44,7 +44,52 @@ export type ChatTab = {
   running: boolean;
   activity: string | null;
   claudeSession: string | null;
+  // subagents of the tab's last run (cli/src/chat/runner.js agentTracker)
+  agents?: SubAgent[];
 };
+
+export type SubAgent = {
+  id: string;
+  type: string;
+  description: string;
+  status: 'running' | 'done' | 'failed' | 'stopped';
+  activity: string | null;
+  tools: number;
+  startedAt: number;
+  endedAt: number | null;
+};
+
+const AGENT_STATUS = ['running', 'done', 'failed', 'stopped'];
+
+const took = (ms: number) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+};
+
+export const runningAgents = (tabs: ChatTab[]) =>
+  tabs.reduce((n, t) => n + (t.agents ?? []).filter((a) => a.status === 'running').length, 0);
+
+// The subagents behind the chevron of the tab bar: per tab (the active one first), one row each
+// with status, type, task, current tool call, tool calls so far and time taken.
+export function renderAgents(tabs: ChatTab[], active: string | null, now = Date.now()): string {
+  const withAgents = tabs
+    .filter((t) => t.agents?.length)
+    .sort((a, b) => Number(b.key === active) - Number(a.key === active));
+  if (!withAgents.length) return '<p class="muted chat-agents-empty">No subagents in the last run of any chat.</p>';
+  return withAgents
+    .map(
+      (t) =>
+        `<div class="agent-group"><div class="agent-tab muted">${esc(t.title)}</div><ul>${(t.agents ?? [])
+          .map((a) => {
+            const status = AGENT_STATUS.includes(a.status) ? a.status : 'done';
+            const what = a.status === 'running' ? (a.activity ?? 'starting…') : status;
+            const n = `${a.tools} tool${a.tools === 1 ? '' : 's'} · ${took((a.endedAt ?? now) - a.startedAt)}`;
+            return `<li class="agent" data-status="${esc(status)}"><span class="dot" aria-hidden="true"></span><div class="agent-main"><div class="agent-head"><strong>${esc(a.type)}</strong><span class="agent-desc">${esc(a.description)}</span></div><div class="agent-now mono" title="${esc(what)}">${esc(what)}</div></div><span class="agent-n muted">${esc(n)}</span></li>`;
+          })
+          .join('')}</ul></div>`,
+    )
+    .join('');
+}
 
 // One tab: select button with presence dot and unread badge, and its own close button.
 export function renderTabs(tabs: ChatTab[], active: string | null, unread: Record<string, number>): string {
@@ -221,7 +266,11 @@ export const CHAT_SHELL = `<div class="chat-bar">
   <button type="button" data-chat="stop" hidden title="Stop what Claude is doing">&#9632; Stop</button>
   <button type="button" class="chat-x" data-chat="close" aria-label="Close chat">&#10005;</button>
 </div>
-<div class="chat-tabs" role="tablist" aria-label="Chats"></div>
+<div class="chat-tabs-row">
+  <div class="chat-tabs" role="tablist" aria-label="Chats"></div>
+  <button type="button" class="chat-agents-toggle" data-chat="agents" aria-expanded="false" aria-controls="chat-agents" title="Subagents"><span class="badge" hidden></span><span class="chev" aria-hidden="true">&#8964;</span></button>
+</div>
+<section class="chat-agents" id="chat-agents" hidden aria-label="Subagents"></section>
 <section class="chat-devices" hidden aria-label="Devices"></section>
 <form class="chat-rename-row" hidden>
   <input class="chat-rename" maxlength="60" aria-label="Chat name" enterkeyhint="done" autocomplete="off">

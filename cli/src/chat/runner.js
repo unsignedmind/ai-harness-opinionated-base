@@ -32,6 +32,84 @@ export function describeTool(name, input = {}) {
   return arg ? `${name}: ${short(arg)}` : name;
 }
 
+const AGENT_TOOLS = new Set(['Agent', 'Task']);
+const TASK_END = { completed: 'done', failed: 'failed', stopped: 'stopped', killed: 'stopped' };
+
+// Subagents of a run, from the stream-json lines: an Agent/Task tool call starts one, the messages
+// with its id as parent_tool_use_id are its own tool calls, its tool_result ends it. A background
+// agent's tool_result only says it was launched; its end comes as a system task_* event, if at all.
+// line(j) says whether the list changed. Paths in the project root are shown relative to it.
+export function agentTracker(now = Date.now, root = '') {
+  const dirs = root ? [...new Set([root, root.replace(/\\/g, '/'), root.replace(/\//g, '\\')])] : [];
+  const rel = (t) => dirs.reduce((s, d) => s.split(d + '/').join('').split(d + '\\').join(''), t);
+  const agents = new Map(); // tool_use id -> agent
+  const tasks = new Map(); // task_id -> tool_use id
+  const byTask = (j) => agents.get(j.tool_use_id) ?? agents.get(tasks.get(j.task_id));
+  const end = (a, status) => {
+    if (a.status !== 'running') return false;
+    a.status = status;
+    a.activity = null;
+    a.endedAt = now();
+    return true;
+  };
+  return {
+    list: () => [...agents.values()].map(({ background, ...a }) => ({ ...a })),
+    line(j) {
+      let changed = false;
+      const content = Array.isArray(j.message?.content) ? j.message.content : [];
+      if (j.type === 'assistant')
+        for (const c of content) {
+          if (c.type !== 'tool_use') continue;
+          const parent = agents.get(j.parent_tool_use_id);
+          if (parent && parent.status === 'running') {
+            parent.activity = rel(describeTool(c.name, c.input));
+            parent.tools++;
+            changed = true;
+          }
+          if (AGENT_TOOLS.has(c.name) && c.id && !agents.has(c.id)) {
+            agents.set(c.id, {
+              id: String(c.id),
+              type: short(c.input?.subagent_type || 'general-purpose', 40),
+              description: short(c.input?.description || c.input?.prompt || '', 80),
+              status: 'running',
+              activity: null,
+              tools: 0,
+              startedAt: now(),
+              endedAt: null,
+              background: !!c.input?.run_in_background,
+            });
+            changed = true;
+          }
+        }
+      else if (j.type === 'user')
+        for (const c of content) {
+          const a = c.type === 'tool_result' && agents.get(c.tool_use_id);
+          if (a && (c.is_error || !a.background)) changed = end(a, c.is_error ? 'failed' : 'done') || changed;
+        }
+      else if (j.type === 'system' && j.subtype === 'task_started' && j.task_id && agents.has(j.tool_use_id))
+        tasks.set(j.task_id, j.tool_use_id);
+      else if (j.type === 'system' && j.subtype === 'task_progress') {
+        const a = byTask(j);
+        if (a && a.status === 'running') {
+          if (j.last_tool_name) a.activity = String(j.last_tool_name);
+          if (Number.isInteger(j.usage?.tool_uses)) a.tools = j.usage.tool_uses;
+          changed = true;
+        }
+      } else if (j.type === 'system' && j.subtype === 'task_notification') {
+        const a = byTask(j);
+        if (a) changed = end(a, TASK_END[j.status] ?? 'done');
+      }
+      return changed;
+    },
+    // the run is over: whatever still runs ended with it
+    finish(stopped) {
+      let changed = false;
+      for (const a of agents.values()) changed = end(a, stopped ? 'stopped' : 'done') || changed;
+      return changed;
+    },
+  };
+}
+
 export function argsFor({ sessionId, resume, mode = 'auto', model, title }) {
   if (!UUID.test(sessionId)) throw new Error('invalid session id');
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-prompts', 'none'];
@@ -57,7 +135,7 @@ export function createRunner({ root, bin = 'claude', mode = 'auto', model, env =
   return {
     mode,
     // returns { done: Promise<{ text, error, stopped, created }>, stop() }
-    run({ sessionId, resume, prompt, title, onActivity = () => {} }) {
+    run({ sessionId, resume, prompt, title, onActivity = () => {}, onAgents = () => {} }) {
       const child = spawnFn(bin, argsFor({ sessionId, resume, mode, model, title }), {
         cwd: root,
         env: cleanEnv(env),
@@ -71,6 +149,7 @@ export function createRunner({ root, bin = 'claude', mode = 'auto', model, env =
       let lastText = '';
       let errText = '';
       let buf = '';
+      const agents = agentTracker(Date.now, root);
 
       const onLine = (line) => {
         let j;
@@ -79,11 +158,13 @@ export function createRunner({ root, bin = 'claude', mode = 'auto', model, env =
         } catch {
           return;
         }
+        if (j && typeof j === 'object' && agents.line(j)) onAgents(agents.list());
         if (j.type === 'system' && j.subtype === 'init') created = true;
         else if (j.type === 'assistant' && Array.isArray(j.message?.content)) {
           for (const c of j.message.content) {
             if (c.type === 'tool_use') onActivity(describeTool(c.name, c.input));
-            else if (c.type === 'text' && c.text?.trim()) lastText = c.text;
+            // a subagent's text is not the reply
+            else if (c.type === 'text' && c.text?.trim() && !j.parent_tool_use_id) lastText = c.text;
           }
         } else if (j.type === 'result') result = j;
       };
@@ -114,6 +195,7 @@ export function createRunner({ root, bin = 'claude', mode = 'auto', model, env =
         );
         child.on('close', (code) => {
           if (buf.trim()) onLine(buf);
+          if (agents.finish(stopped)) onAgents(agents.list());
           if (stopped) return finish({ text: null });
           if (result && !result.is_error) return finish({ text: String(result.result ?? lastText ?? '').trim() || '(no answer)' });
           const why = result?.result || result?.subtype || short(errText, 400) || `claude exited with code ${code}`;
