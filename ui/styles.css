@@ -1540,16 +1540,16 @@ dialog.chat::backdrop {
   padding: 0;
   list-style: none;
 }
-.agent {
+.chat-agents .agent {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   padding: 5px 0;
 }
-.agent + .agent {
+.chat-agents .agent + .agent {
   border-top: 1px dashed var(--line);
 }
-.agent .dot {
+.chat-agents .agent .dot {
   width: 7px;
   height: 7px;
   margin-top: 6px;
@@ -1557,14 +1557,14 @@ dialog.chat::backdrop {
   background: var(--done);
   flex: none;
 }
-.agent[data-status='running'] .dot {
+.chat-agents .agent[data-status='running'] .dot {
   background: var(--accent);
   animation: chat-pulse 1.2s ease-in-out infinite;
 }
-.agent[data-status='failed'] .dot {
+.chat-agents .agent[data-status='failed'] .dot {
   background: var(--other);
 }
-.agent[data-status='stopped'] .dot {
+.chat-agents .agent[data-status='stopped'] .dot {
   background: var(--muted);
 }
 .agent-main {
@@ -1590,7 +1590,7 @@ dialog.chat::backdrop {
   color: var(--muted);
   font-size: 12px;
 }
-.agent[data-status='failed'] .agent-now {
+.chat-agents .agent[data-status='failed'] .agent-now {
   color: var(--other);
 }
 .agent-n {
