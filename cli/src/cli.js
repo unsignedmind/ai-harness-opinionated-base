@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { CHAT_HELP } from './chat/commands.js';
 import { ensureSpecs } from './config.js';
 import { createDomain } from './domain.js';
 import { createPlan } from './plan.js';
@@ -16,9 +17,11 @@ Commands:
   init               Create specs/ and specs/config.json if missing
   create-domain      Reserve a domain id and create specs/domain-<id>-<slug>/idea.md
   create-plan        Save a plan.json in a domain and create its phase folders and step files
+                     (--hollow: an empty plan.json, promotes the domain unplanned)
   update-plan        Save an updated plan.json and create, move or delete phase folders and step files
   create-quick-step  Add a quick step (no plan) to specs/<domain>/quick-steps/
   set-status         Change the status of a plan, phase, step or quick step
+  chat <command>     Local chat with this Claude Code session (nos chat --help)
   help <command>     Show detailed help for a command
 
 Options:
@@ -77,7 +80,7 @@ Example:
     "domain": "specs/domain-1-user-auth/domain.json"
   }`;
 
-const CREATE_PLAN_HELP = `Usage: nos create-plan --domain <domain-<id>-<slug>> --plan <file|-> [--root <dir>]
+const CREATE_PLAN_HELP = `Usage: nos create-plan --domain <domain-<id>-<slug>> (--plan <file|-> | --hollow) [--root <dir>]
 
 Lay out the spec files for a plan in an existing domain.
 
@@ -89,9 +92,15 @@ Lay out the spec files for a plan in an existing domain.
 
 Nothing is written when the plan is invalid. A domain can only be planned once.
 
+--hollow promotes a domain without planning it: it saves only
+  { "name": <domain.json name>, "status": "open", "phases": [] }
+and creates no folders. A hollow plan (no phases, no phase folders) is filled
+by a later create-plan with --plan.
+
 Options:
   --domain <name>  Domain folder name, e.g. domain-1-user-auth        (required)
-  --plan <file|->  plan.json file, or "-" to read it from stdin       (required)
+  --plan <file|->  plan.json file, or "-" to read it from stdin       (required unless --hollow)
+  --hollow         Save an empty plan.json instead (no --plan)
   --root <dir>     Project root containing specs/ (default: current directory)
 
 plan.json ("phases" and "steps" may be arrays or single objects):
@@ -119,7 +128,10 @@ except "labels": labels belong to the domain (domain.json) and are dropped.
 Example:
   nos create-plan --domain domain-1-user-auth --plan plan.json
   -> specs/domain-1-user-auth/plan.json
-     specs/domain-1-user-auth/phases/phase-1-data-model/step-1-user-table.md`;
+     specs/domain-1-user-auth/phases/phase-1-data-model/step-1-user-table.md
+
+  nos create-plan --domain domain-2-dark-mode --hollow
+  -> specs/domain-2-dark-mode/plan.json  { "name": "Dark mode", "status": "open", "phases": [] }`;
 
 const UPDATE_PLAN_HELP = `Usage: nos update-plan --domain <domain-<id>-<slug>> --plan <file|-> [--dry-run] [--force] [--root <dir>]
 
@@ -274,14 +286,28 @@ const COMMANDS = {
   },
   'create-plan': {
     help: CREATE_PLAN_HELP,
-    options: { domain: { type: 'string' }, plan: { type: 'string' }, root: { type: 'string' } },
-    required: ['domain', 'plan'],
+    options: {
+      domain: { type: 'string' },
+      plan: { type: 'string' },
+      hollow: { type: 'boolean' },
+      root: { type: 'string' },
+    },
+    required: ['domain'],
     execute(values, io, root) {
-      const result = createPlan(root, { domain: values.domain, plan: readInput(values.plan, io) });
+      const hollow = values.hollow ?? false;
+      if (hollow && values.plan) throw new UsageError('--hollow takes no --plan', 'create-plan');
+      if (!hollow && !values.plan) {
+        throw new UsageError('Missing input: --plan. Please provide it and retry', 'create-plan');
+      }
+      const result = createPlan(root, {
+        domain: values.domain,
+        ...(hollow ? { hollow } : { plan: readInput(values.plan, io) }),
+      });
       return {
         action: 'create-plan',
         domain: result.domain,
         plan: rel(root, result.planPath),
+        ...(result.hollow && { hollow: true }),
         phases: result.phases.map((phase) => ({
           id: phase.id,
           folder: phase.folder,
@@ -417,7 +443,7 @@ export function run(argv, io = {}) {
       return 0;
     }
     if (name === 'help') {
-      stdout.write(lookupCommand(args[0]).help + '\n');
+      stdout.write((args[0] === 'chat' ? CHAT_HELP : lookupCommand(args[0]).help) + '\n');
       return 0;
     }
 

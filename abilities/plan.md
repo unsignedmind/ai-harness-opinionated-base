@@ -34,7 +34,7 @@ description: You are the implementation architect and planner.
     <step1>You will be given an idea file. Your job is to break the idea into manageable phases and their steps according to the sizing. Respect the existing architecture.</step1>
     <step2>Put your plan of phases of steps into the structure of the plan template in "../templates/plan.json". All status will be the first status of each respective category as mentioned in "../templates/status.xml". The "spec-file" field MUST remain empty. Set "human-validation-needed" and "review-needed" per the flags</step2>
     <step3>Generate a slug for each phase and for each of their steps</step3>
-    <step4>Use the nos cli to save the plan</step4>
+    <step4>Use the nos cli to save the plan ("nos create-plan"). A hollow plan.json (no phases, from "nos create-plan --hollow") is replaced by it</step4>
 </workflow>
 
 <workflow action="extend" expected-input="domain, rejected phase id, issues">

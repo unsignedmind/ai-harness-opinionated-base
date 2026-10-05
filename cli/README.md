@@ -25,7 +25,7 @@ nos <command> --help
 | ------------------- | --------------------------------------------------------------------------- |
 | `init`              | Create `specs/` and `specs/config.json` if missing                          |
 | `create-domain`     | Reserve a domain id and create `specs/domain-<id>-<slug>/idea.md`           |
-| `create-plan`       | Save a `plan.json` in a domain and create its phase folders and step files  |
+| `create-plan`       | Save a `plan.json` in a domain and create its phase folders and step files (`--hollow`: empty plan, promotes unplanned) |
 | `update-plan`       | Save an updated `plan.json` and create, move or delete phases and steps     |
 | `create-quick-step` | Add a quick step (one step outside any plan) to a domain                    |
 | `set-status`        | Change the status of a plan, phase, step or quick step                      |
@@ -90,13 +90,14 @@ $ nos create-domain --idea idea.md --slug user-auth --labels auth,ui
 
 ```sh
 nos create-plan --domain <domain-<id>-<slug>> --plan <file|-> [--root <dir>]
+nos create-plan --domain <domain-<id>-<slug>> --hollow [--root <dir>]
 ```
 
 1. For each phase, takes the next phase id and creates `specs/<domain>/phases/phase-<id>-<slug>/`.
 2. For each step, reserves a step id and creates an empty `step-<id>-<slug>.md` in its phase folder.
 3. Sets each step's `spec-file` field and saves `plan.json` in the domain. A `labels` field is dropped: labels live in `domain.json`.
 
-The plan is validated before anything is written. Each domain can have only one plan.
+The plan is validated before anything is written. Each domain can have only one plan; only a hollow plan (see below) may be replaced.
 
 Example `plan.json` (`phases` and `steps` can be arrays or single objects):
 
@@ -129,6 +130,22 @@ $ nos create-plan --domain domain-1-user-auth --plan plan.json
 #   specs/domain-1-user-auth/plan.json
 #   specs/domain-1-user-auth/phases/phase-1-data-model/step-1-user-table.md
 ```
+
+#### Hollow plan (`--hollow`)
+
+```sh
+nos create-plan --domain <domain-<id>-<slug>> --hollow [--root <dir>]
+```
+
+Promotes a domain without planning it (the Spec UI's "Manual promote" button runs this). It saves only
+
+```json
+{ "name": "<domain.json name>", "status": "open", "phases": [] }
+```
+
+and creates no folders. The name falls back to the first `# ` heading of `idea.md` (without `Idea:`). The status is the first `<plans>` status of `status.xml` (`open` without the file). `--plan` is not allowed with `--hollow`, and an existing `plan.json` is refused.
+
+A hollow plan (no phases and no `phase-*` folders) does not count as "planned": a later `create-plan --plan …` replaces it with the real plan. The orchestrator's RUN option skips plans without phases; its PLAN option still offers the domain.
 
 ### `update-plan`
 
@@ -209,6 +226,37 @@ $ nos set-status --domain domain-1-user-auth --step 1 --status in-review
 }
 ```
 
+### `chat`
+
+Local chat of the project in the spec-ui (or the chat page). By default the chat server answers every
+chat tab with its own headless Claude Code session (`src/chat/runner.js`: `claude -p --output-format stream-json`,
+`--session-id`/`--resume`, `--permission-mode auto`, `--permission-prompts none`, run in the project root).
+`"chat": { "runner": false }` switches to relay: a terminal session answers with `await` / `reply`.
+Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat --help`.
+
+| Command | What it does |
+| --- | --- |
+| `nos chat` | Server address, version and sessions |
+| `nos chat open [--name n] [--no-open] [--reopen]` | Start the server if needed, open or resume the chat |
+| `nos chat await [--timeout-ms n]` | Block until the user writes or ends the chat; adds `next_step` |
+| `nos chat reply [--text t]` | Send a reply; stdin when `--text` is absent |
+| `nos chat typing [--state thinking\|typing\|idle]` | Presence shown in the page |
+| `nos chat pending` | Sessions with undelivered messages, read from disk |
+| `nos chat end` / `nos chat stop` | End the chat as the agent / shut the server down |
+| `nos chat pair [--rotate]` | Pairing links for phones on the home network (spec-ui `dev-to-lan`) |
+| `nos chat server [--port n]` | Run the server in the foreground |
+| `nos chat hook` | Stop hook: hands queued messages to Claude Code |
+
+- The project root is the nearest folder with `specs/` from the current directory (or `--root`).
+- State: `specs/.chat/` (`sessions.json`, `server.json`, `server.log`, `token`, and a `.gitignore` of `*`).
+- One server per project on 127.0.0.1, port `"chat": { "port" }` in `specs/config.json` (default 4611);
+  a port held by another project's server gives a free port, recorded in `server.json`.
+- `"chat"` in `specs/config.json`: `port`, `runner` (default true), `permissionMode` (default `auto`), `model`,
+  `claude` (path of the executable).
+- Env for tests: `NOS_CHAT_STATE_DIR`, `NOS_CHAT_PORT`, `NOS_CHAT_IDLE_MS` (`0`/`off` disables the 30 min idle exit).
+- Design: `../ui/requirements/Technical design local web chat for Claude Code.md` and
+  `../ui/requirements/Concept spec-ui chat integration.md`.
+
 ## Specs layout
 
 ```
@@ -246,3 +294,4 @@ npm run test:watch  # rerun the tests on every change
 | `src/quick-step.js` | `create-quick-step`, `quick-steps.json` access |
 | `src/status.js`  | `set-status` and `status.xml` parsing            |
 | `src/slug.js`    | Slug validation                                  |
+| `src/chat/`     | `nos chat`: session store, server, guard, page, client, Stop hook |

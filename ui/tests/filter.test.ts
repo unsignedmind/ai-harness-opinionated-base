@@ -9,6 +9,7 @@ import {
   parseQuery,
   sortItems,
   toQuery,
+  suggest,
   toggle,
   type Filters,
 } from '../src/filter';
@@ -150,4 +151,27 @@ test('sort by title is alphabetical', () => {
     'media-query',
     'toggle-button',
   ]);
+});
+
+test('suggest: empty query lists all, case-insensitive, prefix first, selected left out', () => {
+  const o = (v: string) => ({ value: v, text: v });
+  const all = ['ui-kit', 'build-ui', 'api', 'guide-ui', 'ui-docs'].map(o);
+  const values = (xs: { value: string }[]) => xs.map((x) => x.value);
+  expect(values(suggest(all, ['api'], ' '))).toStrictEqual(['build-ui', 'guide-ui', 'ui-docs', 'ui-kit']);
+  expect(values(suggest(all, [], 'UI-'))).toStrictEqual(['ui-docs', 'ui-kit']);
+  expect(values(suggest(all, [], '-ui'))).toStrictEqual(['build-ui', 'guide-ui']);
+  expect(values(suggest(all, ['ui-docs'], 'ui-'))).toStrictEqual(['ui-kit']);
+  expect(values(suggest(all, [], 'ui'))).toStrictEqual(['ui-docs', 'ui-kit', 'build-ui', 'guide-ui']);
+});
+
+test('suggest matches the text and the value', () => {
+  const domains = [{ value: 'dark-mode', text: 'Dark mode' }];
+  expect(suggest(domains, [], 'dark')).toStrictEqual(domains);
+  expect(suggest(domains, [], 'k-m')).toStrictEqual(domains);
+});
+
+test('domain filter is written as domain=, the old idea= still parses', () => {
+  expect(toQuery(f({ ideas: ['a', 'b'] }))).toBe('domain=a%2Cb');
+  expect(parseQuery('idea=a').ideas).toStrictEqual(['a']);
+  expect(parseQuery('domain=b&idea=a').ideas).toStrictEqual(['b']);
 });

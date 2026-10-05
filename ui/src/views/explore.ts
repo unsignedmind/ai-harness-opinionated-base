@@ -1,9 +1,10 @@
-// Explore / Ideas: tree of domains -> phases -> steps (and quick steps) on the left, detail with
-// boards on the right. Explore shows domains with a plan, Ideas the ones without; cross-cutting
+// Domains / Ideas: tree of domains -> phases -> steps (and quick steps) on the left, detail with
+// boards on the right. Domains shows domains with a plan, Ideas the ones without; cross-cutting
 // domains are grouped on both.
 import { esc, inline, renderMd } from '../markdown';
 import { isMatured, type Idea, type Model, type Phase, type Step } from '../model';
 import { hrefOf, hrefOfQuick, QUICK_SEGMENT, type Route } from '../route';
+import { askButtons } from './chat';
 import { kanban } from './kanban';
 import {
   crumbs,
@@ -22,11 +23,17 @@ import {
 // UI state that survives re-renders: expanded tree nodes (`idea` / `idea/phase`) and the chosen
 // subtab per detail kind.
 // `canPick`: standalone viewer, data comes from a folder the user picks (undefined on the dev server).
+// `canPromote`: the host can write specs/ (dev server), so Ideas offer "Manual promote".
+// `canChat`: the chat with the project's Claude Code session is there (dev server): "Ask Claude".
 export type ExploreUi = {
   expanded: Set<string>;
   tabs: Record<string, string>;
   canPick?: boolean;
+  canPromote?: boolean;
+  canChat?: boolean;
 };
+
+const ask = (ui: ExploreUi, kinds: Parameters<typeof askButtons>[0]) => (ui.canChat ? askButtons(kinds) : '');
 
 type Tab = string | { html: string };
 
@@ -62,7 +69,7 @@ function scopeOf(model: Model, r: Route): Scope {
   const ideas = r.view === 'ideas';
   return {
     label: ideas ? 'Ideas' : 'Domains',
-    href: ideas ? '#ideas' : '#explore',
+    href: ideas ? '#ideas' : '#domains',
     noun: ideas ? 'idea' : 'domain',
     domains: model.ideas.filter((i) => isMatured(i) !== ideas),
   };
@@ -179,11 +186,22 @@ function overview(model: Model, scope: Scope, canPick: boolean | undefined) {
     ${cross.length ? `<h2>Cross-cutting</h2>${cards(cross)}` : ''}`;
 }
 
+// unplanned idea: promote it to Domains with an empty (hollow) plan.json
+function promote(i: Idea, ui: ExploreUi) {
+  if (isMatured(i)) return '';
+  const cmd = `nos create-plan --domain ${i.folder} --hollow`;
+  return ui.canPromote
+    ? `<div class="promote"><button type="button" class="primary" data-action="promote" data-domain="${esc(i.folder)}">Manual promote</button><span class="muted">Creates an empty plan.json so the idea moves to Domains</span></div>`
+    : `<p class="promote muted">To promote it without a plan, run <code>${esc(cmd)}</code></p>`;
+}
+
 function ideaDetail(i: Idea, ui: ExploreUi, root: Crumb) {
   return (
     crumbs(root, [i.title]) +
     `<h1><span class="id mono">${i.number}</span>${esc(i.title)} ${pill(i.status)}</h1>
     ${i.error ? `<p class="error">${esc(i.error)}</p>` : ''}
+    ${promote(i, ui)}
+    ${ask(ui, i.plan ? ['discuss'] : ['plan', 'discuss'])}
     <dl class="meta">
       ${i.plan ? `<dt>Plan</dt><dd>${esc(i.plan.name)}</dd>` : ''}
       ${i.labels.length ? `<dt>Labels</dt><dd>${labelChips(i.labels)}</dd>` : ''}
@@ -207,6 +225,7 @@ function phaseDetail(p: Phase, ui: ExploreUi, root: Crumb) {
     crumbs(root, [p.idea.title, hrefOf(p.idea)], [`${itemId(p)} ${p.name}`]) +
     `<h1><span class="id mono">${itemId(p)}</span>${esc(p.name)} ${pill(p.status)}</h1>
     <div class="row">${rollup(p.steps)}${hvnBadge(p.hvn)}</div>
+    ${ask(ui, ['review', 'discuss'])}
     ${p.intent ? `<p>${inline(p.intent)}</p>` : ''}
     ${subtabs(ui, 'phase', {
       Board: { html: kanban(p.steps) },
@@ -232,6 +251,7 @@ function quickDetail(i: Idea, ui: ExploreUi, root: Crumb) {
     `<h1>Quick steps ${quickBadge(true)}</h1>
     <p class="muted">Single steps outside the plan, in <code>specs/${esc(i.folder)}/quick-steps/</code>.</p>
     <div class="row">${rollup(i.quickSteps)}</div>
+    ${ask(ui, ['discuss'])}
     ${subtabs(ui, 'quick', {
       Board: { html: kanban(i.quickSteps) },
       Steps: { html: stepCards(i.quickSteps) },
@@ -239,7 +259,7 @@ function quickDetail(i: Idea, ui: ExploreUi, root: Crumb) {
   );
 }
 
-function stepDetail(s: Step, root: Crumb) {
+function stepDetail(s: Step, ui: ExploreUi, root: Crumb) {
   return (
     crumbs(
       root,
@@ -248,6 +268,7 @@ function stepDetail(s: Step, root: Crumb) {
       [itemId(s)],
     ) +
     `<h1><span class="id mono">${itemId(s)}</span>${esc(s.title)} ${pill(s.status)} ${quickBadge(s.quick)}</h1>
+    ${ask(ui, ['specify', 'develop', 'review', 'discuss'])}
     <dl class="meta">
       <dt>Progress</dt><dd>${progressText('AC', s.ac, 'ac') || '<span class="muted">no AC</span>'} ${progressText('Tasks', s.tasks, 'tasks')}</dd>
       <dt>Human check</dt><dd>${s.hvn ? hvnBadge(true) : 'no'}</dd>
@@ -276,7 +297,7 @@ export function renderExplore(model: Model, r: Route, ui: ExploreUi): string {
   if (r.idea && !idea) detail = notFound(`${scope.noun === 'idea' ? 'Idea' : 'Domain'} "${r.idea}"`, scope);
   else if (r.phase && !phase && !quick) detail = notFound(`Phase "${r.phase}"`, scope);
   else if (r.step && !step) detail = notFound(`Step "${r.step}"`, scope);
-  else if (step) detail = stepDetail(step, root);
+  else if (step) detail = stepDetail(step, ui, root);
   else if (quick) detail = quickDetail(idea, ui, root);
   else if (phase) detail = phaseDetail(phase, ui, root);
   else if (idea) detail = ideaDetail(idea, ui, root);

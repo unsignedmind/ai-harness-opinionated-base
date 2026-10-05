@@ -20,7 +20,7 @@ export function parseLabels(labels) {
 }
 
 // first "# " heading of the idea without an "Idea:" prefix, else the slug
-function defaultName(idea, slug) {
+export function defaultName(idea, slug) {
   const heading = /^#\s+(.+)$/m.exec(idea)?.[1].replace(/^idea:\s*/i, '').trim();
   return heading || slug.replaceAll('-', ' ');
 }

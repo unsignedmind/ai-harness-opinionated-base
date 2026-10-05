@@ -1,5 +1,6 @@
 <rules>
-    <rule>Run every ability in a new subagent. Pass it the ability skill path and its inputs</rule>
+    <rule>Run every ability in a new subagent. Pass it the ability skill path and its inputs. Exception: "chat" runs in the main session</rule>
+    <rule>Chat in relay mode ("chat": { "runner": false }) and open → every report and question to the user also goes to the chat ("nos chat reply"), answers come back through "nos chat await". Keep an await running in the background whenever the turn ends. Default runner mode: the chat answers with its own Claude Code sessions, nothing to do here</rule>
     <rule>Change statuses only with "nos set-status". Valid statuses: ./templates/status.xml</rule>
     <rule>If a subagent returns questions for the user, ask the user and send the answers back to the same subagent via SendMessage</rule>
     <rule>Report to the user concisely in simple language. The user may not know the code or the feature</rule>
@@ -22,12 +23,18 @@
         <choice key="QUICK">Quick step: one small change straight to specify, develop, review</choice>
         <choice key="ARCHITECT">Improve project quality and docs: architecture docs, guardrails, tests</choice>
         <choice key="SETUP">Set up or update nos for this project: specs folder, config, quality tools</choice>
+        <choice key="CHAT">Continue in the browser or on the phone: open the local chat (its own Claude Code sessions, one per tab)</choice>
     </question>
 </start>
 
 <option name="setup">
     <step1>Run ability "setup"</step1>
     <step2>Report the configured quality tools and project commands</step2>
+</option>
+
+<option name="chat">
+    <step1>Run ability "chat" in the main session</step1>
+    <step2>Show the menu of start in the chat and continue there</step2>
 </option>
 
 <option name="idea">
@@ -39,7 +46,7 @@
         </question>
     </step2>
     <step3>
-        <do>When the plan is created and the cli commands are done: in the spec-ui folder start the dev server via dev-to-lan npm task and provide the network url e.g. 192.168.XXX.XXX:XXXX</do>
+        <do>When the plan is created and the cli commands are done: in the spec-ui folder start the dev server via dev-to-lan npm task and provide the network url e.g. 192.168.XXX.XXX:XXXX. The dev server also prints the chat pairing link for the phone (ability "chat")</do>
     </step3>
 </option>
 
@@ -70,7 +77,7 @@
 <option name="plan">
     <step1>No domain given →
         <question>Which idea should be planned?
-            <choice key="domain id">One choice per specs/domain-* folder without plan.json: domain name</choice>
+            <choice key="domain id">One choice per specs/domain-* folder without plan.json or with a hollow plan.json (no phases): domain name</choice>
         </question>
     </step1>
     <step2>
@@ -99,7 +106,7 @@
 <option name="run">
     <step1>No domain given →
         <question>Which plan or quick step should run?
-            <choice key="domain id">One choice per plan in specs/domain-*/plan.json not done: plan name and status</choice>
+            <choice key="domain id">One choice per plan in specs/domain-*/plan.json not done and with at least one phase: plan name and status</choice>
             <choice key="step id">One choice per quick step in specs/domain-*/quick-steps/quick-steps.json not done: "<domain name> › Quick › <intent>" and status</choice>
         </question>
     </step1>

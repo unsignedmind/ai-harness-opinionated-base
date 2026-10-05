@@ -4,7 +4,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <title>specs</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./styles.css" />
@@ -14,13 +17,16 @@
       <div class="brand">specs <span id="source">live</span></div>
       <nav id="nav" aria-label="Views">
         <a data-view="ideas" href="#ideas">Ideas</a>
-        <a data-view="explore" href="#explore">Explore</a>
+        <a data-view="domains" href="#domains">Domains</a>
         <a data-view="board" href="#board">Board</a>
         <a data-view="backlog" href="#backlog">Backlog</a>
         <a data-view="docs" href="#docs">Docs</a>
       </nav>
       <div class="right">
         <span id="status"></span>
+        <button type="button" id="chat-toggle" class="chat-toggle" aria-controls="chat" aria-expanded="false" hidden>
+          <span class="dot" aria-hidden="true"></span>Chat<span class="badge" hidden></span>
+        </button>
         <button type="button" id="reload" data-action="reload" hidden title="Read specs/ on the host again">
           &#8635; Reload
         </button>

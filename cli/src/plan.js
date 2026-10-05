@@ -1,7 +1,9 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { reserveIds, specsDir, SPECS_DIR } from './config.js';
+import { defaultName, DOMAIN_FILE, IDEA_FILE } from './domain.js';
 import { assertSlug } from './slug.js';
+import { readValidStatuses, STATUS_FILE_PATH } from './status.js';
 
 export const PLAN_FILE = 'plan.json';
 export const PHASES_DIR = 'phases';
@@ -55,12 +57,46 @@ export function validatePlan(plan) {
   return phases;
 }
 
-export function createPlan(root, { domain, plan } = {}) {
+const readJsonOr = (file, fallback) => {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return fallback;
+  }
+};
+
+// A hollow plan.json (from create-plan --hollow) has no phases and no phase folders exist yet.
+// It promotes the domain without planning it; a later create-plan fills it.
+export function isHollowPlan(domainDir) {
+  const plan = readJsonOr(path.join(domainDir, PLAN_FILE), null);
+  if (!plan || typeof plan !== 'object' || asList(plan.phases).length) return false;
+  const phasesDir = path.join(domainDir, PHASES_DIR);
+  return !existsSync(phasesDir) || !readdirSync(phasesDir).some((f) => f.startsWith('phase-'));
+}
+
+// name from domain.json, else the idea heading; status: first plan status of status.xml (open)
+function hollowPlan(root, domainDir, domain) {
+  const meta = readJsonOr(path.join(domainDir, DOMAIN_FILE), {});
+  const ideaPath = path.join(domainDir, IDEA_FILE);
+  const idea = existsSync(ideaPath) ? readFileSync(ideaPath, 'utf8') : '';
+  const slug = domain.replace(/^domain-\d+-/, '');
+  const name = (typeof meta?.name === 'string' && meta.name.trim()) || defaultName(idea, slug);
+  const status = existsSync(path.join(root, STATUS_FILE_PATH)) ? readValidStatuses(root).plans[0] : 'open';
+  return { name, status, phases: [] };
+}
+
+export function createPlan(root, { domain, plan, hollow = false } = {}) {
   const domainDir = resolveDomain(root, domain);
+  const planPath = path.join(domainDir, PLAN_FILE);
+  if (hollow) {
+    if (plan != null) throw new Error('create-plan --hollow takes no plan');
+    if (existsSync(planPath)) throw new Error(`Domain ${domain} already has a plan.json`);
+    writeFileSync(planPath, JSON.stringify(hollowPlan(root, domainDir, domain), null, 2) + '\n');
+    return { domain, planPath, phases: [], hollow: true };
+  }
   const parsed = parsePlan(plan);
   const phases = validatePlan(parsed);
-  const planPath = path.join(domainDir, PLAN_FILE);
-  if (existsSync(planPath)) {
+  if (existsSync(planPath) && !isHollowPlan(domainDir)) {
     throw new Error(`Domain ${domain} already has a plan.json`);
   }
 

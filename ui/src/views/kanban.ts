@@ -15,9 +15,9 @@ export type KanbanOptions = {
 const path = (it: Item) =>
   it.kind === 'step'
     ? it.phase
-      ? `${it.idea.title} › P${it.phase.number} ${it.phase.name}`
-      : `${it.idea.title} › Quick`
-    : it.idea.title;
+      ? `${it.idea.name} › P${it.phase.number} ${it.phase.name}`
+      : `${it.idea.name} › Quick`
+    : it.idea.name;
 
 function card(it: Item, o: KanbanOptions) {
   const meta = [

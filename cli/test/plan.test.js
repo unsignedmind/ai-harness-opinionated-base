@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { createDomain } from '../src/domain.js';
-import { createPlan } from '../src/plan.js';
-import { makeTempRoot, readJson, writeFile } from './helpers.js';
+import { createPlan, isHollowPlan } from '../src/plan.js';
+import { makeTempRoot, readJson, writeFile, STATUS_XML } from './helpers.js';
 
 const step = (slug, intent = slug) => ({ slug, intent, status: 'open', description: '', 'spec-file': '' });
 const phase = (slug, steps, name = slug) => ({ slug, name, status: 'open', intent: '', description: '', steps });
@@ -137,8 +137,57 @@ test('rejects invalid plans before changing anything', (t) => {
   assert.equal(existsSync(path.join(domainDir, 'plan.json')), false);
 });
 
-test('refuses to plan a domain that already has a plan.json', (t) => {
+test('refuses to plan a domain that already has a plan.json with phases', (t) => {
   const { root, domain } = setup(t);
-  writeFile(root, `specs/${domain}/plan.json`, {});
+  writeFile(root, `specs/${domain}/plan.json`, { name: 'Auth', phases: [{ slug: 'x', steps: [] }] });
   assert.throws(() => createPlan(root, { domain, plan: samplePlan() }), /already has a plan\.json/);
+});
+
+test('refuses to plan over an empty plan.json when phase folders exist', (t) => {
+  const { root, domain } = setup(t);
+  writeFile(root, `specs/${domain}/plan.json`, { name: 'Auth', phases: [] });
+  writeFile(root, `specs/${domain}/phases/phase-1-old/step-1-a.md`, '');
+  assert.throws(() => createPlan(root, { domain, plan: samplePlan() }), /already has a plan\.json/);
+});
+
+// ── hollow plans ──
+
+test('--hollow writes an empty open plan named after domain.json', (t) => {
+  const { root, domain, domainDir } = setup(t);
+  writeFile(root, `specs/${domain}/domain.json`, { name: 'User auth', labels: [], 'cross-cutting': false });
+  writeFile(root, '.claude/skills/nos/templates/status.xml', STATUS_XML);
+
+  const result = createPlan(root, { domain, hollow: true });
+
+  assert.deepEqual(readJson(root, `specs/${domain}/plan.json`), { name: 'User auth', status: 'open', phases: [] });
+  assert.deepEqual(result, { domain, planPath: path.join(domainDir, 'plan.json'), phases: [], hollow: true });
+  assert.equal(existsSync(path.join(domainDir, 'phases')), false);
+  assert.equal(isHollowPlan(domainDir), true);
+});
+
+test('--hollow falls back to the idea heading for the name, without status.xml to open', (t) => {
+  const root = makeTempRoot(t);
+  const { folder } = createDomain(root, { idea: '# Idea: Dark mode\n\ntext', slug: 'dark-mode' });
+  writeFile(root, `specs/${folder}/domain.json`, { labels: [] });
+  createPlan(root, { domain: folder, hollow: true });
+  assert.deepEqual(readJson(root, `specs/${folder}/plan.json`), { name: 'Dark mode', status: 'open', phases: [] });
+});
+
+test('--hollow refuses an existing plan.json and a plan input', (t) => {
+  const { root, domain } = setup(t);
+  assert.throws(() => createPlan(root, { domain, hollow: true, plan: samplePlan() }), /takes no plan/);
+  createPlan(root, { domain, hollow: true });
+  assert.throws(() => createPlan(root, { domain, hollow: true }), /already has a plan\.json/);
+});
+
+test('create-plan fills a hollow plan', (t) => {
+  const { root, domain, domainDir } = setup(t);
+  createPlan(root, { domain, hollow: true });
+
+  const result = createPlan(root, { domain, plan: samplePlan() });
+
+  assert.deepEqual(readdirSync(path.join(domainDir, 'phases')).sort(), ['phase-1-data-model', 'phase-2-login-api']);
+  assert.equal(readJson(root, `specs/${domain}/plan.json`).phases.length, 2);
+  assert.equal(result.phases.length, 2);
+  assert.equal(isHollowPlan(domainDir), false);
 });

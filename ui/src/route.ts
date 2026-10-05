@@ -1,9 +1,9 @@
-// Hash routes: #explore[/idea[/phase[/step]]] (quick steps: #explore/idea/quick-steps[/step]),
+// Hash routes: #domains[/idea[/phase[/step]]] (quick steps: #domains/idea/quick-steps[/step]),
 // #ideas[/idea[/quick-steps[/step]]] for domains without a plan, #board?<filters>, #backlog?<filters>, #docs[/path/in/docs].
 import { DEFAULT_FILTERS, parseQuery, toQuery, type Filters } from './filter';
 import { isMatured, type Idea, type Phase, type Step } from './model';
 
-export type View = 'ideas' | 'explore' | 'board' | 'backlog' | 'docs';
+export type View = 'ideas' | 'domains' | 'board' | 'backlog' | 'docs';
 
 export type Route = {
   view: View;
@@ -15,7 +15,7 @@ export type Route = {
   filters: Filters;
 };
 
-const VIEWS: readonly View[] = ['ideas', 'explore', 'board', 'backlog', 'docs'];
+const VIEWS: readonly View[] = ['ideas', 'domains', 'board', 'backlog', 'docs'];
 
 export function parseRoute(hash: string): Route {
   const raw = hash.replace(/^#/, '');
@@ -23,12 +23,14 @@ export function parseRoute(hash: string): Route {
   const path = qi < 0 ? raw : raw.slice(0, qi);
   const query = qi < 0 ? '' : raw.slice(qi + 1);
   const parts = path.split('/').filter(Boolean).map(decodeURIComponent);
-  const view = VIEWS.includes(parts[0] as View) ? (parts[0] as View) : 'explore';
+  // #explore is the old name of #domains, kept so old links still work
+  if (parts[0] === 'explore') parts[0] = 'domains';
+  const view = VIEWS.includes(parts[0] as View) ? (parts[0] as View) : 'domains';
   if (view === 'docs') {
     const doc = parts.slice(1).join('/');
     return doc ? { view, doc, filters: DEFAULT_FILTERS } : { view, filters: DEFAULT_FILTERS };
   }
-  if (view !== 'explore' && view !== 'ideas') return { view, filters: parseQuery(query) };
+  if (view !== 'domains' && view !== 'ideas') return { view, filters: parseQuery(query) };
   if (parts[0] !== view) return { view, filters: DEFAULT_FILTERS };
   const r: Route = { view, filters: DEFAULT_FILTERS };
   if (parts[1]) r.idea = parts[1];
@@ -42,8 +44,8 @@ const seg = encodeURIComponent;
 // Route segment in place of the phase slug for the quick steps of an idea
 export const QUICK_SEGMENT = 'quick-steps';
 
-// page an idea lives on: explore once it has a plan, ideas before
-export const viewOf = (idea: Idea): View => (isMatured(idea) ? 'explore' : 'ideas');
+// page an idea lives on: domains once it has a plan, ideas before
+export const viewOf = (idea: Idea): View => (isMatured(idea) ? 'domains' : 'ideas');
 
 const base = (idea: Idea) => `#${viewOf(idea)}/${seg(idea.slug)}`;
 

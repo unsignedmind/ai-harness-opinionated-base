@@ -657,12 +657,32 @@ This serves `dev.html` on http://localhost:5180. The server reads `specs/` and t
 
 | View | Shows |
 | --- | --- |
-| **Explore** | Tree of ideas → phases → steps on the left, plus a "Quick steps" node per idea that has quick steps. On the right: details (idea.md, rendered spec, AC/task progress) and a kanban per idea, phase or the quick steps of an idea |
+| **Ideas** | Domains without a `plan.json`. In the live viewer (dev server) an idea's page has a **Manual promote** button: it runs `nos create-plan --domain <folder> --hollow`, which saves an empty `plan.json` (`status` open, no phases), so the idea moves to Domains. The standalone viewer shows the command to run instead. A later PLAN replaces the hollow plan; RUN skips plans without phases |
+| **Domains** | Domains with a `plan.json`. Tree of domains → phases → steps on the left, plus a "Quick steps" node per domain that has quick steps. On the right: details (idea.md, rendered spec, AC/task progress) and a kanban per domain, phase or the quick steps of a domain. Old `#explore` links still open |
 | **Board** | One kanban of all steps or phases across all ideas. There is one column per status. Step boards include `in specification` and `specified`; phase boards only show them when used. `on-hold` and unknown statuses appear only when used |
 | **Backlog** | The same items as a sortable table (id, title, where, status, AC progress) with status tiles |
 | **Docs** | The docs folder (`"spec-ui": { "docs-folder": "docs" }` in `specs/config.json`, relative to the repo root) as a tree of its own folders and text files. Markdown is rendered, and relative links between docs work. Other text is shown as code. A folder shows its `index.md`/`README.md` and its contents |
 
-Board and Backlog can be filtered by label, status, idea and free text. Values of one kind combine with OR, different kinds with AND. Filters live in the URL hash (`#board?status=in-review&labels=ui`), so every view can be bookmarked. Cards show AC and task progress, which is counted from the `( )`/`(x)` markers, a badge for human validation and a ⚡ quick badge for quick steps. Quick steps show in every step kanban and in the backlog next to plan steps (path `<idea> › Quick`). Unknown statuses are flagged.
+Board and Backlog can be filtered by label, status, domain and free text. Labels and domains are picked from a search box with suggestions (the list opens on focus) and show as removable badges; domains are named by `name` in `domain.json`. Values of one kind combine with OR, different kinds with AND. Filters live in the URL hash (`#board?status=in-review&labels=ui`), so every view can be bookmarked. Cards show AC and task progress, which is counted from the `( )`/`(x)` markers, a badge for human validation and a ⚡ quick badge for quick steps. Quick steps show in every step kanban and in the backlog next to plan steps (path `<idea> › Quick`). Unknown statuses are flagged.
+
+### Chat with Claude (live viewer only)
+
+The **Chat** button in the header opens the chat of this project (ability `chat`, `nos chat`). Each tab is its own
+headless Claude Code session in the project root, run by the chat server (`claude -p --resume <id>`, permission mode
+`auto`, no permission prompts). **+** opens a new tab, **✕** on a tab closes it, **✎ Rename** names the active tab,
+**Stop** ends the current run, a tab's tooltip names
+`claude --resume <id>` to continue it in a terminal. While Claude works, the current tool call shows under the log.
+On a desktop the chat is a drawer next to the views; on a phone or tablet (≤ 860px) a full-size dialog that the back
+gesture closes. Messages carry the spec you look at as `[context: …]`; detail pages offer **Ask Claude** buttons
+(specify, develop, review, plan) that prefill a message. `"chat": { "runner": false }` in `specs/config.json` switches
+to relay: a terminal session answers with `nos chat await` / `reply`.
+
+- From the couch: `npm run dev-to-lan` prints a pairing link per network address. Open it once on the phone (sets a
+  30-day cookie). Without it, other devices get "device not paired". `nos chat pair --rotate` unpairs all devices.
+- Plain HTTP: someone sniffing the home Wi-Fi could read messages and the token.
+- Anyone holding a paired device can make Claude Code act in the project (auto mode). `"permissionMode"` in
+  `"chat"` sets another mode, e.g. `acceptEdits` or `plan`.
+- Design: `ui/requirements/Concept spec-ui chat integration.md`.
 
 ### How it works
 
@@ -670,7 +690,7 @@ Board and Backlog can be filtered by label, status, idea and free text. Values o
 | --- | --- |
 | `src/model.ts` | Pure: turns `path → text` of `specs/` into ideas → phases → steps. Parses `domain.json` (name, labels, cross-cutting), `plan.json` and `quick-steps/quick-steps.json` (quick steps: `phase` null, `quick` true), reads the spec sections, counts markers |
 | `src/status.ts` | The statuses from `templates/status.xml` and their board order |
-| `src/serve-specs.ts` + `src/main.ts` | Dev server: a Vite plugin reads `specs/` on the host with `readSpecsFolder` and serves it at `/__specs` (`/` is `dev.html`); `/__docs` serves the docs folder (`readDocs`); it pushes `specs:changed` / `docs:changed` when a file changes, and the page fetches again |
+| `src/serve-specs.ts` + `src/main.ts` | Dev server: a Vite plugin reads `specs/` on the host with `readSpecsFolder` and serves it at `/__specs` (`/` is `dev.html`); `/__docs` serves the docs folder (`readDocs`); it pushes `specs:changed` / `docs:changed` when a file changes, and the page fetches again. `POST /__promote?domain=<folder>` runs `nos create-plan --hollow` (Manual promote) |
 | `src/folder.ts` + `src/handle-store.ts` + `src/standalone.ts` | Standalone: reads the picked folder (specs and docs) and remembers the handle in IndexedDB |
 | `src/docs.ts` | Pure: turns `path → text` of the docs folder into a folder tree, resolves relative links |
 | `src/route.ts`, `src/filter.ts` | Hash routes and filters |

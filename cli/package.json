@@ -1,6 +1,6 @@
 {
   "name": "nos-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "File manager CLI for the nos harness: manages spec folders, id counters and spec files",
   "type": "module",
   "bin": {

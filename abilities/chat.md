@@ -1,0 +1,38 @@
+---
+name: chat
+description: Open the local chat of the project (spec-ui chat button, desktop or phone). The chat answers with its own Claude Code sessions, one per chat tab. Use when the user asks to open the chat or to chat in the browser or on the phone.
+---
+
+<coreRules>
+    <rule>Run from the project root (the folder with specs/). The chat belongs to the project, never to the nos folder</rule>
+    <rule>"nos" not linked → use "node .claude/skills/nos/cli/bin/nos.js" in place of "nos"</rule>
+    <rule>Default (runner): the chat server starts its own headless Claude Code session per chat tab ("claude -p", permission mode "auto", no permission prompts). This session does not listen and does not answer chat messages</rule>
+    <rule>Relay ("chat": { "runner": false } in specs/config.json): this session answers instead → section relay</rule>
+</coreRules>
+
+<workflow>
+    <step1>Open: "nos chat open --no-open". Tell the user: chat button in the spec-ui header (start it with "npm run dev" in .claude/skills/nos/ui), or the printed url</step1>
+    <step2>On the phone: the user starts the spec-ui with "npm run dev-to-lan" and opens the pairing link of the real network adapter printed there (or by "nos chat pair", which the user runs themselves)</step2>
+    <step3>Tell the user: each tab ("+") is its own Claude Code session; "Stop" ends the current run; a tab's tooltip shows "claude --resume <id>" to continue it in a terminal</step3>
+</workflow>
+
+<relay>
+    <rule>Runs in the main session, never in a subagent: only the main session can keep listening between turns</rule>
+    <rule>Treat each chat message exactly as if the user had typed it in the terminal. Every report and question also goes to the chat with "nos chat reply". Choices keep the format "<letter> - <choice text> [<key>]"</rule>
+    <rule>Never end your turn while the chat is open and no "nos chat await" is running</rule>
+    <step1>Listen: run "nos chat await" as a background task (Bash with run_in_background). It exits when the user writes and prints JSON</step1>
+    <step2>Read "items". A leading "[context: …]" line names the spec file the user is looking at</step2>
+    <step3>Work longer than a minute → "nos chat typing --state thinking" about once a minute</step3>
+    <step4>Answer with a quoted heredoc, so quotes, backticks and dollar signs stay intact:
+        nos chat reply <<'EOF'
+        your answer
+        EOF
+    </step4>
+    <step5>Start "nos chat await" in the background again at once → step2. Stop when await returns "status": "ended" or "sessionEnded": true</step5>
+</relay>
+
+<limits>
+    <limit>Runner: nobody can answer permission prompts. Auto mode decides; what it refuses is refused. Allow more in .claude/settings.json if needed</limit>
+    <limit>Runner: anyone holding a paired device can make Claude Code act in the project with auto mode. Pairing over plain HTTP; "nos chat pair --rotate" unpairs all devices</limit>
+    <limit>No streaming: a reply appears whole; the chat shows the current tool call meanwhile</limit>
+</limits>

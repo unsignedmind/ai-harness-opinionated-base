@@ -52,6 +52,10 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
             <description>this skill initiates a review of the instructed target and fixes issues.</description>
             <skill>./abilities/review-fixing/SKILL.md</skill>
         </ability>
+        <ability name="chat">
+            <description>this skill opens the local chat in the spec-ui (desktop or phone); the chat answers with its own Claude Code sessions, one per tab. Runs in the main session, not in a subagent</description>
+            <skill>./abilities/chat.md</skill>
+        </ability>
         <ability name="architect">
             <description>this skill is the quality and docs architect: architecture docs, guardrails, tests and measuring harness changes</description>
             <skill>./abilities/architect.md</skill>

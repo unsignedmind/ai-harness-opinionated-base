@@ -156,6 +156,39 @@ test('missing required options exit with code 2 and a request for the input', (t
   assert.match(b.err, /missing input: --plan/i);
 });
 
+test('create-plan --hollow saves an empty plan and needs no --plan', (t) => {
+  const root = makeTempRoot(t);
+  invoke(['create-domain', '--idea', '-', '--slug', 'auth', '--name', 'User auth'], { cwd: root, stdin: '# Auth' });
+
+  const { code, json, err } = invoke(['create-plan', '--domain', 'domain-1-auth', '--hollow'], { cwd: root });
+
+  assert.equal(err, '');
+  assert.equal(code, 0);
+  assert.deepEqual(json, {
+    action: 'create-plan',
+    domain: 'domain-1-auth',
+    plan: 'specs/domain-1-auth/plan.json',
+    hollow: true,
+    phases: [],
+  });
+  assert.deepEqual(readJson(root, 'specs/domain-1-auth/plan.json'), { name: 'User auth', status: 'open', phases: [] });
+
+  const again = invoke(['create-plan', '--domain', 'domain-1-auth', '--hollow'], { cwd: root });
+  assert.equal(again.code, 1);
+  assert.match(again.err, /already has a plan\.json/);
+
+  const filled = invoke(['create-plan', '--domain', 'domain-1-auth', '--plan', '-'], { cwd: root, stdin: JSON.stringify(PLAN) });
+  assert.equal(filled.code, 0);
+  assert.equal(filled.json.phases.length, 1);
+});
+
+test('create-plan --hollow with --plan is a usage error', (t) => {
+  const root = makeTempRoot(t);
+  const { code, err } = invoke(['create-plan', '--domain', 'domain-1-x', '--hollow', '--plan', '-'], { cwd: root });
+  assert.equal(code, 2);
+  assert.match(err, /--hollow takes no --plan/);
+});
+
 test('an unreadable input file is reported as an error', (t) => {
   const root = makeTempRoot(t);
   const { code, err } = invoke(['create-domain', '--idea', 'nope.md', '--slug', 'x'], { cwd: root });

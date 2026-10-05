@@ -10,6 +10,8 @@ export type Idea = {
   number: number;
   slug: string;
   title: string;
+  // domain name for Board and Backlog: `name` in domain.json, else the title
+  name: string;
   intent: string;
   md: string | null;
   domainJson: string | null;
@@ -189,12 +191,14 @@ function buildIdea(folder: string, files: Map<string, string>): Idea {
     }
   }
 
+  const title = firstH1(md).replace(/^idea:\s*/i, '') || domain?.name || raw?.name || (m ? humanize(m[2]) : folder);
   const idea: Idea = {
     kind: 'idea',
     folder,
     number: m ? Number(m[1]) : 0,
     slug: m ? m[2] : folder,
-    title: firstH1(md).replace(/^idea:\s*/i, '') || domain?.name || raw?.name || (m ? humanize(m[2]) : folder),
+    title,
+    name: domain?.name?.trim() || title,
     intent: firstParagraph(section(md, 'Intent')),
     md,
     domainJson,

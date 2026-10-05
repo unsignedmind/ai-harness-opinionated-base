@@ -41,7 +41,7 @@ test('each card sits in its status column and links to its explore detail', () =
   const root = mount(kanban(model().steps));
   const review = root.querySelector('.col[data-status="in-review"]')!;
   const card = review.querySelector<HTMLElement>('.kcard')!;
-  expect(card.dataset.href).toBe('#explore/dark-mode/switch/media-query');
+  expect(card.dataset.href).toBe('#domains/dark-mode/switch/media-query');
   expect(card.textContent).toContain('Media query');
 });
 
@@ -62,11 +62,11 @@ test('cards within a column are sorted by id', () => {
   expect(ids).toStrictEqual(['S1', 'S2', 'S3']);
 });
 
-test('where option adds the idea › phase path', () => {
+test('where option adds the domain › phase path', () => {
   const card = mount(kanban(model().steps, { where: true })).querySelector('.kcard[data-href$="extract-tokens"]')!;
-  expect(card.querySelector('.path')?.textContent).toBe('Dark mode › P1 Colour tokens');
+  expect(card.querySelector('.path')?.textContent).toBe('Dark mode theme › P1 Colour tokens');
   const phaseCard = mount(kanban(model().phases, { where: true })).querySelector('.kcard[data-href$="tokens"]')!;
-  expect(phaseCard.querySelector('.path')?.textContent).toBe('Dark mode');
+  expect(phaseCard.querySelector('.path')?.textContent).toBe('Dark mode theme');
 });
 
 test('step cards show AC progress, labels and the human-validation badge', () => {
@@ -112,7 +112,7 @@ test('quick step cards carry a quick badge and a Quick path', () => {
   expect(quick.map((c) => c.querySelector('.id')?.textContent)).toStrictEqual(['S5', 'S4']);
   const contrast = quick.find((c) => c.textContent?.includes('Fix contrast'))!;
   expect(contrast.closest<HTMLElement>('.col')?.dataset.status).toBe('in-progress');
-  expect(contrast.querySelector('.path')?.textContent).toBe('Dark mode › Quick');
-  expect(contrast.dataset.href).toBe('#explore/dark-mode/quick-steps/fix-contrast');
+  expect(contrast.querySelector('.path')?.textContent).toBe('Dark mode theme › Quick');
+  expect(contrast.dataset.href).toBe('#domains/dark-mode/quick-steps/fix-contrast');
   expect(cards.length - quick.length).toBe(3);
 });

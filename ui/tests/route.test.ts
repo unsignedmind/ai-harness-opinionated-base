@@ -8,20 +8,29 @@ import { fixtureFiles, quickFixtureFiles } from './fixtures';
 test('empty or unknown hash opens explore overview', () => {
   for (const h of ['', '#', '#nope/x'])
     expect(parseRoute(h)).toStrictEqual({
-      view: 'explore',
+      view: 'domains',
       filters: DEFAULT_FILTERS,
     });
 });
 
+test('old #explore links open the domains view', () => {
+  expect(parseRoute('#explore/dark-mode/switch')).toMatchObject({
+    view: 'domains',
+    idea: 'dark-mode',
+    phase: 'switch',
+  });
+  expect(parseRoute('#explore').view).toBe('domains');
+});
+
 test('explore paths name idea, phase and step', () => {
-  expect(parseRoute('#explore/dark-mode/switch/media-query')).toStrictEqual({
-    view: 'explore',
+  expect(parseRoute('#domains/dark-mode/switch/media-query')).toStrictEqual({
+    view: 'domains',
     idea: 'dark-mode',
     phase: 'switch',
     step: 'media-query',
     filters: DEFAULT_FILTERS,
   });
-  expect(parseRoute('#explore/dark-mode')).toMatchObject({ idea: 'dark-mode' });
+  expect(parseRoute('#domains/dark-mode')).toMatchObject({ idea: 'dark-mode' });
 });
 
 test('board and backlog read their filters from the query', () => {
@@ -57,21 +66,21 @@ test('domains without a plan link into ideas', () => {
 });
 
 test('path segments are url-decoded', () => {
-  expect(parseRoute('#explore/a%20b')).toMatchObject({ idea: 'a b' });
+  expect(parseRoute('#domains/a%20b')).toMatchObject({ idea: 'a b' });
 });
 
 test('hrefOf links ideas, phases and steps into explore', () => {
   const m = buildModel(fixtureFiles());
   const idea = m.ideas[1];
-  expect(hrefOf(idea)).toBe('#explore/dark-mode');
-  expect(hrefOf(idea.phases[1])).toBe('#explore/dark-mode/switch');
-  expect(hrefOf(idea.steps[1])).toBe('#explore/dark-mode/switch/media-query');
+  expect(hrefOf(idea)).toBe('#domains/dark-mode');
+  expect(hrefOf(idea.phases[1])).toBe('#domains/dark-mode/switch');
+  expect(hrefOf(idea.steps[1])).toBe('#domains/dark-mode/switch/media-query');
 });
 
 test('quick steps link into the quick-steps segment of their idea', () => {
   const idea = buildModel(quickFixtureFiles()).ideas[1];
-  expect(hrefOf(idea.quickSteps[0])).toBe('#explore/dark-mode/quick-steps/fix-contrast');
-  expect(hrefOfQuick(idea)).toBe('#explore/dark-mode/quick-steps');
+  expect(hrefOf(idea.quickSteps[0])).toBe('#domains/dark-mode/quick-steps/fix-contrast');
+  expect(hrefOfQuick(idea)).toBe('#domains/dark-mode/quick-steps');
 });
 
 test('viewHref appends a query only when filters differ from default', () => {

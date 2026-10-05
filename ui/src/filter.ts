@@ -41,6 +41,7 @@ const haystack = (it: Item) =>
     it.description,
     it.status.label,
     it.idea.title,
+    it.idea.name,
     it.idea.slug,
     it.kind === 'step' ? (it.phase?.name ?? 'quick') : '',
   ]
@@ -74,6 +75,18 @@ export function counts(items: Item[]): Counts {
   return c;
 }
 
+// filter autosuggest (labels, domains): empty query lists all, else matches text or value;
+// text prefix matches first, already selected left out
+export type Option = { value: string; text: string };
+
+export function suggest(opts: Option[], selected: string[], q: string): Option[] {
+  const s = q.trim().toLowerCase();
+  const prefix = (o: Option) => +!o.text.toLowerCase().startsWith(s);
+  return opts
+    .filter((o) => !selected.includes(o.value) && `${o.text} ${o.value}`.toLowerCase().includes(s))
+    .sort((a, b) => prefix(a) - prefix(b) || a.text.localeCompare(b.text));
+}
+
 export const toggle = <T>(xs: T[], x: T): T[] => (xs.includes(x) ? xs.filter((y) => y !== x) : [...xs, x]);
 
 const list = (v: string | null) => (v ? v.split(',').filter(Boolean) : []);
@@ -84,7 +97,8 @@ export function parseQuery(qs: string): Filters {
   return {
     labels: list(p.get('labels')),
     statuses: list(p.get('status')).filter((s): s is StatusKey => (STATUS_ORDER as readonly string[]).includes(s)),
-    ideas: list(p.get('idea')),
+    // `idea` is the old name of `domain`, kept so old links still work
+    ideas: list(p.get('domain') ?? p.get('idea')),
     q: p.get('q') ?? '',
     level: p.get('level') === 'phases' ? 'phases' : 'steps',
     sort: SORTS.includes(sort) ? sort : 'id',
@@ -96,7 +110,7 @@ export function toQuery(f: Filters): string {
   const p = new URLSearchParams();
   if (f.labels.length) p.set('labels', f.labels.join(','));
   if (f.statuses.length) p.set('status', f.statuses.join(','));
-  if (f.ideas.length) p.set('idea', f.ideas.join(','));
+  if (f.ideas.length) p.set('domain', f.ideas.join(','));
   if (f.q) p.set('q', f.q);
   if (f.level !== 'steps') p.set('level', f.level);
   if (f.sort !== 'id') p.set('sort', f.sort);
@@ -126,7 +140,7 @@ const cmp = (a: unknown, b: unknown): number => {
 const SORT_KEY: Record<SortKey, (it: Item) => unknown> = {
   id: idKey,
   title: (it) => titleOf(it).toLowerCase(),
-  where: (it) => [it.idea.title.toLowerCase(), ...idKey(it)],
+  where: (it) => [it.idea.name.toLowerCase(), ...idKey(it)],
   status: (it) => [STATUS_ORDER.indexOf(it.status.key), ...idKey(it)],
   ac: (it) => (it.kind === 'step' ? [it.ac.total ? it.ac.done / it.ac.total : -1, ...idKey(it)] : [-1]),
 };

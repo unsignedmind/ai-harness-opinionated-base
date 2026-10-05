@@ -49,6 +49,13 @@ test('labels in plan.json are ignored', () => {
   expect(buildModel(files).ideas[1].labels).toStrictEqual([]);
 });
 
+test('domain name comes from domain.json, else the idea title', () => {
+  const files = fixtureFiles();
+  expect(buildModel(files).ideas[1]).toMatchObject({ title: 'Dark mode', name: 'Dark mode theme' });
+  files['specs/domain-2-dark-mode/domain.json'] = JSON.stringify({ ...DOMAIN, name: ' ' });
+  expect(buildModel(files).ideas[1].name).toBe('Dark mode');
+});
+
 test('cross-cutting is read from domain.json', () => {
   const files = fixtureFiles();
   files['specs/domain-2-dark-mode/domain.json'] = JSON.stringify({

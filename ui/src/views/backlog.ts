@@ -39,7 +39,7 @@ export function renderBacklog(model: Model, f: Filters): string {
         (it) => `<tr data-href="${esc(hrefOf(it))}">
         <td class="id mono">${esc(itemId(it))}</td>
         <td>${esc(titleOf(it))}<div class="path">${esc(it.intent)}</div></td>
-        <td><div>${esc(it.idea.title)}</div>${it.kind === 'step' ? `<div class="path">${it.phase ? `P${it.phase.number} ${esc(it.phase.name)}` : quickBadge(true)}</div>` : ''}</td>
+        <td><div>${esc(it.idea.name)}</div>${it.kind === 'step' ? `<div class="path">${it.phase ? `P${it.phase.number} ${esc(it.phase.name)}` : quickBadge(true)}</div>` : ''}</td>
         <td>${pill(it.status)}</td>
         <td>${labelChips(it.labels)}</td>
         <td>${it.kind === 'step' ? progressText('AC', it.ac, 'ac') : dots(it.steps)}</td>
@@ -52,7 +52,7 @@ export function renderBacklog(model: Model, f: Filters): string {
     ${filterBar(model, f, 'backlog')}
     <div class="summary">${tiles}</div>
     <div class="wrap"><table class="list">
-      <thead><tr>${th('id', 'ID')}${th('title', f.level === 'steps' ? 'Step' : 'Phase')}${th('where', 'Idea')}${th('status', 'Status')}<th>Labels</th>${th('ac', 'Progress')}<th></th></tr></thead>
+      <thead><tr>${th('id', 'ID')}${th('title', f.level === 'steps' ? 'Step' : 'Phase')}${th('where', 'Domain')}${th('status', 'Status')}<th>Labels</th>${th('ac', 'Progress')}<th></th></tr></thead>
       <tbody>${body}</tbody>
     </table></div>
   </div>`;

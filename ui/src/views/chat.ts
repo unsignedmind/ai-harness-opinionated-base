@@ -1,0 +1,206 @@
+// Chat with Claude Code in the project: presence labels, the context a message carries (the spec
+// the user looks at), the "Ask Claude" prompts, the panel markup, the tab bar and the message log.
+// Message text only ever reaches the page through textContent.
+import { esc } from '../markdown';
+import type { Model } from '../model';
+import { QUICK_SEGMENT, type Route } from '../route';
+import { itemId } from './parts';
+
+export type Presence =
+  | 'ended'
+  | 'typing'
+  | 'thinking'
+  | 'listening'
+  | 'queued'
+  | 'waiting'
+  // the chat server runs its own Claude Code session for the tab and is idle
+  | 'ready'
+  // spec-ui only: no chat yet, server unreachable, device not paired
+  | 'off'
+  | 'offline'
+  | 'unpaired';
+
+export const PRESENCE_LABEL: Record<Presence, string> = {
+  ended: 'chat ended',
+  typing: 'Claude is typing…',
+  thinking: 'Claude is thinking…',
+  listening: 'Claude is listening',
+  queued: 'queued for Claude',
+  waiting: 'Claude is not connected',
+  ready: 'Claude is ready',
+  off: 'chat not started',
+  offline: 'chat server offline',
+  unpaired: 'device not paired',
+};
+
+export type ChatEntry = { role: 'user' | 'agent'; text: string; at: string };
+export type ChatContext = { label: string; path: string };
+
+// one chat tab = one Claude Code session in the project
+export type ChatTab = {
+  key: string;
+  title: string;
+  presence: Presence;
+  running: boolean;
+  activity: string | null;
+  claudeSession: string | null;
+};
+
+// One tab: select button with presence dot and unread badge, and its own close button.
+export function renderTabs(tabs: ChatTab[], active: string | null, unread: Record<string, number>): string {
+  return (
+    tabs
+      .map((t) => {
+        const on = t.key === active;
+        const n = on ? 0 : (unread[t.key] ?? 0);
+        const hint = t.claudeSession ? ` — in a terminal: claude --resume ${t.claudeSession}` : '';
+        const key = esc(t.key);
+        return `<span role="tab" class="chat-tab" data-key="${key}" data-presence="${esc(t.presence)}" aria-selected="${on}"><button type="button" class="chat-tab-name" data-chat="tab" data-key="${key}" title="${esc(t.title + hint)}"><span class="dot" aria-hidden="true"></span><span class="lbl">${esc(t.title)}</span>${n ? `<span class="badge">${n}</span>` : ''}</button><button type="button" class="chat-tab-x" data-chat="close-tab" data-key="${key}" aria-label="Close ${esc(t.title)}">&#10005;</button></span>`;
+      })
+      .join('') +
+    '<button type="button" class="chat-new" data-chat="new" title="New chat: its own Claude Code session" aria-label="New chat">+</button>'
+  );
+}
+
+// what the user looks at, as a spec path Claude can open
+export function contextOf(model: Model, r: Route): ChatContext | null {
+  if (r.view !== 'domains' && r.view !== 'ideas') return null;
+  const idea = r.idea ? model.ideas.find((i) => i.slug === r.idea) : undefined;
+  if (!idea) return null;
+  const base = `specs/${idea.folder}/`;
+  if (r.phase === QUICK_SEGMENT) {
+    const s = r.step ? idea.quickSteps.find((q) => q.slug === r.step) : undefined;
+    return s
+      ? { label: `${itemId(s)} ${s.title}`, path: s.specPath || `${base}quick-steps/` }
+      : { label: `${idea.title} · quick steps`, path: `${base}quick-steps/` };
+  }
+  const phase = r.phase ? idea.phases.find((p) => p.slug === r.phase) : undefined;
+  if (phase) {
+    const s = r.step ? phase.steps.find((x) => x.slug === r.step) : undefined;
+    if (s) return { label: `${itemId(s)} ${s.title}`, path: s.specPath || base };
+    return { label: `${itemId(phase)} ${phase.name}`, path: `${base}phases/phase-${phase.number}-${phase.slug}/` };
+  }
+  return { label: idea.title, path: base };
+}
+
+const CONTEXT_LINE = /^\[context: ([^\]\n]+)\]\n/;
+
+export const withContext = (text: string, ctx: ChatContext | null) => (ctx ? `[context: ${ctx.path}]\n${text}` : text);
+
+export function splitContext(text: string): { context: string | null; body: string } {
+  const m = CONTEXT_LINE.exec(text);
+  return m ? { context: m[1], body: text.slice(m[0].length) } : { context: null, body: text };
+}
+
+// text and fenced code parts, split on lines starting with three backticks
+export function splitFences(text: string): { code: boolean; text: string }[] {
+  const out: { code: boolean; text: string }[] = [];
+  text.split(/^```.*$/m).forEach((part, i) => {
+    const code = i % 2 === 1;
+    const t = code ? part.replace(/^\n/, '').replace(/\n$/, '') : part.replace(/^\n+/, '').replace(/\n+$/, '');
+    if (t || code) out.push({ code, text: t });
+  });
+  return out;
+}
+
+export type AskKind = 'specify' | 'develop' | 'review' | 'plan' | 'discuss';
+
+// the message prefilled by an "Ask Claude" button; the context line carries the path
+export function askPrompt(kind: AskKind, ctx: ChatContext): string {
+  const what = ctx.label;
+  switch (kind) {
+    case 'specify':
+      return `Run the nos "specify" ability for ${what}.`;
+    case 'develop':
+      return `Run the nos "develop" ability for ${what}.`;
+    case 'review':
+      return `Review ${what} (nos "review-pessimistic").`;
+    case 'plan':
+      return `Create the plan for ${what} (nos "plan").`;
+    case 'discuss':
+      return `About ${what}: `;
+  }
+}
+
+// "Ask Claude" buttons on a detail page (dev server only)
+export function askButtons(kinds: AskKind[]): string {
+  const label: Record<AskKind, string> = {
+    specify: 'Specify',
+    develop: 'Develop',
+    review: 'Review',
+    plan: 'Plan',
+    discuss: 'Ask…',
+  };
+  return `<div class="ask" role="group" aria-label="Ask Claude"><span class="muted">Ask Claude</span>${kinds
+    .map((k) => `<button type="button" data-action="ask" data-ask="${k}">${esc(label[k])}</button>`)
+    .join('')}</div>`;
+}
+
+// static markup of the panel, filled by src/chat.ts
+export const CHAT_SHELL = `<div class="chat-bar">
+  <button type="button" class="chat-back" data-chat="close" aria-label="Back to specs">&#8249; specs</button>
+  <strong>Claude</strong>
+  <span class="chat-presence" data-presence="off"><span class="dot"></span><span class="lbl"></span></span>
+  <span class="grow"></span>
+  <button type="button" data-chat="rename" hidden title="Rename this chat">&#9998; Rename</button>
+  <button type="button" data-chat="stop" hidden title="Stop what Claude is doing">&#9632; Stop</button>
+  <button type="button" class="chat-x" data-chat="close" aria-label="Close chat">&#10005;</button>
+</div>
+<div class="chat-tabs" role="tablist" aria-label="Chats"></div>
+<form class="chat-rename-row" hidden>
+  <input class="chat-rename" maxlength="60" aria-label="Chat name" enterkeyhint="done" autocomplete="off">
+  <button type="submit" class="primary">Save</button>
+  <button type="button" data-chat="rename-cancel">Cancel</button>
+</form>
+<div class="chat-log" aria-live="polite"></div>
+<p class="chat-activity mono" hidden></p>
+<div class="chat-notice" hidden></div>
+<form class="chat-composer">
+  <div class="chat-context" hidden>
+    <span class="chip"><span class="lbl"></span><button type="button" data-chat="drop-context" aria-label="Do not send the context">&#10005;</button></span>
+  </div>
+  <textarea rows="2" placeholder="Message Claude…" aria-label="Message to Claude"></textarea>
+  <button type="submit" class="primary">Send</button>
+  <p class="chat-line muted" role="status"></p>
+</form>
+<div class="chat-resize" data-chat="resize" aria-hidden="true"></div>`;
+
+const time = (at: string) => {
+  const d = new Date(at);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+function el(tag: string, cls: string, text?: string) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+// redraws the log; keeps it at the bottom only when the reader already is (within 40px)
+export function renderLog(log: HTMLElement, chat: ChatEntry[], presence: Presence) {
+  const stick = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.textContent = '';
+  if (!chat.length)
+    log.append(el('p', 'chat-empty muted', 'Type a message. It goes to the Claude Code session of this project.'));
+  for (const m of chat) {
+    const msg = el('div', `msg ${m.role}`);
+    const { context, body } = m.role === 'user' ? splitContext(m.text) : { context: null, body: m.text };
+    msg.append(el('div', 'meta', `${m.role === 'user' ? 'You' : 'Claude'} · ${time(m.at)}`));
+    if (context) msg.append(el('div', 'ctx mono', context));
+    for (const part of splitFences(body)) msg.append(el(part.code ? 'pre' : 'div', part.code ? '' : 't', part.text));
+    log.append(msg);
+  }
+  if (presence === 'thinking' || presence === 'typing') {
+    const b = el('div', 'chat-dots');
+    b.setAttribute('role', 'status');
+    b.setAttribute('aria-label', PRESENCE_LABEL[presence]);
+    for (let i = 0; i < 3; i++) b.append(el('span', '', '●'));
+    log.append(b);
+  } else if (presence === 'queued') {
+    const n = el('p', 'chat-note muted', 'Your message is in the queue. Claude Code is not listening right now.');
+    n.setAttribute('role', 'status');
+    log.append(n);
+  }
+  if (stick) log.scrollTop = log.scrollHeight;
+}
