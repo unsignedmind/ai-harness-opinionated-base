@@ -70,20 +70,21 @@ export async function health(port, timeoutMs = 1000) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// The running server of this project (port from server.json), or null
-export async function liveServer(root, stateDir) {
+// The running server of this project (port from server.json, root = main), or null
+export async function liveServer(main, stateDir) {
   const s = readServerJson(stateDir);
   if (!s) return null;
   const h = await health(s.port);
-  return h && h.root === realDir(root) ? { port: s.port, version: h.version } : null;
+  return h && h.root === realDir(main) ? { port: s.port, version: h.version } : null;
 }
 
-// Reuse, restart (other version) or start the server of this project. Returns its port.
-export async function ensureServer(root, stateDir, { env = process.env, log = () => {} } = {}) {
+// Reuse, restart (other version) or start the server of this project (roots from chatRoots), always for
+// main. Returns its port.
+export async function ensureServer(roots, stateDir, { env = process.env, log = () => {} } = {}) {
   ensureStateDir(stateDir);
-  const me = realDir(root);
+  const me = realDir(roots.main);
   const known = readServerJson(stateDir);
-  const port = known?.port ?? portOf(root, env);
+  const port = known?.port ?? portOf(roots, env);
   const h = await health(port);
   if (h && h.root === me) {
     if (h.version === VERSION) return port;
@@ -92,9 +93,9 @@ export async function ensureServer(root, stateDir, { env = process.env, log = ()
     for (let i = 0; i < 50 && (await health(port, 200)); i++) await sleep(100);
   }
   // the default port may belong to another project's server: then the new server picks a free one
-  const want = h && h.root !== me ? 0 : portOf(root, env);
+  const want = h && h.root !== me ? 0 : portOf(roots, env);
   const out = openSync(files(stateDir).log, 'a');
-  const child = spawn(process.execPath, [BIN, 'chat', 'server', '--root', root, '--port', String(want)], {
+  const child = spawn(process.execPath, [BIN, 'chat', 'server', '--root', me, '--port', String(want)], {
     detached: true,
     stdio: ['ignore', out, out],
     windowsHide: true,
@@ -112,13 +113,13 @@ export async function ensureServer(root, stateDir, { env = process.env, log = ()
 }
 
 // Shut the running server of this project down (its runs stop) and start a fresh one. Returns its port.
-export async function restartServer(root, stateDir, opts = {}) {
-  const live = await liveServer(root, stateDir);
+export async function restartServer(roots, stateDir, opts = {}) {
+  const live = await liveServer(roots.main, stateDir);
   if (live) {
     await request(live.port, 'POST', '/shutdown', {}).catch(() => {});
     for (let i = 0; i < 50 && (await health(live.port, 200)); i++) await sleep(100);
   }
-  return ensureServer(root, stateDir, opts);
+  return ensureServer(roots, stateDir, opts);
 }
 
 export const sessionsFile = (stateDir) => files(stateDir).sessions;

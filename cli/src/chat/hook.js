@@ -1,9 +1,11 @@
 // Stop hook (`nos chat hook`): when a turn ends with chat messages queued and no `await` running,
 // hand them to Claude Code as its next input. Returns the hook output object, or null for none.
 // Relay mode only: in runner mode the chat server's own Claude Code sessions answer the tabs, so
-// the hook never takes their messages (not even when the server is down).
+// the hook never takes their messages (not even when the server is down). The session may sit in a
+// worktree of the project (input.cwd): the resolver brings it back to main, whose chat it serves.
 import { liveServer, request } from './client.js';
-import { chatConfig, findRoot, files, realDir, stateDirOf } from './paths.js';
+import { findWorkRoot } from '../roots.js';
+import { chatConfig, chatRoots, files, realDir, stateDirOf } from './paths.js';
 import { loadState, saveState } from './sessions.js';
 
 const MAX_LISTED = 20;
@@ -18,9 +20,17 @@ export async function runHook(stdinText, { env = process.env } = {}) {
   // blocking twice in a row can wedge a session
   if (!input || input.stop_hook_active === true || typeof input.cwd !== 'string') return null;
 
-  const root = findRoot(input.cwd);
-  if (chatConfig(root).runner) return null;
-  const stateDir = stateDirOf(root, env);
+  // not a nos project: done without asking git
+  if (!env.NOS_SPECS_ROOT && !findWorkRoot(input.cwd)) return null;
+  let roots;
+  try {
+    roots = chatRoots({ cwd: input.cwd, env });
+  } catch {
+    return null; // not a nos project
+  }
+  if (chatConfig(roots).runner) return null;
+  const root = roots.main;
+  const stateDir = stateDirOf(roots, env);
   const file = files(stateDir).sessions;
   const me = realDir(root);
   const state = loadState(file);

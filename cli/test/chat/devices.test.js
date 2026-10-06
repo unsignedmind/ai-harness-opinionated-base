@@ -4,13 +4,14 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { audit, createDeviceStore, deviceName, IDLE_MS } from '../../src/chat/devices.js';
-import { ensureStateDir } from '../../src/chat/paths.js';
-import { makeTempRoot } from '../helpers.js';
+import { ensureStateDir, stateDirOf } from '../../src/chat/paths.js';
+import { initProject } from '../../src/init.js';
+import { gitOk, hasGit, makeProject, makeTempRoot } from '../helpers.js';
 
 const UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/129.0 Mobile Safari/537.36';
 
 function setup(t) {
-  const dir = ensureStateDir(path.join(makeTempRoot(t), 'specs', '.chat'));
+  const dir = ensureStateDir(path.join(makeTempRoot(t), '.specs', '.chat'));
   let clock = 1_000_000;
   const store = createDeviceStore({ dir, now: () => clock });
   return { dir, store, tick: (ms) => (clock += ms) };
@@ -83,30 +84,51 @@ test('deny, revoke, revoke all, rename; idle devices drop out after 30 days', (t
   assert.equal(store.verify(c.cookie), null);
 });
 
-test('audit log lines; the state folder keeps it (and devices, tls) out of git', (t) => {
+test('audit log lines; the state folder keeps them out of git with its own * .gitignore', (t) => {
   const { dir } = setup(t);
   audit(dir, { device: 'abc', action: 'message', key: 'k1', detail: 'Run\nthe tests' });
   const log = readFileSync(path.join(dir, 'audit.log'), 'utf8');
   assert.match(log, /\tabc\tmessage\tk1\tRun the tests\n$/);
   assert.equal(readFileSync(path.join(dir, '.gitignore'), 'utf8'), '*\n');
-  // git agrees: everything in specs/.chat is ignored
-  const root = path.resolve(dir, '..', '..');
-  try {
-    execFileSync('git', ['init', '-q'], { cwd: root });
-  } catch {
-    return; // no git here: the .gitignore content check above is enough
-  }
-  writeFileSync(path.join(dir, 'devices.json'), '{}');
-  for (const f of ['audit.log', 'devices.json', 'tls/cert.pem']) {
-    const out = execFileSync('git', ['check-ignore', '-q', '--no-index', path.join('specs', '.chat', f)], {
-      cwd: root,
-      stdio: 'pipe',
-    });
-    assert.equal(String(out), '');
-  }
 });
 
+// git check-ignore exits 0 when the path is ignored, 1 when not
+const ignored = (cwd, file) => {
+  try {
+    execFileSync('git', ['check-ignore', '-q', '--no-index', file], { cwd, stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+test(
+  '<specs>/.chat (devices, audit log, tls) is ignored by the .specs repo and by the project',
+  { skip: !hasGit },
+  (t) => {
+    const { root, roots } = makeProject(t, { git: true });
+    initProject(roots);
+    const dir = stateDirOf(roots, {});
+    assert.equal(dir, path.join(root, '.specs', '.chat'));
+    // before the state dir exists: the .specs/.gitignore of nos init alone keeps it out of the specs history
+    for (const f of ['audit.log', 'devices.json', 'tls/cert.pem']) assert.ok(ignored(roots.specs, `.chat/${f}`), f);
+    ensureStateDir(dir);
+    audit(dir, { action: 'pair' });
+    writeFileSync(path.join(dir, 'devices.json'), '{}');
+    for (const f of ['audit.log', 'devices.json', 'tls/cert.pem']) {
+      assert.ok(ignored(roots.specs, `.chat/${f}`), f);
+      assert.ok(ignored(root, `.specs/.chat/${f}`), f);
+    }
+    // git add -A in .specs takes none of it
+    gitOk(['add', '-A'], roots.specs);
+    assert.doesNotMatch(gitOk(['status', '--porcelain'], roots.specs), /\.chat/);
+  },
+);
+
 test('device names from the user agent', () => {
-  assert.equal(deviceName('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Version/18.0 Mobile Safari/604.1'), 'iPhone · Safari');
+  assert.equal(
+    deviceName('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Version/18.0 Mobile Safari/604.1'),
+    'iPhone · Safari',
+  );
   assert.equal(deviceName(''), 'Device · Browser');
 });

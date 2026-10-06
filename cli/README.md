@@ -452,7 +452,7 @@ $ nos set-status --domain domain-1-user-auth --step 1 --status in-review
 
 Local chat of the project in the spec-ui (or the chat page). By default the chat server answers every
 chat tab with its own headless Claude Code session (`src/chat/runner.js`: `claude -p --output-format stream-json`,
-`--session-id`/`--resume`, `--permission-mode auto`, `--permission-prompts none`, run in the project root).
+`--session-id`/`--resume`, `--permission-mode auto`, `--permission-prompts none`, started in the main checkout).
 `"chat": { "runner": false }` switches to relay: a terminal session answers with `await` / `reply`.
 Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat --help`.
 
@@ -470,13 +470,26 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 | `nos chat server [--port n]` | Run the server in the foreground |
 | `nos chat hook` | Stop hook (relay mode only): hands queued messages to Claude Code |
 
-- The project is resolved like every command (`nos roots`): main, also when called from a run's worktree.
-- State: `<specs>/.chat/` (`sessions.json`, `server.json`, `server.log`, `devices.json`, `audit.log`, `tls/`), ignored
-  by the `.specs` repo. `src/chat/devices.js` (with `devices.d.ts`) is shared with the spec-ui dev server.
+- Roots come from the resolver (`src/chat/paths.js` `chatRoots`: `--root`, `NOS_SPECS_ROOT`, else the walk from the
+  current directory). The chat always works with **main**: from a worktree of the project (also the Stop hook's `cwd`)
+  every command reaches the chat of the main checkout, same state dir, same session key (sha256 of main's real path).
+  Without `nos.config.json` in main every command fails with "nos is not set up in <main> …: run nos init" (the hook
+  prints nothing). `status` and the server log print main with forward slashes.
+- State: `<specs>/.chat/` (`sessions.json`, `server.json`, `server.log`, `devices.json`, `audit.log`, `tls/`, and a
+  `.gitignore` of `*`; `.specs/.gitignore` of `nos init` ignores `.chat/` too). `src/chat/devices.js` and
+  `src/chat/paths.js` (with `devices.d.ts` / `paths.d.ts`) are shared with the spec-ui dev server.
 - One server per project on 127.0.0.1, port `"chat": { "port" }` in `<specs>/config.json` (default 4611);
-  a port held by another project's server gives a free port, recorded in `server.json`.
+  a port held by another project's server gives a free port, recorded in `server.json` (`root` = main).
 - `"chat"` in `<specs>/config.json`: `port`, `runner` (default true), `permissionMode` (default `auto`), `model`,
   `claude` (path of the executable).
+- A tab's session never inherits `NOS_SPECS_ROOT` or `NOS_RUN_TOKEN` (nor the variables of the Claude Code session
+  that started the server).
+- The run of a tab: when the result of the session's own shell call (Bash/PowerShell, not a subagent's) of
+  `nos run start` holds its JSON (`"action": "run-start"`), the tab records `run: { kind, id, domain, branch, worktree }`
+  (never the token) in `sessions.json`; the results of `nos run cleanup` / `nos run abandon` clear it. Other tools
+  (Read, grep, cat), error reports (`{ action, error, … }`) and failed calls are ignored. Not covered: a `nos run`
+  call in a background shell (its output arrives through another tool). `run` is in `GET /api/sessions`
+  (`sessions`, `tabs`), `GET /api/session/<key>` and the `sessions` events.
 - Permissions and the relay Stop hook live in the project's `.claude/settings.local.json` with the absolute
   `node <home>/cli/bin/nos.js chat …` (written by the setup ability).
 - Env for tests: `NOS_CHAT_STATE_DIR`, `NOS_CHAT_PORT`, `NOS_CHAT_IDLE_MS` (`0`/`off` disables the 30 min idle exit).

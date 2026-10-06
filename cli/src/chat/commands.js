@@ -1,25 +1,25 @@
 // `nos chat <command>`: the only thing Claude Code runs for the local chat. Acts on the chat of the
-// project around the current directory (the folder with specs/), so no command takes an id.
+// project around the current directory (resolved like every nos command; from a worktree it is the chat of
+// main), so no command takes an id.
 import { X509Certificate } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { createDeviceStore } from './devices.js';
-import { ensureServer, liveServer, removeServerJson, request, restartServer, VERSION, writeServerJson } from './client.js';
+import {
+  ensureServer,
+  liveServer,
+  removeServerJson,
+  request,
+  restartServer,
+  VERSION,
+  writeServerJson,
+} from './client.js';
 import { runHook } from './hook.js';
 import { launchBrowser } from './launch.js';
-import {
-  chatConfig,
-  ensureStateDir,
-  files,
-  findRoot,
-  keyOf,
-  portOf,
-  realDir,
-  SPEC_UI_PORT,
-  stateDirOf,
-} from './paths.js';
+import { chatConfig, ensureStateDir, files, chatRoots, keyOf, portOf, SPEC_UI_PORT, stateDirOf } from './paths.js';
+import { slash } from '../roots.js';
 import { createRunner } from './runner.js';
 import { createChatServer } from './server.js';
 import { createSessionStore } from './sessions.js';
@@ -28,8 +28,9 @@ export const CHAT_HELP = `Usage: nos chat [<command>] [options]
 
 Local chat in the spec-ui (or the chat page) for this project. By default the chat server runs
 its own headless Claude Code session per chat tab (claude -p, permission mode "auto"). With
-"chat": { "runner": false } in specs/config.json a terminal session answers instead (await/reply).
-State lives in specs/.chat/ of the project (never committed).
+"chat": { "runner": false } in <specs>/config.json (default .specs/config.json) a terminal session
+answers instead (await/reply). State lives in <specs>/.chat/ (never committed). From a worktree of
+the project every command acts on the chat of the main checkout. Needs a project set up by nos init.
 
 Commands:
   (none)            Server address, version and sessions
@@ -49,19 +50,19 @@ Commands:
   hook              Stop hook: hand queued messages to Claude Code (reads hook JSON on stdin)
 
 Options:
-  --root <dir>      Project root (default: nearest folder with specs/ from the current directory)
+  --root <dir>      Project root or one of its worktrees (default: resolved from the current
+                    directory like every nos command, NOS_SPECS_ROOT included)
 
 Results are JSON on stdout. Errors print { "error" } and exit 1.`;
 
 const NEXT = {
-  messages:
-    'Answer in the chat with `nos chat reply`, then run `nos chat await` again in the background.',
+  messages: 'Answer in the chat with `nos chat reply`, then run `nos chat await` again in the background.',
   ended: 'The user sent this and closed the chat. Do what it asks, report in the terminal, and do not reopen the chat.',
   userEnded: 'The user closed the chat. Stop listening and do not reopen it unless asked.',
   waiting: 'No message yet. Run `nos chat await` again.',
   agentEnded: 'The chat was ended. Stop listening.',
   runner:
-    'The chat answers itself with its own Claude Code sessions (tabs in the spec-ui). Do not listen; set "chat": { "runner": false } in specs/config.json to answer from this terminal instead.',
+    'The chat answers itself with its own Claude Code sessions (tabs in the spec-ui). Do not listen; set "chat": { "runner": false } in <specs>/config.json to answer from this terminal instead.',
   noServer: 'The chat server is not running. Run `nos chat open` if the user wants to chat.',
 };
 
@@ -99,12 +100,16 @@ export function pairUrls(code, nets = networkInterfaces(), port = SPEC_UI_PORT, 
     .flatMap(([name, list]) =>
       (list ?? [])
         .filter((n) => n.family === 'IPv4' && !n.internal)
-        .map((n) => ({ interface: name, virtual: VIRTUAL.test(name), url: `${scheme}://${n.address}:${port}/?pair=${code}` })),
+        .map((n) => ({
+          interface: name,
+          virtual: VIRTUAL.test(name),
+          url: `${scheme}://${n.address}:${port}/?pair=${code}`,
+        })),
     )
     .sort((a, b) => Number(a.virtual) - Number(b.virtual));
 }
 
-// short SHA-256 fingerprint of the spec-ui's certificate (specs/.chat/tls), to compare on the phone
+// short SHA-256 fingerprint of the spec-ui's certificate (<specs>/.chat/tls), to compare on the phone
 export function tlsFingerprint(stateDir) {
   try {
     const fp = new X509Certificate(readFileSync(path.join(stateDir, 'tls', 'cert.pem'))).fingerprint256;
@@ -121,18 +126,20 @@ function idleOf(env) {
   return Number(v) || 1800000;
 }
 
-async function serve(root, stateDir, port, { env, stderr }) {
+// root = main (already real)
+async function serve(roots, stateDir, port, { env, stderr }) {
+  const root = roots.main;
   ensureStateDir(stateDir);
   const store = createSessionStore({ file: files(stateDir).sessions });
-  const cfg = chatConfig(root);
+  const cfg = chatConfig(roots);
   const runner = cfg.runner
-    ? createRunner({ root: realDir(root), bin: cfg.claude, mode: cfg.permissionMode, model: cfg.model, env })
+    ? createRunner({ root, bin: cfg.claude, mode: cfg.permissionMode, model: cfg.model, env })
     : null;
   const chat = createChatServer({
     runner,
     store,
     version: VERSION,
-    root: realDir(root),
+    root,
     idleMs: idleOf(env),
     onStop: () => {
       removeServerJson(stateDir);
@@ -151,11 +158,11 @@ async function serve(root, stateDir, port, { env, stderr }) {
     pid: process.pid,
     port: bound,
     version: VERSION,
-    root: realDir(root),
+    root,
     startedAt: new Date().toISOString(),
   });
   stderr.write(
-    `nos chat: listening on http://127.0.0.1:${bound}/ for ${realDir(root)}` +
+    `nos chat: listening on http://127.0.0.1:${bound}/ for ${slash(root)}` +
       (runner ? ` (own Claude Code sessions, permission mode ${cfg.permissionMode})\n` : ' (relay)\n'),
   );
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => void chat.stop());
@@ -191,8 +198,9 @@ export async function runChat(argv, io = {}) {
     }
 
     const { values } = parseArgs({ args, options: OPTIONS, strict: true, allowPositionals: false });
-    const root = values.root ? realDir(values.root) : findRoot(cwd);
-    const stateDir = stateDirOf(root, env);
+    const roots = chatRoots({ root: values.root, cwd, env });
+    const root = roots.main;
+    const stateDir = stateDirOf(roots, env);
     const name = values.name ?? '';
     const key = keyOf(root, name);
 
@@ -202,21 +210,25 @@ export async function runChat(argv, io = {}) {
         print({
           server: live ? `http://127.0.0.1:${live.port}/` : null,
           version: live?.version ?? VERSION,
-          root,
+          root: slash(root),
           sessions: createSessionStore({ file: files(stateDir).sessions }).list(),
         });
         return 0;
       }
       case 'server': {
-        const port = values.port !== undefined ? Number(values.port) : portOf(root, env);
-        await serve(root, stateDir, port, { env, stderr });
+        const port = values.port !== undefined ? Number(values.port) : portOf(roots, env);
+        await serve(roots, stateDir, port, { env, stderr });
         return 0;
       }
       case 'open': {
-        const port = await ensureServer(root, stateDir, { env, log: (m) => stderr.write(`nos chat: ${m}\n`) });
+        const port = await ensureServer(roots, stateDir, { env, log: (m) => stderr.write(`nos chat: ${m}\n`) });
         const r = await request(port, 'POST', '/api/sessions', { dir: root, name, reopen: values.reopen === true });
         if (r.code === 409) {
-          print({ status: 'user-ended', key: r.body.key, next_step: 'The user ended this chat. Reopen only when asked: `nos chat open --reopen`.' });
+          print({
+            status: 'user-ended',
+            key: r.body.key,
+            next_step: 'The user ended this chat. Reopen only when asked: `nos chat open --reopen`.',
+          });
           return 0;
         }
         if (r.code !== 200) throw new Error(r.body.error ?? `open failed (${r.code})`);
@@ -232,8 +244,12 @@ export async function runChat(argv, io = {}) {
         return 0;
       }
       case 'restart': {
-        const port = await restartServer(root, stateDir, { env, log: (m) => stderr.write(`nos chat: ${m}
-`) });
+        const port = await restartServer(roots, stateDir, {
+          env,
+          log: (m) =>
+            stderr.write(`nos chat: ${m}
+`),
+        });
         print({ status: 'restarted', server: `http://127.0.0.1:${port}/` });
         return 0;
       }
@@ -307,4 +323,3 @@ export async function runChat(argv, io = {}) {
     return 1;
   }
 }
-

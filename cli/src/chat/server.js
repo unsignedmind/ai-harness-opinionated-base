@@ -123,6 +123,7 @@ export function createChatServer({
         agents: agents.get(s.key) ?? [],
         messages: s.messages,
         claudeSession: s.claudeSession,
+        run: s.run,
         updatedAt: s.updatedAt,
       }));
   }
@@ -180,6 +181,12 @@ export function createChatServer({
         each(key, 'agents', { agents: list });
         broadcastSessions();
       },
+      // the session started (or ended) a nos run: the tab shows it, sessions.json keeps it for a restart
+      onRun: (run) => {
+        if (!store.get(key)) return;
+        store.update(key, { run });
+        broadcastSessions();
+      },
       onExit: (r) => {
         if (procs.get(key) === proc) procs.delete(key);
         activity.delete(key);
@@ -201,7 +208,10 @@ export function createChatServer({
     if (batch.status !== 'messages') return;
     const prompt = batch.items.map((i) => i.text).join('\n\n');
     if (!s.title) {
-      const first = batch.items[0].text.replace(/^\[context: [^\]]*\]\n/, '').replace(/\s+/g, ' ').trim();
+      const first = batch.items[0].text
+        .replace(/^\[context: [^\]]*\]\n/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
       store.update(key, { title: first.length > 40 ? first.slice(0, 39) + '…' : first });
     }
     if (!s.claudeSession) store.update(key, { claudeSession: randomUUID(), claudeStarted: false });
@@ -233,7 +243,11 @@ export function createChatServer({
       if (state !== lastPresence.get(key)) broadcastPresence(key);
     }
     const busy =
-      [...streams.values()].some((s) => s.size) || allStreams.size > 0 || parked.size > 0 || procs.size > 0 || tailStreams.size > 0;
+      [...streams.values()].some((s) => s.size) ||
+      allStreams.size > 0 ||
+      parked.size > 0 ||
+      procs.size > 0 ||
+      tailStreams.size > 0;
     for (const p of procs.values()) if (!working(p) && now - p.lastUse > procIdleMs) p.close();
     if (busy) lastActive = now;
     else if (idleMs > 0 && now - lastActive > idleMs) void stop();
@@ -381,7 +395,11 @@ export function createChatServer({
     if (m === 'GET' && p === '/chat.css') return asset(res, 'text/css; charset=utf-8', CSS);
     if (m === 'GET' && p === '/client.js') return asset(res, 'text/javascript; charset=utf-8', CLIENT_JS);
     if (m === 'GET' && p === '/events-all') {
-      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-store',
+        connection: 'keep-alive',
+      });
       allStreams.add(res);
       const tabs = sessionsView();
       send(res, 'sessions', { sessions: tabs, runner: !!runner });
@@ -396,7 +414,18 @@ export function createChatServer({
     if (m === 'GET' && (k = /^\/api\/session\/([^/]+)$/.exec(p))) {
       const s = session(k[1]);
       const { key, dir, name, status, endedBy, chat } = s;
-      return json(res, 200, { key, dir, name, status, endedBy, chat, presence: presenceFor(key), running: working(procs.get(key)) });
+      const run = s.run ?? null;
+      return json(res, 200, {
+        key,
+        dir,
+        name,
+        status,
+        endedBy,
+        chat,
+        run,
+        presence: presenceFor(key),
+        running: working(procs.get(key)),
+      });
     }
     if (m !== 'POST') throw new HttpError(404, 'not found');
 

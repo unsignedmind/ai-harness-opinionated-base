@@ -110,7 +110,10 @@ test('await with timeoutMs 0 answers at once; thinking and typing expire', async
 test('a new event stream gets chat-sync then presence; a reply is pushed', async (t) => {
   const { port, call, key } = await start(t);
   const first = await events(port, key, 2);
-  assert.deepEqual(first.map((e) => e.event), ['chat-sync', 'presence']);
+  assert.deepEqual(
+    first.map((e) => e.event),
+    ['chat-sync', 'presence'],
+  );
   const later = events(port, key, 4);
   await sleep(50);
   await call('POST', `/api/session/${key}/reply`, { text: 'All 42 pass.' });
@@ -131,12 +134,22 @@ test('shutdown answers parked awaits with waiting', async (t) => {
 
 test('a body over 1 MiB and text over 32,000 characters get 400; ended gets 409', async (t) => {
   const { call, key } = await start(t);
-  assert.equal((await call('POST', `/api/session/${key}/messages`, { text: 'x'.repeat(1024 * 1024 + 10) }).catch(() => ({ code: 400 }))).code, 400);
+  assert.equal(
+    (
+      await call('POST', `/api/session/${key}/messages`, { text: 'x'.repeat(1024 * 1024 + 10) }).catch(() => ({
+        code: 400,
+      }))
+    ).code,
+    400,
+  );
   assert.equal((await call('POST', `/api/session/${key}/messages`, { text: 'x'.repeat(32001) })).code, 400);
   assert.equal((await call('POST', `/api/session/${key}/messages`, { text: '  ' })).code, 400);
   assert.deepEqual((await call('POST', `/api/session/${key}/end`)).body, { status: 'ended', endedBy: 'user' });
   assert.equal((await call('POST', `/api/session/${key}/messages`, { text: 'late' })).code, 409);
-  assert.equal((await call('POST', '/api/sessions', { dir: (await call('GET', '/api/sessions')).body.sessions[0].dir })).code, 409);
+  assert.equal(
+    (await call('POST', '/api/sessions', { dir: (await call('GET', '/api/sessions')).body.sessions[0].dir })).code,
+    409,
+  );
 });
 
 test('the chat page escapes the boot JSON', async (t) => {
@@ -279,7 +292,10 @@ test('runner: tabs are their own sessions; errors show up as replies', async (t)
   const tab = (await call('POST', '/api/sessions/new', { dir, title: 'Review' })).body.key;
   assert.notEqual(tab, key);
   const tabs = (await call('GET', '/api/sessions')).body.tabs;
-  assert.deepEqual(tabs.map((s) => s.title), ['New chat', 'Review']);
+  assert.deepEqual(
+    tabs.map((s) => s.title),
+    ['New chat', 'Review'],
+  );
   await call('POST', `/api/session/${tab}/messages`, { text: 'go' });
   await call('POST', `/api/session/${key}/messages`, { text: 'go too' });
   assert.equal(runner.procs.length, 2);
@@ -322,7 +338,10 @@ test('project-wide stream: sessions, then a chat-sync per tab, events carry the 
       runner.procs[0].opts.onActivity('Read: README.md');
     }, 50);
   });
-  assert.deepEqual(got.slice(0, 2).map((e) => e.event), ['sessions', 'chat-sync']);
+  assert.deepEqual(
+    got.slice(0, 2).map((e) => e.event),
+    ['sessions', 'chat-sync'],
+  );
   assert.equal(got[0].data.runner, true);
   const act = got.find((e) => e.event === 'activity');
   assert.deepEqual(act.data, { key, text: 'Read: README.md' });
@@ -374,14 +393,59 @@ test('transcript-events: the tab session steps, then appended ones; a subagent b
 
   store.update(key, { claudeSession: sid });
   const main = sse(port, `/transcript-events?key=${key}`, (g) => g.length >= 2);
-  setTimeout(() => appendFileSync(path.join(folder, `${sid}.jsonl`), line({ type: 'assistant', uuid: 'a1', message: { content: [{ type: 'text', text: 'hello' }] } })), 100);
+  setTimeout(
+    () =>
+      appendFileSync(
+        path.join(folder, `${sid}.jsonl`),
+        line({ type: 'assistant', uuid: 'a1', message: { content: [{ type: 'text', text: 'hello' }] } }),
+      ),
+    100,
+  );
   const { got } = await main;
-  assert.deepEqual(got[0].data.items.map((i) => i.text), ['hi']);
+  assert.deepEqual(
+    got[0].data.items.map((i) => i.text),
+    ['hi'],
+  );
   assert.equal(got[0].data.initial, true);
-  assert.deepEqual(got[1].data.items.map((i) => [i.kind, i.text]), [['text', 'hello']]);
+  assert.deepEqual(
+    got[1].data.items.map((i) => [i.kind, i.text]),
+    [['text', 'hello']],
+  );
 
   const sub = await sse(port, `/transcript-events?key=${key}&agent=a796`, (g) => g.length >= 1);
-  assert.deepEqual(sub.got[0].data.items.map((i) => [i.label, i.text]), [['Task', 'Do the step']]);
+  assert.deepEqual(
+    sub.got[0].data.items.map((i) => [i.label, i.text]),
+    [['Task', 'Do the step']],
+  );
   assert.equal((await sse(port, `/transcript-events?key=${key}&agent=../x`, () => true)).status, 400);
   assert.equal((await sse(port, `/transcript-events?key=nope`, () => true)).status, 400);
+});
+
+test('runner: a nos run of a tab (onRun) is stored, shown in the tabs, the session and a sessions event', async (t) => {
+  const runner = fakeRunner();
+  const { port, call, key, store } = await start(t, { runner });
+  await call('POST', `/api/session/${key}/messages`, { text: 'start quick step 7' });
+  assert.equal((await call('GET', `/api/session/${key}`)).body.run, null);
+  assert.equal((await call('GET', '/api/sessions')).body.tabs[0].run, null);
+  // the fields of the run file
+  const run = {
+    kind: 'quick',
+    id: 7,
+    domain: 'domain-3-x',
+    branch: 'quick-7',
+    worktree: 'D:/p/.claude/worktrees/quick-7',
+  };
+  const pushed = sse(port, '/events-all', (got) => got.some((e) => e.event === 'sessions' && e.data.sessions[0]?.run));
+  await sleep(30);
+  runner.procs[0].opts.onRun(run);
+  const { got } = await pushed;
+  assert.deepEqual(got.findLast((e) => e.event === 'sessions').data.sessions[0].run, run);
+  assert.deepEqual(store.get(key).run, run);
+  assert.deepEqual((await call('GET', `/api/session/${key}`)).body.run, run);
+  assert.deepEqual((await call('GET', '/api/sessions')).body.tabs[0].run, run);
+  assert.deepEqual((await call('GET', '/api/sessions')).body.sessions[0].run, run);
+  // cleanup or abandon: the run is gone
+  runner.procs[0].opts.onRun(null);
+  assert.equal(store.get(key).run, null);
+  assert.equal((await call('GET', `/api/session/${key}`)).body.run, null);
 });
