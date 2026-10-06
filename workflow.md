@@ -1,5 +1,7 @@
 <rules>
-    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". <home> = this skill's base directory, or the "home" from "nos roots". Always forward slashes. After the first "nos roots" use its "home" verbatim in every call (identical string, so permission rules match). Never rely on a linked "nos"</rule>
+    <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in full in every Bash call. <home> = this skill's base directory, or the "home" from "nos roots". Always forward slashes. After the first "nos roots" use its "home" verbatim in every call (identical string, so permission rules match). Never through a shell variable, function or alias (Claude Code's worktree isolation refuses a command whose name is computed at runtime), never a linked "nos"</rule>
+    <rule>Git against main: never "cd <main> && git …", "git -C <main> …" or GIT_DIR from a worktree session. Claude Code's worktree isolation blocks git redirected into the main checkout. Git against main happens only inside nos commands (run finish, run cleanup, run abandon)</rule>
+    <rule>Pushing: nos never pushes code, the user pushes. No ability and no step of this workflow runs git push. Only "nos specs commit" pushes the specs repo, and only when "specs.remote" is set (opt-in backup)</rule>
     <rule>Run every ability in a new subagent. Pass it the ability skill path, home, work, specs and its inputs. Exception: "chat" runs in the main session</rule>
     <rule>Chat in relay mode ("chat": { "runner": false }) and open → every report and question to the user also goes to the chat ("nos chat reply"), answers come back through "nos chat await". Keep an await running in the background whenever the turn ends. Default runner mode: the chat answers with its own Claude Code sessions, nothing to do here</rule>
     <rule>Change statuses only with "nos set-status --domain <domain> [--phase <id>] [--step <id>] --status <status>". Valid statuses: <home>/templates/status.xml. merged and discarded are never set by you: only "nos run finish" and "nos run abandon" set them. Never call "nos set-status --run"</rule>
@@ -8,11 +10,11 @@
     <rule>Every question with choices, also relayed from subagents: one choice per line, "<letter> - <choice text> [<key>]". Letters A, B, C… in choice order. The user answers with letter or key</rule>
     <rule>"review-needed" missing in plan.json → true</rule>
     <rule>Quick step: a single step without plan and phase in <specs>/<domain>/quick-steps/quick-steps.json. Its status changes with "nos set-status --domain <domain> --step <id>" without --phase. Pass "quick step" and no phase id to every ability</rule>
-    <rule>Roots: "nos roots" prints home, work, main, specs, inWorktree, configured. Run it at start, after entering a worktree and after leaving one. Pass home, work and specs to every ability; inside a run also the run id and "mainBranch" of <specs>/.runs/<run>.json. Never build a nos path yourself. Grep/Glob over the specs: always pass <specs> as the path (hidden folder)</rule>
+    <rule>Roots: "nos roots" prints home, work, main, specs, inWorktree, configured. Run it at start, after entering a worktree and after leaving one. Pass home, work and specs to every ability; inside a run also the run id and "mainBranch" of <specs>/.runs/<run>.json. Never build a nos path yourself. <specs> lies outside the checkout (default: the sibling folder ../<project>.specs): Read/Grep/Glob over the specs always get <specs> or a path in it passed explicitly</rule>
     <rule>Run: one plan (run id plan-<domain id>) or one quick step (run id quick-<step id>) in its own branch and git worktree <main>/.claude/worktrees/<run>. The session works inside that worktree. One run per session, one run per domain. Running runs: <specs>/.runs/*.json</rule>
     <rule>Token: "nos run start" prints the run token. Remember it (it stays in this transcript) and pass --token <token> to every "nos run" command. Fresh session without the token → only --take-over, and only after the user chose TAKEOVER. State run id and token in every park report, so they survive a compacted context</rule>
     <rule>Specs commits: only you commit <specs>, only with "nos specs commit". Subagents never run git against <specs>. Inside a run, after every ability returns: nos specs commit --run <run> -m "step-<id>: <ability>" (phase abilities: "phase-<id>: <ability>"). Outside a run (idea, plan, quick step creation): nos specs commit --domain <domain> -m "<ability>: <domain>" or "<ability>: <what>". Never --domain for a domain with a run file in <specs>/.runs: it would commit that run's spec edits; check first. Only <specs>/config.json changed (e.g. chat settings): nos specs commit --config -m "<ability>: <what>". Status changes are picked up by the next specs commit</rule>
-    <rule>Code commits: develop, review-fixing, integrate and architect commit code and docs themselves in their cwd, subject prefix "step-<id>: ", "phase-<id>: " or "architect: " (colon included, matched exactly). Never a spec file</rule>
+    <rule>Code commits: develop, review-fixing, integrate and architect commit code and docs themselves in their cwd, subject prefix "step-<id>: ", "phase-<id>: " or "architect: " (colon included, matched exactly). Never a spec file, never a push</rule>
     <rule>Exit codes of nos commands, react by the table <exitCodes>
     <code n="0">ok</code>
     <code n="1">failed → park, report the error. From "nos run finish" → cycle "finish" step2</code>
@@ -64,7 +66,7 @@
         <choice key="RUN">Run or continue a plan or quick step</choice>
         <choice key="QUICK">Quick step: one small change straight to specify, develop, review</choice>
         <choice key="ARCHITECT">Improve project quality and docs: architecture docs, guardrails, tests</choice>
-        <choice key="SETUP">Set up or update nos for this project: nos.config.json, .specs repo, quality tools, slots</choice>
+        <choice key="SETUP">Set up or update nos for this project: nos.config.json, the specs repo, quality tools, slots</choice>
         <choice key="CHAT">Continue in the browser or on the phone: open the local chat (its own Claude Code sessions, one per tab)</choice>
     </question>
 </start>

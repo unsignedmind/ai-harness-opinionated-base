@@ -5,8 +5,17 @@ import path from 'node:path';
 import { run } from '../src/cli.js';
 import { git, gitEnv } from '../src/git.js';
 import { initProject } from '../src/init.js';
-import { findWorkRoot, homeGuard, resolveRoots, slash, SPECS_DIR, worktreeProjectDir } from '../src/roots.js';
-import { gitOk, hasGit, initRepo, makeProject, makeTempRoot, writeFile } from './helpers.js';
+import {
+  defaultSpecsDir,
+  findWorkRoot,
+  homeGuard,
+  projectOfSpecs,
+  resolveRoots,
+  slash,
+  specsGuard,
+  worktreeProjectDir,
+} from '../src/roots.js';
+import { gitOk, hasGit, initRepo, makeProject, makeTempRoot, SPECS_DIR, writeFile } from './helpers.js';
 
 const noGit = { skip: !hasGit && 'git is not available' };
 
@@ -32,14 +41,18 @@ function addWorktree(root, name = 'quick-1') {
   return wt;
 }
 
-test('plain dir without nos.config.json: work = main = cwd, specs = cwd/.specs', async (t) => {
+// the default specs root of a project folder: the sibling <name>.specs
+const siblingOf = (root) => path.join(path.dirname(root), `${path.basename(root)}.specs`);
+
+test('plain dir without nos.config.json: work = main = cwd, specs = the sibling folder <cwd>.specs', async (t) => {
   const root = makeTempRoot(t);
 
   const roots = resolveRoots({ cwd: root, env: {} });
 
   assert.equal(roots.work, root);
   assert.equal(roots.main, root);
-  assert.equal(roots.specs, path.join(root, SPECS_DIR));
+  assert.equal(roots.specs, siblingOf(root));
+  assert.equal(defaultSpecsDir(root), '../p.specs');
   assert.equal(roots.inWorktree, false);
   assert.equal(roots.git, false);
 });
@@ -56,9 +69,56 @@ test('the walk from a subfolder lands on the folder with nos.config.json', async
   assert.equal(roots.specs, path.join(root, SPECS_DIR));
 });
 
-test('specs.dir of nos.config.json sets the specs root', async (t) => {
+test('specs.dir of nos.config.json sets the specs root: relative to main or absolute; null is the default', async (t) => {
   const { root } = makeProject(t, { config: { specs: { dir: 'planning' } } });
   assert.equal(resolveRoots({ cwd: root, env: {} }).specs, path.join(root, 'planning'));
+  const elsewhere = path.join(makeTempRoot(t), 'specs');
+  writeFile(root, 'nos.config.json', { specs: { dir: elsewhere } });
+  assert.equal(resolveRoots({ cwd: root, env: {} }).specs, elsewhere);
+  writeFile(root, 'nos.config.json', { specs: { dir: null } });
+  assert.equal(resolveRoots({ cwd: root, env: {} }).specs, siblingOf(root));
+});
+
+test('specs guard: warns only when the specs root lies inside the checkout', async (t) => {
+  const lines = [];
+  const sink = { write: (s) => lines.push(s) };
+  const inside = makeProject(t).roots;
+  const [warning] = specsGuard(inside, sink);
+  assert.match(warning, /specs root inside the checkout .*worktree sessions cannot write it \(Claude Code isolation\)/);
+  assert.deepEqual(lines, [warning + '\n']);
+  assert.deepEqual(specsGuard(makeProject(t, { sibling: true }).roots, sink), []);
+  assert.equal(lines.length, 1);
+});
+
+test('back-pointer: from inside the sibling specs root the walk lands on the project it names', async (t) => {
+  const { root } = makeProject(t, { sibling: true });
+  const specs = siblingOf(root);
+  const deep = path.join(specs, 'domain-1-a', 'phases');
+  mkdirSync(deep, { recursive: true });
+
+  for (const cwd of [specs, deep]) {
+    assert.equal(findWorkRoot(cwd), root, cwd);
+    const roots = resolveRoots({ cwd, env: {} });
+    assert.deepEqual([roots.work, roots.main, roots.specs, roots.configured], [root, root, specs, true], cwd);
+  }
+  assert.deepEqual(projectOfSpecs(specs), { main: root });
+});
+
+test('back-pointer to a folder without nos.config.json: not set up, the walk stops there', async (t) => {
+  const { root } = makeProject(t, { sibling: true });
+  const specs = siblingOf(root);
+  writeFile(specs, 'config.json', { project: '../gone', 'id-counters': { domain: 1, phase: 1, step: 1 } });
+
+  assert.deepEqual(projectOfSpecs(specs), { main: null });
+  assert.equal(findWorkRoot(specs), null);
+  const roots = resolveRoots({ cwd: specs, env: {} });
+  assert.equal(roots.configured, false);
+  assert.equal(roots.via, 'cwd');
+  // a config.json without "project" (or id-counters) is no back-pointer
+  writeFile(specs, 'config.json', { 'id-counters': { domain: 1, phase: 1, step: 1 } });
+  assert.equal(projectOfSpecs(specs), null);
+  writeFile(specs, 'config.json', { project: '../p' });
+  assert.equal(projectOfSpecs(specs), null);
 });
 
 test('main repo: main = work, git true, not in a worktree', noGit, (t) => {
@@ -119,18 +179,18 @@ test(
 );
 
 test(
-  'nos roots prints the same specs from main, a worktree, <main>/.claude/skills/nos and <main>/.specs',
+  'nos roots prints the same specs from main, a worktree, <main>/.claude/skills/nos and the sibling specs root',
   noGit,
   async (t) => {
-    const { root } = makeProject(t, { git: true });
+    const { root } = makeProject(t, { git: true, sibling: true });
     const wt = addWorktree(root);
     const nos = initRepo(path.join(root, '.claude', 'skills', 'nos'));
-    const specs = initRepo(path.join(root, SPECS_DIR));
+    const specs = initRepo(siblingOf(root));
     const home = nos;
 
     const results = await Promise.all([root, wt, nos, specs].map((cwd) => nosRoots(cwd, { home })));
 
-    const expected = slash(path.join(root, SPECS_DIR));
+    const expected = slash(siblingOf(root));
     assert.deepEqual(
       results.map((r) => r.specs),
       [expected, expected, expected, expected],

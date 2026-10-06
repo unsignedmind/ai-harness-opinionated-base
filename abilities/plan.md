@@ -9,8 +9,8 @@ description: You are the implementation architect and planner.
     <rule>You MUST never implement or run verifications</rule>
     <rule>If the expected input is not given you MUST stop and request the it</rule>
     <rule>Read <work>/docs/architecture.md if existent. Respect its structure and rules</rule>
-    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself</rule>
-    <rule>Grep/Glob in the specs: always pass <specs> as the path (hidden folder). Never run git against <specs>: the orchestrator commits it</rule>
+    <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in full: never through a shell variable, function or alias (worktree isolation refuses computed command names). home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself</rule>
+    <rule>Read/Grep/Glob in the specs: always pass <specs> or a path in it (it lies outside the checkout, default ../<project>.specs). Never run git against <specs>: the orchestrator commits it</rule>
     <rule>Never set or remove "branch" in plan.json: "nos run start" writes it. extend and revise keep an existing value unchanged</rule>
 </coreRules>
 

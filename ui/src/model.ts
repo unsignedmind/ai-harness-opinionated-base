@@ -1,4 +1,4 @@
-// Turns the raw files of the specs root (.specs/) into ideas -> phases -> steps. Pure: the loader
+// Turns the raw files of the specs root (<specs>) into ideas -> phases -> steps. Pure: the loader
 // hands over `path relative to the specs root -> text` (src/folder.ts readSpecsFolder), so tests feed
 // fixtures. spec-file values in plan.json / quick-steps.json are relative to the specs root as well.
 // Runs (GET /__runs) are joined in: a plan run by its domain, a quick run by its step.
@@ -78,11 +78,13 @@ export type Model = {
   phases: Phase[];
   steps: Step[];
   labels: string[];
-  // the specs root as the project sees it: relative to main (".specs", nos.config.json specs.dir), or
-  // absolute when it lies outside; spec paths shown to the user and to Claude start with it
+  // the specs root as the project sees it: relative to main ("../moodo-poc.specs" for the default sibling
+  // folder, nos.config.json specs.dir), absolute only on another drive; spec paths shown to the user and to
+  // Claude start with it
   specsRel: string;
 };
 
+// fallback when the loader names none (tests, an older dev server)
 export const DEFAULT_SPECS_REL = '.specs';
 
 // <specsRel>/<rel>, forward slashes

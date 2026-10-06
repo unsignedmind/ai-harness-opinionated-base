@@ -78,8 +78,33 @@ test('specs.dir of nos.config.json names the specs root', async () => {
 });
 
 test('a project whose specs root is missing says so', async () => {
-  await expect(readSpecsFolder(dir('p', { 'nos.config.json': '{}' }))).rejects.toThrow(
-    /no \.specs\/ folder: run nos init/,
+  await expect(readSpecsFolder(dir('p', { 'nos.config.json': '{"specs":{"dir":"plans"}}' }))).rejects.toThrow(
+    /no plans\/ folder: run nos init/,
+  );
+});
+
+test('the default specs root is the sibling folder: the project folder names the folder to pick instead', async () => {
+  for (const config of ['{}', '{"specs":{"dir":null}}', '{"specs":{"dir":"../moodo.specs"}}']) {
+    await expect(readSpecsFolder(dir('moodo', { 'nos.config.json': config, src: {} }))).rejects.toThrow(
+      /lies outside it \(\.\.\/moodo\.specs\).*pick the specs folder moodo\.specs\/ instead/,
+    );
+  }
+});
+
+test('the sibling specs root picked on its own: read, and named as the project sees it via its back-pointer', async () => {
+  const sibling = dir('moodo.specs', { ...specs, 'config.json': '{"project":"../moodo","id-counters":{}}' });
+  expect(await readSpecsFolder(sibling)).toStrictEqual(ALL);
+  expect(await locateSpecs(sibling)).toMatchObject({ root: null, rel: '../moodo.specs' });
+  // no domains yet: the name or the id-counters mark it as a specs root
+  expect((await locateSpecs(dir('moodo.specs', { 'config.json': '{"project":"../moodo"}' }))).rel).toBe(
+    '../moodo.specs',
+  );
+  expect((await locateSpecs(dir('plans', { 'config.json': '{"id-counters":{}}' }))).rel).toBe('plans');
+  // a back-pointer deeper down ("../../x/p") or none at all: its own name
+  const deep = dir('s', { ...specs, 'config.json': '{"project":"../../x/p"}' });
+  expect((await locateSpecs(deep)).rel).toBe('s');
+  expect((await locateSpecs(dir('specs', { ...specs, 'config.json': '{"project":"../a/b"}' }))).rel).toBe(
+    '../../specs',
   );
 });
 
@@ -150,8 +175,8 @@ test('docs-folder may not leave the project', async () => {
   expect(d.error).toMatch(/inside the project/);
 });
 
-test('with .specs/ picked on its own the docs are out of reach', async () => {
-  expect((await docsOf(dir('.specs', specs))).error).toMatch(/Open the project folder/);
+test('with the specs root picked on its own the docs are out of reach', async () => {
+  expect((await docsOf(dir('.specs', specs))).error).toMatch(/docs are out of its reach.*npm run dev/);
 });
 
 test('a broken nos.config.json falls back to docs/ and .specs', async () => {

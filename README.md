@@ -2,7 +2,7 @@
 
 nos turns Claude Code into a small development team. You describe an idea. nos turns it into a plan, implements that plan step by step with TDD, reviews every step twice and every phase once more, and all of this happens in a loop that only stops when you want it to.
 
-The main session is the **orchestrator**. It never writes code itself. It starts a fresh subagent for every job (idea, plan, develop, review, architect), keeps track of progress in `.specs/` (the specs' own git repo), and reports to you in simple language. Every plan and quick step runs in its own git branch and worktree, so several can run in parallel.
+The main session is the **orchestrator**. It never writes code itself. It starts a fresh subagent for every job (idea, plan, develop, review, architect), keeps track of progress in `<specs>/` (the specs' own git repo, by default the folder `<project>.specs` next to the project checkout), and reports to you in simple language. Every plan and quick step runs in its own git branch and worktree, so several can run in parallel.
 
 > **This is a blueprint, not a finished product for every type of project.** It shows one way to build a harness. Use it as is, take pieces from it, or rebuild it for your own team and project. Part 3 explains the ideas behind it, and Part 4 shows how to change it.
 
@@ -60,8 +60,8 @@ open ──► in-specification ──► specified ──► in-progress ──
 
 ### Prerequisites
 
-- `nos` CLI (Node.js 20+) | Creates `.specs/` folders and ids, changes statuses, and runs every git step of a run (worktree, rebase, gate, merge).
-- Install: `cd .claude/skills/nos/cli && npm install` (no dependencies). Nothing is linked: orchestrator, abilities and hooks call `node <home>/cli/bin/nos.js`, `<home>` = the nos folder (see Part 6). In this README `nos` stands for that call.
+- `nos` CLI (Node.js 20+) | Creates `<specs>/` folders and ids, changes statuses, and runs every git step of a run (worktree, rebase, gate, merge).
+- Install: `cd .claude/skills/nos/cli && npm install` (no dependencies). Nothing is linked: orchestrator, abilities and hooks call `node <home>/cli/bin/nos.js` literally, `<home>` = the nos folder (see Part 6). In this README `nos` stands for that call.
 - git. Without a git repo nos works in the current folder, without branches and worktrees.
 
 - A test suite, linter and formatter in the project are recommended. Develop and both reviewers run the configured quality check (`nos gate`). Missing ones are skipped; the architect (TESTS) can add them later.
@@ -71,14 +71,14 @@ open ──► in-specification ──► specified ──► in-progress ──
 
 Idempotent: on a fresh project it sets everything up, on a set up one it only checks and fills gaps. Run it on main.
 
-1. Runs `nos init`: creates `nos.config.json`, `.specs/` as its own git repo (first commit `nos: init`) and the `.gitignore` entries `.specs/` and `.claude/worktrees/`. Existing files and id counters stay untouched.
+1. Runs `nos init`: creates `nos.config.json` (`specs.dir` `../<project>.specs`), `<specs>/` next to the checkout as its own git repo (first commit `nos: init`, `config.json` with the back-pointer `project`) and the `.gitignore` entry `.claude/worktrees/`. Existing files and id counters stay untouched. Adds the specs root to `permissions.additionalDirectories` in `.claude/settings.local.json`.
 2. Detects the tooling: package manager, `package.json` scripts, Makefile, pyproject, go.mod, …
 3. Proposes the commands per key, the docs folder for the viewer and the slots (3 when e2e is configured, else 1), and asks you to confirm or adjust.
 4. Writes `quality-tools`, `project-commands`, `spec-ui` and `worktrees` into `nos.config.json`.
 5. Runs the quality tools once with `nos gate` and reports pass or fail.
 6. Slot check: starts the dev server once per slot (`nos exec dev`) and checks that each answers on its own port.
 7. Chat: permissions and (relay) the Stop hook go into `.claude/settings.local.json` with absolute paths. `settings.json` is never written.
-8. Offers a git remote as backup for `.specs` (`specs.remote`).
+8. Offers a git remote as backup for `<specs>` (`specs.remote`).
 9. Commits `nos.config.json` and `.gitignore` on main with `setup: …` (setup is a listed exception to "main moves only by merges").
 
 ```json
@@ -116,7 +116,7 @@ B - Create a plan from an idea [PLAN]
 C - Run or continue a plan or quick step [RUN]
 D - Quick step: one small change straight to specify, develop, review [QUICK]
 E - Improve project quality and docs: architecture docs, guardrails, tests [ARCHITECT]
-F - Set up or update nos for this project: nos.config.json, .specs repo, quality tools, slots [SETUP]
+F - Set up or update nos for this project: nos.config.json, the specs repo, quality tools, slots [SETUP]
 G - Continue in the browser or on the phone: open the local chat (its own Claude Code sessions, one per tab) [CHAT]
 ```
 
@@ -124,7 +124,7 @@ Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
 
 ### The typical path
 
-1. **IDEA**: describe what you want. The idea agent asks you questions until the idea is clear. It saves the result as `.specs/domain-<id>-<slug>/idea.md`.
+1. **IDEA**: describe what you want. The idea agent asks you questions until the idea is clear. It saves the result as `<specs>/domain-<id>-<slug>/idea.md`.
    Then: `Create a plan now?` → `YES`.
 2. **PLAN**: the planner splits the idea into phases and steps and saves `plan.json`. Every step gets an empty spec file.
    Then: `Run it now?` → `YES`. Or `CHANGE` to describe changes to the split. The planner revises the plan and asks again.
@@ -214,7 +214,9 @@ A resumed session (`claude --resume`, a restarted chat) is back in the run's wor
 ### Runs: branches and worktrees
 
 - A **run** is one plan (`plan-<domain id>`) or one quick step (`quick-<step id>`) in its own branch and git worktree under `.claude/worktrees/<run>`. The session works inside it; subagents, tests and code commits land there. One run per domain, one run per session; run several in parallel from several terminals or chat tabs.
-- The specs are not in the worktrees. They live once in `.specs/` (its own git repo, ignored by the project), shared by every run and live in the Spec UI. Only the orchestrator commits them (`nos specs commit`, after every ability).
+- The specs are not in the worktrees. They live once in `<specs>/` (its own git repo next to the project checkout, default `../<project>.specs`), shared by every run and live in the Spec UI. Only the orchestrator commits them (`nos specs commit`, after every ability).
+- Why outside the checkout: Claude Code's worktree isolation (after `EnterWorktree`) refuses edits to the main checkout from the worktree session and its subagents, also through junctions, and blocks git redirected into it (`git -C <main>`, `cd <main> && git`). So the specs live outside, nos is always called as the literal `node <home>/cli/bin/nos.js …` (never via a variable or alias: computed command names are refused too), and git against main runs only inside nos commands.
+- nos never pushes code; you push. Only the specs repo is pushed, by `nos specs commit`, when you set `specs.remote` as backup.
 - Lifecycle: `nos run start` → enter the worktree → steps as usual, with `nos run sync` (rebase onto main) before every develop → `nos run finish` (merge lock, main checks, sync, full gate incl. e2e, `merge --ff-only`, statuses `merged`) → leave the worktree → `nos run cleanup`. Or `nos run abandon` (status `discarded`).
 - Merges serialize, developing does not: first done, first merged. The others pick up main at their next sync.
 - A rebase conflict starts the **integrate** ability: it reads both specs (its own and the ones of the commits already on main), resolves by intent, continues the rebase and runs the gate. When both specs want contradicting things it stops and shows you both.
@@ -243,8 +245,8 @@ In `plan.json`, every phase and step has `"review-needed"` (missing counts as `t
 ```
 nos.config.json                          tracked: quality tools, project commands, spec-ui docs folder, slots, specs dir/remote (setup)
 .claude/worktrees/plan-1/                worktree of a running run (branch plan-1)
-.specs/                                  own git repo, ignored by the project
-├── config.json                          id counters (managed by nos), chat
+../<project>.specs/                      the specs root: own git repo next to the project checkout
+├── config.json                          back-pointer "project", id counters (managed by nos), chat
 ├── .gitignore .gitattributes            local state ignored; LF working copies (nos init)
 ├── .runs/ .locks/ .chat/                running runs, locks, chat state (local, not committed)
 └── domain-1-user-auth/
@@ -267,7 +269,7 @@ docs/
 └── guardrails.xml                       extra rules per ability (architect)
 ```
 
-Code commits start with `step-<id>: ` or `phase-<id>: ` (with the colon), so `git log --grep "^step-3:"` shows everything done for step 3 and never step 30. The architect's commits start with `architect: `, setup's with `setup: `. Spec changes are committed in `.specs` (`git -C .specs log`), one commit per ability.
+Code commits start with `step-<id>: ` or `phase-<id>: ` (with the colon), so `git log --grep "^step-3:"` shows everything done for step 3 and never step 30. The architect's commits start with `architect: `, setup's with `setup: `. Spec changes are committed in `<specs>` (`git -C <specs> log`), one commit per ability.
 
 The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Chrome or Edge, or run `npm run dev` inside `ui/` for live updates while a run is going (see Part 5).
 
@@ -296,7 +298,7 @@ The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Ch
 │   ├── chat.md
 │   └── architect.md
 ├── templates/
-│   ├── config.json                 initial id counters of .specs/config.json
+│   ├── config.json                 initial id counters of <specs>/config.json
 │   ├── nos.config.json             initial project config: specs, worktrees, quality tools, project commands, docs folder
 │   ├── domain.json                 domain structure
 │   ├── plan.json                   plan structure
@@ -308,7 +310,7 @@ The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Ch
 │   ├── test-types.md               test groups and architecture rule ideas
 │   └── guardrails.xml              structure of docs/guardrails.xml
 ├── cli/                            `nos` CLI: ids, folders, statuses, runs, gate (Part 6)
-└── ui/                             read-only browser viewer for .specs/ (Part 5)
+└── ui/                             read-only browser viewer for the specs root (Part 5)
 ```
 
 All skill files are written in minimal pseudo-XML: `<coreRules>`, `<input>`, and a numbered `<workflow>`.
@@ -363,11 +365,11 @@ The status change of the resumed step is skipped because it already happened. Th
 
 ### abilities/setup.md: setup 🔧
 
-Not part of the run cycle. Started from the menu (SETUP), or offered at start when `nos.config.json` is missing or has no `quality-tools`. Runs `nos init`, detects the project's tooling, lets you confirm the commands and slots, writes `nos.config.json`, runs the gate once, verifies the slots, writes the chat settings to `.claude/settings.local.json` and offers a remote for `.specs`. Never touches the id counters or `settings.json`.
+Not part of the run cycle. Started from the menu (SETUP), or offered at start when `nos.config.json` is missing or has no `quality-tools`. Runs `nos init`, detects the project's tooling, lets you confirm the commands and slots, writes `nos.config.json`, runs the gate once, verifies the slots, writes `additionalDirectories` (the specs root) and the chat settings to `.claude/settings.local.json` and offers a remote for `<specs>`. Never touches the id counters or `settings.json`.
 
 ### abilities/idea.md: idea 💡
 
-Asks you focused questions until the idea is ready for planning. It generates a slug, picks a domain name and labels, and saves the idea with `nos create-domain`, which creates `.specs/domain-<id>-<slug>/idea.md` and `domain.json`. It reports the domain folder. Its questions reach you through the orchestrator. Optional input: a starting context, e.g. tech debt entries handed over by the architect.
+Asks you focused questions until the idea is ready for planning. It generates a slug, picks a domain name and labels, and saves the idea with `nos create-domain`, which creates `<specs>/domain-<id>-<slug>/idea.md` and `domain.json`. It reports the domain folder. Its questions reach you through the orchestrator. Optional input: a starting context, e.g. tech debt entries handed over by the architect.
 
 ### abilities/quick-step.md: quick step ⚡
 
@@ -388,7 +390,7 @@ Input: domain, phase id, step id, optional feedback and resume flag. For one ste
 3. Works through the tasks with TDD: test → see it fail → implement → green. It ticks tasks and met ACs with `(x)`.
 4. Runs `nos gate` (with `--e2e` when the Test Strategy names e2e). It fixes what it can and marks what it can't with `(!)`.
 5. Fills the Dev Log. It never changes the Spec Log.
-6. Commits code only with `step-<id>: <what>` in the worktree, and pushes the branch if there is an origin. The spec file lives in `.specs` and is committed by the orchestrator.
+6. Commits code only with `step-<id>: <what>` in the worktree, never pushes (you push). The spec file lives in `<specs>` and is committed by the orchestrator.
 7. Reports `pass` or `blocked`.
 
 It never changes the Description, ACs, Spec Log or Test Strategy. Changing a test to make it pass is strictly forbidden.
@@ -441,7 +443,7 @@ It writes the review file (step: `## Review` in the spec, phase: `review.md` in 
 
 ### abilities/review-fixing/SKILL.md: second reviewer and fixer 🕵🏼🛠️
 
-Runs in a new context and does its **own review first, without reading the review file**, including tests, lint and format. Then it reads the pessimistic review, compares, removes invalid findings and adds missing ones. It fixes the findings with TDD and marks each one `(x)` fixed or `(!)` (not fixable, out of scope, or needs your decision). It reruns `nos gate`, writes its fixes into the Dev Log marked `(reviewer)`, and commits the code with `step-<id>: `/`phase-<id>: `. Then it fills `### Fixes` in the review with that prefix (never a sha, shas change on rebase) and updates Criteria and Result when they changed. No second commit: the review lives in `.specs`. It reports `pass` or `blocked`. When human validation is needed, it adds simple verification steps that the orchestrator shows you.
+Runs in a new context and does its **own review first, without reading the review file**, including tests, lint and format. Then it reads the pessimistic review, compares, removes invalid findings and adds missing ones. It fixes the findings with TDD and marks each one `(x)` fixed or `(!)` (not fixable, out of scope, or needs your decision). It reruns `nos gate`, writes its fixes into the Dev Log marked `(reviewer)`, and commits the code with `step-<id>: `/`phase-<id>: `. Then it fills `### Fixes` in the review with that prefix (never a sha, shas change on rebase) and updates Criteria and Result when they changed. No second commit: the review lives in `<specs>`. It reports `pass` or `blocked`. When human validation is needed, it adds simple verification steps that the orchestrator shows you.
 
 Both reviewers read the review guardrails in `docs/guardrails.xml` and the architecture in `docs/architecture.md` if they exist. Like develop, review-fixing never changes the architecture docs and notes needed changes in the Dev Log marked `(architecture)`.
 
@@ -472,8 +474,8 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
 
 ### Templates
 
-- **config.json**: initial id counters for domain, phase and step. `nos init` copies it to `.specs/config.json` (which also holds the `chat` settings). Ids are global across all domains.
-- **nos.config.json**: initial project config, copied to the project root by `nos init`: `specs` (`dir`, `remote`), `worktrees` (`slots`, `slotWait`), empty `quality-tools` and `project-commands`, and `spec-ui.docs-folder` (`docs`, the folder the viewer's Docs view shows).
+- **config.json**: initial id counters for domain, phase and step. `nos init` copies it to `<specs>/config.json` (which also holds the `chat` settings). Ids are global across all domains.
+- **nos.config.json**: initial project config, copied to the project root by `nos init`: `specs` (`dir`, `remote`; `dir` `null` = the default `../<project>.specs`, which `nos init` writes in explicitly), `worktrees` (`slots`, `slotWait`), empty `quality-tools` and `project-commands`, and `spec-ui.docs-folder` (`docs`, the folder the viewer's Docs view shows).
 - **domain.json**: domain structure. It has a name, labels and `cross-cutting` (`false` for now, reserved for an upcoming spec UI change). Written by `nos create-domain`.
 - **plan.json**: plan structure. It has a name, status and phases. Phases have a name, status, intent, `human-validation-needed`, `review-needed`, a description and steps. Steps have an intent, status, `human-validation-needed`, `review-needed`, a description and `spec-file`, and every phase and step also has a slug. `spec-file` is filled by `nos`.
 - **status.xml**: valid statuses. `nos set-status` rejects anything else.
@@ -503,14 +505,14 @@ Used in ACs, the Task List and review findings:
 | Command | Used by | Does |
 | --- | --- | --- |
 | `nos roots` | orchestrator, every ability without given paths | prints `home`, `work`, `main`, `specs`, `inWorktree`, `configured` |
-| `nos init` | setup | creates `nos.config.json`, the `.specs` repo and the `.gitignore` entries if missing |
+| `nos init` | setup | creates `nos.config.json`, the `<specs>` repo next to the checkout (with the back-pointer) and the `.gitignore` entry if missing |
 | `nos create-domain --idea <file> --slug <s>` | idea, quick-step | new domain id, folder, `idea.md`, `domain.json` |
 | `nos create-plan --domain <d> --plan <file>` | plan (create) | saves `plan.json`, creates phase folders and step files |
 | `nos update-plan --domain <d> --plan <file>` | plan (extend, revise) | saves the changed plan, creates/moves/deletes phases and steps |
 | `nos create-quick-step --domain <d> --step <file>` | quick-step | new step id, quick step file, entry in `quick-steps/quick-steps.json` |
 | `nos set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | orchestrator | changes one status, checked against the matching `status.xml` section. A step id not in `plan.json` is looked up in the quick steps |
 | `nos run start\|sync\|finish\|cleanup\|abandon` | orchestrator | run lifecycle (branch, worktree, rebase, gate, ff-only merge, removal) |
-| `nos specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | orchestrator | commits one domain's specs (or only `config.json`) in `.specs` |
+| `nos specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | orchestrator | commits one domain's specs (or only `config.json`) in `<specs>` |
 | `nos specs find-step <id>` | integrate | spec file of a step id in any domain |
 | `nos gate [--e2e]` | develop, reviewers, integrate, architect, setup | the quality check, JSON per tool |
 | `nos exec <install\|dev\|deploy-test>` | setup, `run start` | project commands with slot lease |
@@ -519,7 +521,7 @@ Used in ACs, the Task List and review findings:
 
 | Role | Writes code | Writes spec | Changes status | Commits |
 | --- | --- | --- | --- | --- |
-| orchestrator | no | no | yes (nos) | `.specs` only (`nos specs commit`); in the worktree only a step's leftovers on exit code 5 |
+| orchestrator | no | no | yes (nos) | `<specs>` only (`nos specs commit`); in the worktree only a step's leftovers on exit code 5 |
 | idea / plan / quick-step | no | idea / plan / quick step (nos) | no | no |
 | specify | no | Description, ACs, Spec Log, Test Strategy. Read-only once done | no | no |
 | spec-review | no | Description, ACs, Spec Log, Test Strategy | no | no |
@@ -694,13 +696,13 @@ during the fix phase review. Which statuses are set, and where does it resume?
 
 ## Part 5: Spec UI (viewer)
 
-`ui/` is a read-only browser viewer for `.specs/` and the project docs. It shows what nos is doing without opening JSON or markdown files. It never changes anything. Statuses change only through `nos set-status`.
+`ui/` is a read-only browser viewer for `<specs>/` and the project docs. It shows what nos is doing without opening JSON or markdown files. It never changes anything. Statuses change only through `nos set-status`.
 
 ### Use it
 
 **Without a server (standalone):**
 1. Open `.claude/skills/nos/ui/index.html` straight from disk in Chrome or Edge. These browsers support the File System Access API.
-2. Click **Open the project folder** and pick the project root (or `.specs/`, then Docs stays empty).
+2. Click **Open the specs folder** and pick the specs root (by default `<project>.specs` next to the project; Docs stays empty then: a picked folder cannot reach the project next to it). A project folder whose specs root lies inside it works too, docs included; picking a project folder whose specs root lies outside says which folder to pick instead.
 3. The folder is remembered, so the next visit takes one click (**Reopen**). **↻ Reload** reads the folder again.
 
 **With live reload (dev server):**
@@ -709,7 +711,7 @@ cd .claude/skills/nos/ui
 npm install      # once
 npm run dev           # or: npm run dev-to-lan
 ```
-This serves `dev.html` on http://localhost:5180. The server reads `.specs/` and the docs folder from disk and the page fetches them (`/__specs`, `/__docs`). When a spec or doc changes the page refreshes by itself; **↻ Reload** fetches again. It is handy for watching a run in AUTO mode.
+This serves `dev.html` on http://localhost:5180. The server reads `<specs>/` and the docs folder from disk and the page fetches them (`/__specs`, `/__docs`). When a spec or doc changes the page refreshes by itself; **↻ Reload** fetches again. It is handy for watching a run in AUTO mode.
 
 The dev server finds the project with the nos resolver: it walks up from `ui/` to the first `nos.config.json`. Not set up yet → the page says "nos is not set up … run nos init". Environment:
 
@@ -717,11 +719,11 @@ The dev server finds the project with the nos resolver: it walks up from `ui/` t
 | --- | --- |
 | `NOS_SPECS_ROOT=<project>` | serve another project than the one nos sits in (also turns the browser auto-open off) |
 | `NOS_UI_OPEN=0` / `1` | never / always open `dev.html` in the browser on start (default: open, except under `NOS_SPECS_ROOT`, vitest or CI) |
-| `NOS_CHAT_PORT` | port of the chat server the dev server (re)starts |
+| `NOS_CHAT_PORT` | port of the chat server the dev server starts (`nos chat start`: a running server of the same version is kept with its tabs) |
 
-Runs (`nos run start`) show live: `/__runs` lists `.specs/.runs/*.json` with ahead/behind main and a dirty worktree. A chat tab working in a run shows its id (`quick-7`). Domains, quick steps and cards get a dot: pulsing = running, grey = stale (not seen for 2h), green = merged/abandoned, awaiting `nos run cleanup`. Statuses `merged` and `discarded` have their own pills; Board and Backlog hide `discarded` unless the status filter asks for it.
+Runs (`nos run start`) show live: `/__runs` lists `<specs>/.runs/*.json` with ahead/behind main and a dirty worktree. A chat tab working in a run shows its id (`quick-7`). Domains, quick steps and cards get a dot: pulsing = running, grey = stale (not seen for 2h), green = merged/abandoned, awaiting `nos run cleanup`. Statuses `merged` and `discarded` have their own pills; Board and Backlog hide `discarded` unless the status filter asks for it.
 
-`npm run dev-to-lan` does the same, but also listens on the network. Other devices open the printed `Network` URL (`http://<host-ip>:5180/`) and see the host's `.specs/` without picking a folder. Windows may ask to let Node through the firewall.
+`npm run dev-to-lan` does the same, but also listens on the network. Other devices open the printed `Network` URL (`http://<host-ip>:5180/`) and see the host's `<specs>/` without picking a folder. Windows may ask to let Node through the firewall.
 
 ### Views
 
@@ -744,12 +746,12 @@ headless Claude Code session in the project root, run by the chat server (`claud
 `claude --resume <id>` to continue it in a terminal. While Claude works, the current tool call shows under the log.
 On a desktop the chat is a drawer next to the views; on a phone or tablet (≤ 860px) a full-size dialog that the back
 gesture closes. Messages carry the spec you look at as `[context: …]`; detail pages offer **Ask Claude** buttons
-(specify, develop, review, plan) that prefill a message. `"chat": { "runner": false }` in `.specs/config.json` switches
+(specify, develop, review, plan) that prefill a message. `"chat": { "runner": false }` in `<specs>/config.json` switches
 to relay: a terminal session answers with `nos chat await` / `reply`.
 
 From the couch (`npm run dev-to-lan`):
 
-- **HTTPS**: the dev server uses a self-signed certificate made once and kept in `.specs/.chat/tls/`. Each phone shows a
+- **HTTPS**: the dev server uses a self-signed certificate made once and kept in `<specs>/.chat/tls/`. Each phone shows a
   warning once; compare the fingerprint the terminal prints with the one the phone shows, then accept.
 - **Pairing**: the terminal prints a one-time link and QR code (also "Pair a device" in the chat panel's **Devices**,
   or `nos chat pair`). A link works **once, within 10 minutes**. The phone then shows a 4-digit number; allow the
@@ -758,8 +760,8 @@ From the couch (`npm run dev-to-lan`):
   with `nos chat devices --revoke <id>` (`--revoke-all` for all); its open chat stops at once.
 - **Whole spec-ui gated**: other devices see nothing (specs, docs, promote, live reload) before they are paired. This
   PC needs no pairing.
-- **Audit log**: `.specs/.chat/audit.log` records pairing, approvals and every chat action with the device. Everything in
-  `.specs/.chat/` is gitignored.
+- **Audit log**: `<specs>/.chat/audit.log` records pairing, approvals and every chat action with the device. Everything in
+  `<specs>/.chat/` is gitignored.
 - Anyone holding a paired device can make Claude Code act in the project (auto mode). `"permissionMode"` in `"chat"`
   sets another mode, e.g. `acceptEdits` or `plan`.
 - Design: `ui/requirements/Concept spec-ui chat integration.md`.
@@ -768,16 +770,16 @@ From the couch (`npm run dev-to-lan`):
 
 | File | Role |
 | --- | --- |
-| `src/model.ts` | Pure: turns `path → text` of `.specs/` into ideas → phases → steps. Parses `domain.json` (name, labels, cross-cutting), `plan.json` and `quick-steps/quick-steps.json` (quick steps: `phase` null, `quick` true), reads the spec sections, counts markers |
+| `src/model.ts` | Pure: turns `path → text` of `<specs>/` into ideas → phases → steps. Parses `domain.json` (name, labels, cross-cutting), `plan.json` and `quick-steps/quick-steps.json` (quick steps: `phase` null, `quick` true), reads the spec sections, counts markers |
 | `src/status.ts` | The statuses from `templates/status.xml` and their board order |
-| `src/serve-specs.ts` + `src/main.ts` | Dev server: a Vite plugin reads `.specs/` on the host with `readSpecsFolder` and serves it at `/__specs` (`/` is `dev.html`); `/__docs` serves the docs folder (`readDocs`); it pushes `specs:changed` / `docs:changed` when a file changes, and the page fetches again. `POST /__promote?domain=<folder>` runs `nos create-plan --hollow` (Manual promote) |
+| `src/serve-specs.ts` + `src/main.ts` | Dev server: a Vite plugin reads `<specs>/` on the host with `readSpecsFolder` and serves it at `/__specs` (`/` is `dev.html`); `/__docs` serves the docs folder (`readDocs`); it pushes `specs:changed` / `docs:changed` when a file changes, and the page fetches again. `POST /__promote?domain=<folder>` runs `nos create-plan --hollow` (Manual promote) |
 | `src/folder.ts` + `src/handle-store.ts` + `src/standalone.ts` | Standalone: reads the picked folder (specs and docs) and remembers the handle in IndexedDB |
 | `src/docs.ts` | Pure: turns `path → text` of the docs folder into a folder tree, resolves relative links |
 | `src/route.ts`, `src/filter.ts` | Hash routes and filters |
 | `src/app.ts`, `src/views/*` | Rendering: explore, board, backlog, docs, kanban, filter bar |
 | `src/markdown.ts` | Minimal markdown renderer. Escapes first, so no raw HTML is rendered |
 | `bundle/viewer.js` | Built standalone script (IIFE, because `file://` pages can't load modules). Commit it with source changes |
-| `tests/` | Vitest tests. `real-specs.test.ts` checks that the real `.specs/` (project root) parse |
+| `tests/` | Vitest tests. `real-specs.test.ts` checks that the project's real `<specs>/` parse |
 | `package.json`, `tsconfig.json`, `vite.config.ts` | Its own package: vite, vitest, jsdom, TypeScript, Prettier. Nothing in the host project |
 
 The viewer is a separate npm package, so the project it sits in has no viewer scripts, tests or configs. Run these inside `ui/`:
@@ -796,13 +798,13 @@ The viewer is a separate npm package, so the project it sits in has no viewer sc
 - **New status:** add it to `src/status.ts` (`STATUS_ORDER`, `STEP_BOARD_STATUSES` / `PHASE_BOARD_STATUSES`, labels) and a colour to `styles.css`, as well as to `status.xml`. Otherwise it shows as a flagged "other".
 - **New spec section with markers:** add a `progress(section(...))` in `src/model.ts`, then show it in `src/views/parts.ts`.
 - **New `plan.json` or `domain.json` field:** extend the `Raw*` types and the model in `src/model.ts`.
-- Changes to the spec template or the plan structure must also be checked against the viewer (see the consistency table in Part 4). `tests/real-specs.test.ts` fails when the real `.specs/` no longer parse.
+- Changes to the spec template or the plan structure must also be checked against the viewer (see the consistency table in Part 4). `tests/real-specs.test.ts` fails when the real `<specs>/` no longer parse.
 
 ---
 
 ## Part 6: nos CLI
 
-`cli/` holds `nos`, the file manager for `.specs/` and the driver of every git step of a run. It hands out ids from the counters in `.specs/config.json`, creates domain and phase folders, lays out empty step spec files, changes statuses in `plan.json`, and runs worktrees, rebase, gate, merge, locks and specs commits. The AI never does these by hand (idea 4 in Part 3). No dependencies, Node.js 20+.
+`cli/` holds `nos`, the file manager for `<specs>/` and the driver of every git step of a run. It hands out ids from the counters in `<specs>/config.json`, creates domain and phase folders, lays out empty step spec files, changes statuses in `plan.json`, and runs worktrees, rebase, gate, merge, locks and specs commits. The AI never does these by hand (idea 4 in Part 3). No dependencies, Node.js 20+.
 
 Full reference (all options, examples, `update-plan` rules, output format): [`cli/README.md`](cli/README.md).
 
@@ -813,15 +815,15 @@ cd .claude/skills/nos/cli
 npm install     # no dependencies
 ```
 
-Invocation: `node <home>/cli/bin/nos.js <command>`, `<home>` = the nos folder, absolute. Orchestrator, abilities, hooks and permissions use only this form (no `npm link`), so a stale copy of nos inside a worktree never runs; the CLI warns when it does. Help: `nos help <command>` or `nos <command> --help`.
+Invocation: `node <home>/cli/bin/nos.js <command>`, `<home>` = the nos folder, absolute. Orchestrator, abilities, hooks and permissions use only this form, typed out literally (no `npm link`, no shell variable, function or alias: worktree isolation refuses computed command names), so a stale copy of nos inside a worktree never runs; the CLI warns when it does. Help: `nos help <command>` or `nos <command> --help`.
 
 ### Commands
 
 | Command | Does |
 | --- | --- |
 | `roots` | prints the resolved `home`, `work`, `main`, `specs` (absolute), `inWorktree`, `configured` |
-| `init` | creates `nos.config.json`, `.specs/` (own git repo) and the `.gitignore` entries if missing. Run on main |
-| `create-domain --idea <file\|-> --slug <s>` | a domain id, creates `.specs/domain-<id>-<slug>/idea.md` and `domain.json` |
+| `init` | creates `nos.config.json`, `<specs>/` (own git repo) and the `.gitignore` entries if missing. Run on main |
+| `create-domain --idea <file\|-> --slug <s>` | a domain id, creates `<specs>/domain-<id>-<slug>/idea.md` and `domain.json` |
 | `create-plan --domain <d> --plan <file\|->` | saves `plan.json`, creates phase folders and empty step files, fills `spec-file`. One plan per domain |
 | `update-plan --domain <d> --plan <file\|-> [--dry-run] [--force]` | saves a changed plan, creates/moves/deletes phases and steps. Deleting files with content needs `--force` |
 | `create-quick-step --domain <d> --step <file\|->` | reserves a step id, creates `quick-steps/step-<id>-<slug>.md` and adds the step to `quick-steps/quick-steps.json` |
@@ -830,7 +832,7 @@ Invocation: `node <home>/cli/bin/nos.js <command>`, `<home>` = the nos folder, a
 | `run sync\|finish\|cleanup\|abandon --token <t>` | rebase onto main; lock + checks + gate + ff-only merge; remove worktree and branch; drop the run |
 | `gate [--e2e]` | the quality tools of `nos.config.json`, JSON per tool |
 | `exec <install\|dev\|deploy-test>` | a project command; `dev` holds a slot |
-| `specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | commits one domain's specs (or only `config.json`) in `.specs`. Never `--domain` for a domain another session's run owns |
+| `specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | commits one domain's specs (or only `config.json`) in `<specs>`. Never `--domain` for a domain another session's run owns |
 | `specs find-step <id>` | spec file of a step id |
 | `lock take\|release\|status <name> --token <t> [--break]` | the `merge`, `ids`, `slot-<n>` locks |
 
@@ -852,7 +854,7 @@ Run inside `cli/`: `npm test` (node:test) or `npm run test:watch`. Code lives in
 ## Porting to another project
 
 1. Clone or copy nos into `.claude/skills/nos/` (tracked or ignored, both work) and set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`.
-2. `npm install` in `cli/` (Part 6). Run `/nos` → `SETUP` on main: it creates `nos.config.json`, `.specs/` and the `.gitignore` entries. Commit nothing else by hand.
+2. `npm install` in `cli/` (Part 6). Run `/nos` → `SETUP` on main: it creates `nos.config.json`, `<specs>/` (next to the project folder) and the `.gitignore` entry. Commit nothing else by hand.
 3. Make sure the project has a test command, a linter and a formatter, or remove those checks from develop and the reviewers.
    Then run `/nos` → `ARCHITECT`: CREATE-DOCS for the architecture docs, TESTS for missing test types. Add guardrails later, once runs show real failures.
 4. Viewer: comes along with the folder. Opening `ui/index.html` needs nothing. For live reload or changes, run `npm install` in `ui/`. The dev server finds the project like the CLI does (walks up to `nos.config.json`, `NOS_SPECS_ROOT` overrides).
@@ -860,4 +862,4 @@ Run inside `cli/`: `npm test` (node:test) or `npm run test:watch`. Code lives in
 
 ### Migrating a project with tracked `specs/`
 
-Older nos versions kept the specs in a tracked `specs/` folder with `specs/config.json`. The new nos does not detect or convert that layout (a `spec-file` starting with `specs/` fails with "run the migration"). Migrate once by hand, working tree clean, following the rehearsed steps 1–10 in `ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": split the `specs/` history with `git filter-branch --prune-empty --subdirectory-filter specs` in a bare throw-away clone (not `git subtree split`: it leaks project history when `specs/` was deleted and re-added), write `.specs/.gitattributes` (`* text=auto eol=lf`) before pulling it into the `.specs` repo, move `.chat`, split the config into `nos.config.json` and `.specs/config.json`, drop the `specs/` prefix of every `spec-file` with a JSON-safe script, untrack `specs/`, run `nos init --root <project>` (adds the missing `.gitignore` entries), commit both repos, write `.claude/settings.local.json` with absolute paths, and verify with `nos roots`.
+Older nos versions kept the specs in a tracked `specs/` folder with `specs/config.json`. The new nos does not detect or convert that layout (a `spec-file` starting with `specs/` fails with "run the migration"). Migrate once by hand, working tree clean, following the rehearsed steps 1–10 in `ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": split the `specs/` history with `git filter-branch --prune-empty --subdirectory-filter specs` in a bare throw-away clone (not `git subtree split`: it leaks project history when `specs/` was deleted and re-added), write `<specs>/.gitattributes` (`* text=auto eol=lf`) before pulling it into the `<specs>` repo (target: the sibling folder `../<project>.specs`), move `.chat`, split the config into `nos.config.json` (`specs.dir` `../<project>.specs`) and `<specs>/config.json`, drop the `specs/` prefix of every `spec-file` with a JSON-safe script, untrack `specs/`, run `nos init --root <project>` (adds the missing `.gitignore` entry and the back-pointer `project`), commit both repos, write `.claude/settings.local.json` with absolute paths and `additionalDirectories`, and verify with `nos roots`.

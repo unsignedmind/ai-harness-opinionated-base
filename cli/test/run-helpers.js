@@ -7,7 +7,8 @@ import { createQuickStep, quickStepId } from '../src/quick-step.js';
 import { setStatus } from '../src/status.js';
 import { gitOk, hasGit, initRepo, invokeCli, makeProject, readJson, writeFile } from './helpers.js';
 
-// Shared by the run tests (run, run-scenario, run-cleanup) with real git: a temp project (main), its .specs repo,
+// Shared by the run tests (run, run-scenario, run-cleanup) with real git: a temp project (main), its specs repo
+// in the default place (the sibling folder ../p.specs, outside the checkout),
 // worktrees under <main>/.claude/worktrees. Quality tools are fake node one-liners; the test tool fails when the
 // checkout has a file FAIL, so a branch can break the gate.
 export const noGit = { skip: !hasGit && 'git is not available' };
@@ -15,10 +16,11 @@ export const noGit = { skip: !hasGit && 'git is not available' };
 export const FAIL_IF = `node -e "process.exit(require('fs').existsSync('FAIL') ? 1 : 0)"`;
 export const PASS = `node -e "process.exit(0)"`;
 
-// A git project with src/a.txt on main and a .specs repo with one domain + quick step per slug
+// A git project with src/a.txt on main and a sibling specs repo with one domain + quick step per slug
 export function setup(t, { config = {}, slugs = ['a', 'b'] } = {}) {
   const { root, roots } = makeProject(t, {
     git: true,
+    sibling: true,
     config: { 'quality-tools': { test: FAIL_IF }, worktrees: { slots: 1, slotWait: 1 }, ...config },
   });
   writeFile(root, 'src/a.txt', 'one\ntwo\nthree\n');

@@ -29,7 +29,7 @@ import {
 // `canPick`: standalone viewer, data comes from a folder the user picks (undefined on the dev server).
 // `canPromote`: the host can write the specs (dev server), so Ideas offer "Manual promote".
 // `canChat`: the chat with the project's Claude Code session is there (dev server): "Ask Claude".
-// `specsRel`: the specs root as the project sees it (model.specsRel, e.g. .specs), set per render.
+// `specsRel`: the specs root as the project sees it (model.specsRel, e.g. ../moodo-poc.specs), set per render.
 export type ExploreUi = {
   expanded: Set<string>;
   tabs: Record<string, string>;
@@ -156,12 +156,12 @@ function tree(scope: Scope, sel: Selection, ui: ExploreUi) {
 
 function empty(canPick: boolean | undefined) {
   if (canPick === undefined)
-    return '<div class="empty"><p class="muted">No domains under <code>.specs/domain-*</code> yet.</p></div>';
+    return '<div class="empty"><p class="muted">No domains under <code>&lt;specs&gt;/domain-*</code> yet.</p></div>';
   return `<div class="empty">
-    <p>Read-only view of a project's <code>.specs/</code> folder: domains, phases and steps as boards.</p>
+    <p>Read-only view of a project's specs folder: domains, phases and steps as boards.</p>
     ${
       canPick
-        ? '<button type="button" class="primary" data-action="pick">Open the project folder</button><p class="muted">Its <code>.specs/</code> folder alone works too, without the docs.</p>'
+        ? '<button type="button" class="primary" data-action="pick">Open the specs folder</button><p class="muted">By default <code>&lt;project&gt;.specs/</code>, next to the project folder. The docs show only in the live viewer (<code>npm run dev</code>), or with a project folder whose specs root lies inside it.</p>'
         : '<p class="error">This browser cannot open folders. Use Chrome or Edge.</p>'
     }
     <p class="muted">Nothing is uploaded or written. The folder is remembered in this browser.</p>

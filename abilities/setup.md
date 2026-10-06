@@ -1,12 +1,12 @@
 ---
 name: setup
-description: You set up nos for the project. Creates or checks nos.config.json and the .specs repo, gathers the quality tools, project commands, docs folder and slots, writes the chat settings
+description: You set up nos for the project. Creates or checks nos.config.json and the specs repo (outside the checkout), gathers the quality tools, project commands, docs folder and slots, writes the chat settings
 ---
 
 <coreRules>
     <rule>You are the setup agent</rule>
     <rule>Idempotent: every step checks what exists first. Fresh project → full setup. Layout exists → check only: fill what is missing, propose changes, change nothing the user did not confirm</rule>
-    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". <home> = the given home, or the nos folder that holds this ability's abilities/ folder. Absolute path, forward slashes, also in every file you write</rule>
+    <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in full: never through a shell variable, function or alias (worktree isolation refuses computed command names). <home> = the given home, or the nos folder that holds this ability's abilities/ folder. Absolute path, forward slashes, also in every file you write</rule>
     <rule>Run on the main checkout from the project root (git top level). "nos roots" says inWorktree true → stop, report: "run setup from the main checkout"</rule>
     <rule>Never change production code, package.json or tool configs. You write only: <main>/nos.config.json, <main>/.claude/settings.local.json, the "chat" node of <specs>/config.json. "nos init" writes the rest</rule>
     <rule>Never write .claude/settings.json. Machine paths go to .claude/settings.local.json only, with forward slashes</rule>
@@ -22,8 +22,9 @@ description: You set up nos for the project. Creates or checks nos.config.json a
 
 <workflow>
     <step1>Layout: "nos roots" → home, main, specs, configured.
-        <do>Fresh (configured false): "nos init --root <main>". It creates nos.config.json from the template, <specs> as its own git repo (.gitignore, config.json, first commit "nos: init") and the project .gitignore entries ".specs/" and ".claude/worktrees/". Report its created list</do>
-        <do>Check only (configured true): <specs> missing and "specs.remote" set → git clone <remote> <specs> first. Then "nos init --root <main>" anyway: it fills only missing parts (existing list). Read the current quality-tools, project-commands, spec-ui and worktrees of <main>/nos.config.json</do>
+        <do>Fresh (configured false): "nos init --root <main>". It creates nos.config.json from the template (specs.dir "../<project folder>.specs"), <specs> as its own git repo next to the checkout (.gitignore, config.json with id-counters and the back-pointer "project", first commit "nos: init") and the project .gitignore entry ".claude/worktrees/". The specs root lies outside the checkout on purpose: Claude Code's worktree isolation refuses writes into the main checkout from a worktree session, subagents included. Report its created list. A warning "specs root inside the checkout" on stderr → report it: a configured specs.dir inside the project cannot be written from run worktrees</do>
+        <do>Check only (configured true): <specs> missing and "specs.remote" set → git clone <remote> <specs> first. Then "nos init --root <main>" anyway: it fills only missing parts (existing list) and a missing or stale back-pointer ("backPointer.written" true on a specs repo with history → tell the orchestrator: nos specs commit --config -m "setup: back-pointer"). Read the current quality-tools, project-commands, spec-ui and worktrees of <main>/nos.config.json</do>
+        <do>Always: merge permissions.additionalDirectories ["<specs>"] (absolute, forward slashes, exactly as "nos roots" prints it) into <main>/.claude/settings.local.json, keep every other entry. Sessions in default permission mode then read and write the specs without prompts (auto mode needs none). Read/Grep/Glob outside the cwd still get the path passed</do>
         <do>"nos init" exits 1 (inside a worktree, not the project root, git identity missing for the first <specs> commit, …) → report its error and stop</do>
     </step1>
     <step2>Detect the tooling: package manager from the lockfile (npm, pnpm, yarn, bun) and package.json scripts. Other stacks: Makefile, pyproject.toml, go.mod, gradle, Cargo.toml, CI pipeline files</step2>
@@ -49,12 +50,12 @@ description: You set up nos for the project. Creates or checks nos.config.json a
         .claude/settings.json has nos entries with relative paths → list them and tell the user to remove them by hand
     </step7>
     <step8>Specs backup: "specs.remote" null →
-        <question>Back up the specs to a git remote? The specs live in their own repo (.specs), not in the project
-            <choice key="REMOTE">Give the remote url. Written to "specs.remote" in nos.config.json, then "nos init --root <main>" adds it as origin of <specs> ("remote.added" true). "remote.mismatch" true → <specs> already has another origin ("remote.existing"), never changed: report both urls, the user decides. Every specs commit pushes there</choice>
+        <question>Back up the specs to a git remote? The specs live in their own repo (<specs>, next to the project), not in the project
+            <choice key="REMOTE">Give the remote url. Written to "specs.remote" in nos.config.json, then "nos init --root <main>" adds it as origin of <specs> ("remote.added" true). "remote.mismatch" true → <specs> already has another origin ("remote.existing"), never changed: report both urls, the user decides. Every specs commit pushes there (the only push nos makes; code is never pushed)</choice>
             <choice key="NO">Keep the specs on this disk only</choice>
         </question>
         Set → report it
     </step8>
-    <step9>Commit on main (listed exception: setup commits directly on main): in <main> stage only nos.config.json and .gitignore, commit "setup: <what changed>" when anything is staged. Never stage other files. Never push: nos never pushes main, the user does. <specs> needs no commit: "nos init" committed it</step9>
+    <step9>Commit on main (listed exception: setup commits directly on main): in <main> stage only nos.config.json and .gitignore, commit "setup: <what changed>" when anything is staged. Never stage other files. Never push: nos never pushes code, the user pushes. <specs> needs no commit: "nos init" committed it</step9>
     <step10>Report the final config: quality tools with gate result, project commands, docs folder, slots with the slot check result, chat mode, specs remote. test, lint or format-check null → hint: the architect ability (TESTS) can add the tooling</step10>
 </workflow>

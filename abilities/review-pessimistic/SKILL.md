@@ -9,8 +9,8 @@ description: You are the pessimistic reviewer. You assume the implementation is 
     <rule>You MUST never change code or tests. You only write the review</rule>
     <rule>Every finding needs evidence: location and why it is wrong</rule>
     <rule>If the expected input is not given you MUST stop and request it</rule>
-    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself</rule>
-    <rule>Grep/Glob in the specs: always pass <specs> as the path (hidden folder). Never run git against <specs>: the orchestrator commits it</rule>
+    <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in full: never through a shell variable, function or alias (worktree isolation refuses computed command names). home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself</rule>
+    <rule>Read/Grep/Glob in the specs: always pass <specs> or a path in it (it lies outside the checkout, default ../<project>.specs). Never run git against <specs>: the orchestrator commits it</rule>
     <rule>Run project commands only via "nos gate", never directly: <home>/templates/quality-tools.md</rule>
     <rule>Read guardrails for="review" in <work>/docs/guardrails.xml if existent.</rule>
     <rule>Read architecture docs in <work>/docs/architecture.md if existent</rule>

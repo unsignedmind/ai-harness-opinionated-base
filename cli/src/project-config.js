@@ -1,13 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { FAILED, NosError } from './exit-codes.js';
-import { PROJECT_CONFIG_FILE, SPECS_DIR, slash } from './roots.js';
+import { PROJECT_CONFIG_FILE, slash } from './roots.js';
 
 // nos.config.json: project config, tracked in the project (templates/nos.config.json).
 // specs.* and worktrees.* are read from main's file; quality-tools, project-commands and spec-ui from
 // work's file, because a branch may change its test command.
+// specs.dir null = the default sibling folder ../<main folder name>.specs (roots.js defaultSpecsDir).
 export const DEFAULT_PROJECT_CONFIG = Object.freeze({
-  specs: Object.freeze({ dir: SPECS_DIR, remote: null }),
+  specs: Object.freeze({ dir: null, remote: null }),
   worktrees: Object.freeze({ slots: 1, slotWait: 600 }),
   'quality-tools': Object.freeze({
     test: null,

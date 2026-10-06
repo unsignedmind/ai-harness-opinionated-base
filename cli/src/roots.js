@@ -8,15 +8,21 @@ import { git, gitAvailable } from './git.js';
 //   home        the nos folder this code runs from (NOS_HOME)
 //   work        the checkout the caller sits in: main or a worktree, marked by nos.config.json
 //   main        the main checkout of the project (git common dir), = work without git
-//   specs       main + specs.dir of main's nos.config.json (default .specs), its own git repo
+//   specs       main + specs.dir of main's nos.config.json (default ../<main folder name>.specs, a sibling of
+//               the checkout: Claude Code's worktree isolation refuses writes into the main checkout), own git repo
 //   inWorktree  work is a linked git worktree of main
 //   git         work is inside a git repo
 //   offset      the project folder inside its git checkout, '' unless the project is a subfolder of the repo
 //   configured  a nos.config.json exists in work or main (nos init ran)
 //   via         how work was found: 'root' (--root), 'env' (NOS_SPECS_ROOT), 'walk', 'cwd' (nothing found)
-export const SPECS_DIR = '.specs';
 export const PROJECT_CONFIG_FILE = 'nos.config.json';
-const LEGACY_SPEC_PREFIX = 'specs/';
+// <specs>/config.json; its "project" key points back to main, relative to the specs root
+const SPECS_CONFIG_FILE = 'config.json';
+export const SPECS_SUFFIX = '.specs';
+const LEGACY_SPEC_PREFIXES = ['specs/', '.specs/'];
+
+// The default specs.dir of a project: the sibling folder ../<main folder name>.specs. Built only here.
+export const defaultSpecsDir = (main) => `../${path.basename(path.resolve(main))}${SPECS_SUFFIX}`;
 
 // D:\x\y -> D:/x/y, the form every CLI result prints
 export const slash = (p) => p.split(path.sep).join('/');
@@ -41,22 +47,48 @@ export function isInside(child, parent) {
 // jsdom's, which fileURLToPath refuses
 export const NOS_HOME = canonical(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'));
 
+// The back-pointer of dir's config.json: { main } when it has "project" (relative to dir) and "id-counters" and
+// that folder has nos.config.json, { main: null } for a back-pointer to a folder without it, null for no
+// back-pointer at all (no file, no "project" key, not JSON).
+export function projectOfSpecs(dir) {
+  const file = path.join(dir, SPECS_CONFIG_FILE);
+  if (!existsSync(file)) return null;
+  let config;
+  try {
+    config = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+  const project = config?.project;
+  if (typeof project !== 'string' || !project.trim() || !config['id-counters']) return null;
+  const main = path.resolve(dir, project.trim());
+  return { main: existsSync(path.join(main, PROJECT_CONFIG_FILE)) ? main : null };
+}
+
+// The back-pointer a specs root stores in its config.json: main relative to the specs root, forward slashes
+export const backPointerOf = (roots) => slash(path.relative(roots.specs, roots.main)) || '.';
+
 // Walks up from start to the first folder with nos.config.json, null when there is none.
-// Walking first makes nested repos (nos itself, .specs) harmless: git is asked from the project, not from them.
+// Walking first makes nested repos (nos itself, an inner specs root) harmless: git is asked from the project,
+// not from them. A specs root on the way (config.json with a "project" back-pointer) answers with its project,
+// so the walk works from the specs root outside the checkout too; a back-pointer to a folder without
+// nos.config.json ends the walk (not set up).
 export function findWorkRoot(start) {
   let dir = path.resolve(start);
   for (;;) {
     if (existsSync(path.join(dir, PROJECT_CONFIG_FILE))) return dir;
+    const back = projectOfSpecs(dir);
+    if (back) return back.main;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
 }
 
-// specs.dir of main's nos.config.json, else SPECS_DIR
+// specs.dir of main's nos.config.json (relative to main, or absolute), else the default sibling folder
 function specsDirOf(main) {
   const file = path.join(main, PROJECT_CONFIG_FILE);
-  if (!existsSync(file)) return SPECS_DIR;
+  if (!existsSync(file)) return defaultSpecsDir(main);
   let config;
   try {
     config = JSON.parse(readFileSync(file, 'utf8'));
@@ -64,7 +96,7 @@ function specsDirOf(main) {
     throw new NosError(FAILED, `Cannot read ${slash(file)}: ${err.message}`);
   }
   const dir = config?.specs?.dir;
-  return typeof dir === 'string' && dir.trim() ? dir.trim() : SPECS_DIR;
+  return typeof dir === 'string' && dir.trim() ? dir.trim() : defaultSpecsDir(main);
 }
 
 // The top of the main worktree. Normally the parent of the common dir (<top>/.git). A submodule's common
@@ -159,6 +191,17 @@ export function homeGuard(roots, stderr = process.stderr) {
   return warnings;
 }
 
+// A specs root inside the main checkout cannot be written from a worktree session: Claude Code's worktree
+// isolation refuses edits to the main checkout (subagents and junctions included). Warns on stderr.
+export function specsGuard(roots, stderr = process.stderr) {
+  if (!isInside(roots.specs, roots.main)) return [];
+  const warning =
+    `nos: warning: specs root inside the checkout (${slash(roots.specs)}): worktree sessions cannot write it ` +
+    `(Claude Code isolation). Move it outside, e.g. specs.dir "${defaultSpecsDir(roots.main)}"`;
+  stderr.write(warning + '\n');
+  return [warning];
+}
+
 // The spec-file of a plan step or quick step: relative to the specs root, forward slashes, '' when empty.
 // Older forms (specs/ or .specs/ prefix, absolute paths) are refused; the migration rewrites them.
 export function specFileOf(entry) {
@@ -166,8 +209,7 @@ export function specFileOf(entry) {
     .trim()
     .replaceAll('\\', '/');
   const legacy =
-    specFile.startsWith(LEGACY_SPEC_PREFIX) ||
-    specFile.startsWith(`${SPECS_DIR}/`) ||
+    LEGACY_SPEC_PREFIXES.some((prefix) => specFile.startsWith(prefix)) ||
     specFile.startsWith('/') ||
     /^[A-Za-z]:/.test(specFile) ||
     path.isAbsolute(specFile);

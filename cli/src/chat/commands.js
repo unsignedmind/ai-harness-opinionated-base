@@ -28,7 +28,7 @@ export const CHAT_HELP = `Usage: nos chat [<command>] [options]
 
 Local chat in the spec-ui (or the chat page) for this project. By default the chat server runs
 its own headless Claude Code session per chat tab (claude -p, permission mode "auto"). With
-"chat": { "runner": false } in <specs>/config.json (default .specs/config.json) a terminal session
+"chat": { "runner": false } in <specs>/config.json a terminal session
 answers instead (await/reply). State lives in <specs>/.chat/ (never committed). From a worktree of
 the project every command acts on the chat of the main checkout. Needs a project set up by nos init.
 
@@ -41,6 +41,8 @@ Commands:
   typing            Set presence: thinking, typing or idle         [--name n] [--state s]
   pending           Sessions with undelivered messages (read from disk)
   end               End the chat as the agent                      [--name n]
+  start             Start the server unless one of this version runs (an outdated one is restarted);
+                    a current server and its tabs are left alone. The spec-ui calls it on start
   stop              Shut the server down
   restart           Shut the server down (running Claude Code runs stop) and start a fresh one
   pair              One-time pairing link for a phone or tablet (10 min, single use; the device
@@ -64,6 +66,9 @@ const NEXT = {
   runner:
     'The chat answers itself with its own Claude Code sessions (tabs in the spec-ui). Do not listen; set "chat": { "runner": false } in <specs>/config.json to answer from this terminal instead.',
   noServer: 'The chat server is not running. Run `nos chat open` if the user wants to chat.',
+  openRelay: 'Run `nos chat await` in the background now.',
+  openRunner:
+    'The chat answers by itself with its own Claude Code session per tab: do not run `nos chat await`. Set "chat": { "runner": false } in <specs>/config.json to answer from this terminal instead.',
 };
 
 const OPTIONS = {
@@ -239,16 +244,21 @@ export async function runChat(argv, io = {}) {
           url,
           key: r.body.key,
           specUi: `spec-ui (default port ${SPEC_UI_PORT}, e.g. http://localhost:${SPEC_UI_PORT}/): chat button in the header`,
-          next_step: 'Run `nos chat await` in the background now.',
+          next_step: chatConfig(roots).runner ? NEXT.openRunner : NEXT.openRelay,
         });
+        return 0;
+      }
+      case 'start': {
+        const before = await liveServer(root, stateDir);
+        const port = await ensureServer(roots, stateDir, { env, log: (m) => stderr.write(`nos chat: ${m}\n`) });
+        const kept = before?.port === port && before.version === VERSION;
+        print({ status: kept ? 'running' : 'started', server: `http://127.0.0.1:${port}/`, version: VERSION });
         return 0;
       }
       case 'restart': {
         const port = await restartServer(roots, stateDir, {
           env,
-          log: (m) =>
-            stderr.write(`nos chat: ${m}
-`),
+          log: (m) => stderr.write(`nos chat: ${m}\n`),
         });
         print({ status: 'restarted', server: `http://127.0.0.1:${port}/` });
         return 0;

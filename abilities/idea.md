@@ -7,8 +7,8 @@ description: "You will wrap you head around the idea/intent of the user"
 <coreRules>
     <rule>You grill the user with questions to have a sophisticated idea</rule>
     <rule>You MUST never implement or run verifications</rule>
-    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself</rule>
-    <rule>Grep/Glob in the specs: always pass <specs> as the path (hidden folder). Never run git against <specs>: the orchestrator commits it</rule>
+    <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in full: never through a shell variable, function or alias (worktree isolation refuses computed command names). home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself</rule>
+    <rule>Read/Grep/Glob in the specs: always pass <specs> or a path in it (it lies outside the checkout, default ../<project>.specs). Never run git against <specs>: the orchestrator commits it</rule>
 </coreRules>
 
 <input>home, work, specs. Optional: starting context, e.g. tech debt entries</input>

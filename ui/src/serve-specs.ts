@@ -1,15 +1,16 @@
-// Dev server side of the live viewer (dev.html). The host reads the project's specs root (.specs/,
-// roots.specs from cli/src/roots.js) from its own disk on every request, so any device on the network
-// sees it without picking a folder. Serves `/` as dev.html, `GET /__specs` as
-// `{ specsRel, files: path -> text }` (paths relative to the specs root, specsRel = the specs root
-// relative to main, e.g. ".specs"), `GET /__docs` as the docs folder named in main's nos.config.json
+// Dev server side of the live viewer (dev.html). The host reads the project's specs root (roots.specs from
+// cli/src/roots.js, by default the sibling folder ../<project>.specs, outside the checkout: read with node fs
+// and watched by absolute path, so vite's fs restrictions do not apply) from its own disk on every request,
+// so any device on the network sees it without picking a folder. Serves `/` as dev.html, `GET /__specs` as
+// `{ specsRel, files: path -> text }` (paths relative to the specs root, specsRel = the specs root relative
+// to main, e.g. "../moodo-poc.specs"), `GET /__docs` as the docs folder named in main's nos.config.json
 // (relative to main), `GET /__runs` as the runs (src/serve-runs.ts), and pushes "specs:changed",
-// "runs:changed" (a run file in .specs/.runs/) and "docs:changed" when a file under them changes.
+// "runs:changed" (a run file in <specs>/.runs/) and "docs:changed" when a file under them changes.
 // `POST /__promote?domain=<folder>` runs `nos create-plan --domain <folder> --hollow --root <main>`
 // (Manual promote on the Ideas page). `/__chat/*` is the chat with Claude Code in the project
 // (src/chat-proxy.ts). Every request, the HMR websocket included, passes src/access.ts first: this
-// machine, or a paired device. Every start of the dev server restarts the project's chat server, so it
-// runs the current nos code (not on vite's own restarts after a config change: once per process).
+// machine, or a paired device. Every start of the dev server runs `nos chat start` once per process: a
+// running chat server of the CLI's version is kept with its live tabs; none or an outdated one is (re)started.
 // Not set up (no nos.config.json in main, no specs root): the server still starts and answers every
 // data route with the reason, so the page says "run nos init" instead of failing.
 import { execFile } from 'node:child_process';
@@ -22,7 +23,7 @@ import type { Connect, Plugin } from 'vite';
 import { chatRoots, stateDirOf } from '../../cli/src/chat/paths.js';
 import type { Roots } from '../../cli/src/roots.js';
 import { createAccess, isLocal } from './access.ts';
-import { chatHandler, nosCli, restartChatServer } from './chat-proxy.ts';
+import { chatHandler, nosCli, startChatServer } from './chat-proxy.ts';
 import { readDocs, readSpecsFolder, type DirLike, type FileLike } from './folder.ts';
 import { runsHandler } from './serve-runs.ts';
 
@@ -70,11 +71,11 @@ export function specsSetup({
   }
 }
 
-// the specs root as the project sees it: relative to main with forward slashes (".specs"), absolute
-// when it lies outside main
+// the specs root as the project sees it: relative to main with forward slashes ("../moodo-poc.specs" for the
+// default sibling folder, ".specs" inside), absolute only when no relative path exists (another drive)
 export function specsRelOf(roots: Pick<Roots, 'main' | 'specs'>): string {
   const rel = relative(roots.main, roots.specs);
-  const out = !rel || rel.startsWith('..') || isAbsolute(rel) ? resolve(roots.specs) : rel;
+  const out = !rel || isAbsolute(rel) ? resolve(roots.specs) : rel;
   return out.split(sep).join('/');
 }
 
@@ -247,11 +248,11 @@ export function serveSpecs(setup: SpecsSetup, serveOpts: ServeOptions = {}): Plu
 
       // couch mode (`npm run dev-to-lan`): a one-time pairing link (and QR code) for a phone
       server.httpServer?.once('listening', () => {
-        const g = globalThis as { __nosChatRestarted?: boolean };
-        if (!process.env.VITEST && !g.__nosChatRestarted) {
-          g.__nosChatRestarted = true;
-          restartChatServer(root).then(
-            (url) => server.config.logger.info(`  ➜  Chat server: ${url} (restarted)`),
+        const g = globalThis as { __nosChatStarted?: boolean };
+        if (!process.env.VITEST && !g.__nosChatStarted) {
+          g.__nosChatStarted = true;
+          startChatServer(root).then(
+            ({ server: url, status }) => server.config.logger.info(`  ➜  Chat server: ${url} (${status})`),
             (e: Error) => server.config.logger.warn(`  ➜  Chat server did not start: ${e.message}`),
           );
         }

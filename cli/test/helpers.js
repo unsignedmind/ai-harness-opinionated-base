@@ -3,15 +3,23 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { git, gitAvailable } from '../src/git.js';
-import { resolveRoots, SPECS_DIR } from '../src/roots.js';
+import { resolveRoots } from '../src/roots.js';
 
+// The test projects keep their specs root inside (specs.dir ".specs", written explicitly): most tests read and
+// write it by that path. The default sibling layout (../<name>.specs) has its own tests (roots, init, cli).
+export const SPECS_DIR = '.specs';
+
+// A fresh folder <tmp>/nos-cli-XXXX/p, removed with its parent after the test: the parent also holds the
+// default specs root p.specs (the sibling folder) of a project nos init sets up there.
 // realpath: tmpdir() may be an 8.3 short path on Windows, the resolver returns long names
 export function makeTempRoot(t) {
-  const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'nos-cli-')));
+  const parent = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'nos-cli-')));
+  const root = path.join(parent, 'p');
+  mkdirSync(root);
   // Windows: a process tree killed by a test (taskkill) may hold the folder for a moment -> retry, never fail the test
   t.after(() => {
     try {
-      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      rmSync(parent, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     } catch {
       // left in the temp folder
     }
@@ -83,13 +91,18 @@ export function initRepo(dir) {
 
 // Temp project with nos.config.json and <specs>/config.json. { git: true } makes it a git repo with
 // nos.config.json and .gitignore committed on main. roots come from the real resolver (home = this nos).
-export function makeProject(t, { git: withGit = false, config = {} } = {}) {
+// { sibling: true }: the default layout instead, specs root ../p.specs with the back-pointer "project": "../p".
+export function makeProject(t, { git: withGit = false, config = {}, sibling = false } = {}) {
   const root = makeTempRoot(t);
-  writeFile(root, 'nos.config.json', { specs: { dir: SPECS_DIR, remote: null }, ...config });
-  writeFile(root, `${SPECS_DIR}/config.json`, { 'id-counters': { domain: 1, phase: 1, step: 1 } });
+  const dir = sibling ? `../${path.basename(root)}.specs` : SPECS_DIR;
+  writeFile(root, 'nos.config.json', { specs: { dir, remote: null }, ...config });
+  writeFile(root, `${dir}/config.json`, {
+    ...(sibling && { project: `../${path.basename(root)}` }),
+    'id-counters': { domain: 1, phase: 1, step: 1 },
+  });
   if (withGit) {
     initRepo(root);
-    writeFile(root, '.gitignore', `${SPECS_DIR}/\n.claude/worktrees/\n`);
+    writeFile(root, '.gitignore', sibling ? '.claude/worktrees/\n' : `${SPECS_DIR}/\n.claude/worktrees/\n`);
     gitOk(['add', 'nos.config.json', '.gitignore'], root);
     gitOk(['commit', '-m', 'init'], root);
   }

@@ -12,7 +12,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 
 import { createAccess, DEVICE_COOKIE, isLocal, PENDING_COOKIE, type Access } from '../src/access';
 import { keyOf, stateDirOf } from '../../cli/src/chat/paths.js';
-import { chatHandler } from '../src/chat-proxy';
+import { chatHandler, startChatServer } from '../src/chat-proxy';
 import { loadTls } from '../src/tls';
 
 // tests run inside ui/, the CLI sits next to it
@@ -286,6 +286,16 @@ test('chat: opening the details view of a tab is in the audit log, with the suba
   expect(log).toMatch(new RegExp(`\tlocal\tdetails\t${key}\t?\n`));
   expect(log).toMatch(new RegExp(`\tlocal\tdetails\t${key}\tagent a1b2c3`));
   expect(log).not.toMatch(/details	.*\.\.\/x/);
+});
+
+test('dev server start: a running chat server of this version is kept with its tabs, never restarted', async () => {
+  const pid = () => JSON.parse(readFileSync(join(state, 'server.json'), 'utf8')).pid;
+  const first = await startChatServer(root, CLI);
+  const before = pid();
+  const again = await startChatServer(root, CLI);
+  expect(again).toStrictEqual({ server: first.server, status: 'running' });
+  expect(pid()).toBe(before);
+  expect(JSON.parse((await call('GET', '/__chat/state')).body)).toMatchObject({ key: keyOf(root), server: true });
 });
 
 test('https: the certificate is made once and reused; cookies are Secure', { timeout: 60000 }, async () => {

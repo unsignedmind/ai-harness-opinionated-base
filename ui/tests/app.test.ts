@@ -168,7 +168,7 @@ test('status line and overview count in singular for one', () => {
 test('without specs the overview offers to open the specs folder', () => {
   shell({}, { canPick: true });
   const btn = main().querySelector<HTMLButtonElement>('.empty button[data-action="pick"]');
-  expect(btn?.textContent).toBe('Open the project folder');
+  expect(btn?.textContent).toBe('Open the specs folder');
 });
 
 test('without the File System Access API the empty state says which browsers work', () => {

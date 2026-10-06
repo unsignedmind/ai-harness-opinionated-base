@@ -1,8 +1,8 @@
 // Entry of the standalone viewer (.claude/skills/nos/ui/index.html, opened straight from disk). Built into
 // bundle/viewer.js as a classic script, because file:// pages cannot load ES modules. Data comes
-// from a folder the user picks (the project folder, for the docs too, or its .specs/ alone; src/folder.ts
-// locateSpecs); the handle is
-// remembered so a revisit is one click.
+// from a folder the user picks: the specs folder (by default <project>.specs next to the project, which a
+// picked project folder cannot reach), or a project folder whose specs root lies inside it, docs included
+// (src/folder.ts locateSpecs). The handle is remembered so a revisit is one click.
 import { mountApp } from './app';
 import { buildDocs } from './docs';
 import { locateSpecs, readDocs, readSpecsFolder, type DirLike } from './folder';

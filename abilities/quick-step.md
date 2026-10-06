@@ -10,8 +10,8 @@ description: You create a quick step. One step without a plan, allocated to a do
     <rule>Return every question to the caller and wait for the answer</rule>
     <rule>Every question with choices: one choice per line, "<letter> - <choice text> [<key>]". Letters A, B, C… in choice order. The user answers with letter or key</rule>
     <rule>Files only via the nos cli: create-domain, create-quick-step</rule>
-    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself</rule>
-    <rule>Grep/Glob in the specs: always pass <specs> as the path (hidden folder). Never run git against <specs>: the orchestrator commits it</rule>
+    <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in full: never through a shell variable, function or alias (worktree isolation refuses computed command names). home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself</rule>
+    <rule>Read/Grep/Glob in the specs: always pass <specs> or a path in it (it lies outside the checkout, default ../<project>.specs). Never run git against <specs>: the orchestrator commits it</rule>
 </coreRules>
 
 <input>home, work, specs. Optional: intent of the user</input>

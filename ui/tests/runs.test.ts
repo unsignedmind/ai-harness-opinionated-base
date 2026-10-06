@@ -22,6 +22,8 @@ const ENV = {
   GIT_COMMITTER_NAME: 'nos test',
   GIT_COMMITTER_EMAIL: 'nos@test.invalid',
 };
+// tmp holds the project (p) and its default specs root, the sibling folder p.specs
+let tmp = '';
 let main = '';
 let specs = '';
 let id = 0; // the quick step's id
@@ -39,13 +41,15 @@ const base = {
 };
 
 beforeAll(() => {
-  main = realpathSync.native(mkdtempSync(join(tmpdir(), 'nos-runs-')));
+  tmp = realpathSync.native(mkdtempSync(join(tmpdir(), 'nos-runs-')));
+  main = join(tmp, 'p');
+  mkdirSync(main);
   git(main, 'init', '-q', '-b', 'main');
   writeFileSync(join(main, 'app.txt'), 'one\n');
   nos(['init']);
   git(main, 'add', '-A');
   git(main, 'commit', '-q', '-m', 'init');
-  specs = join(main, '.specs');
+  specs = join(tmp, 'p.specs');
   nos(['create-domain', '--idea', '-', '--slug', 'sync'], '# Idea: Sync\n');
   const quick = nos(
     ['create-quick-step', '--domain', 'domain-1-sync', '--step', '-'],
@@ -113,7 +117,7 @@ afterAll(() => {
   } catch {
     // gone already
   }
-  rmSync(main, { recursive: true, force: true });
+  rmSync(tmp, { recursive: true, force: true });
 });
 
 const byId = (runs: Run[]) => Object.fromEntries(runs.map((r) => [`${r.kind}-${r.id}`, r]));
@@ -211,11 +215,15 @@ test('the model joins the runs: the quick run to its step, the plan run to the d
   expect(sync.quickSteps[0].run).toMatchObject({ kind: 'quick', id, ahead: 2 });
 });
 
-test('specsRel: the specs root relative to main, absolute outside it', () => {
-  expect(specsRelOf({ main, specs })).toBe('.specs');
+test('specsRel: the specs root relative to main (the sibling folder too), absolute only on another drive', () => {
+  expect(specsRelOf({ main, specs })).toBe('../p.specs');
+  expect(specsRelOf({ main, specs: join(main, '.specs') })).toBe('.specs');
   expect(specsRelOf({ main, specs: join(main, 'plans', 'specs') })).toBe('plans/specs');
-  const outside = join(tmpdir(), 'elsewhere');
-  expect(specsRelOf({ main, specs: outside })).toBe(resolve(outside).split(sep).join('/'));
+  if (process.platform === 'win32') {
+    const drive = main[0].toUpperCase() === 'Z' ? 'Y' : 'Z';
+    const outside = `${drive}:\\elsewhere`;
+    expect(specsRelOf({ main, specs: outside })).toBe(resolve(outside).split(sep).join('/'));
+  }
 });
 
 test('the browser opens only when nobody scripts the dev server', () => {
@@ -238,10 +246,13 @@ test('a change in .runs/*.json is runs:changed, logs and local state are nothing
   expect(specsEvent(specs, join(main, 'app.txt'))).toBeNull();
 });
 
-test('the dev server finds the project from inside it, from a worktree and via NOS_SPECS_ROOT', () => {
+test('the dev server finds the project from inside it, from its specs root, a worktree and via NOS_SPECS_ROOT', () => {
   const real = (p: string) => realpathSync.native(p);
-  const fromMain = specsSetup({ cwd: join(main, '.specs'), env: {} });
+  const fromMain = specsSetup({ cwd: main, env: {} });
   expect(fromMain.roots && real(fromMain.roots.specs)).toBe(real(specs));
+  // the specs root lies outside the checkout: its config.json points back to the project
+  const fromSpecs = specsSetup({ cwd: join(specs, 'domain-1-sync'), env: {} });
+  expect(fromSpecs.roots && real(fromSpecs.roots.main)).toBe(real(main));
   const fromWorktree = specsSetup({ cwd: wt('plan-1'), env: {} });
   expect(fromWorktree.roots && real(fromWorktree.roots.main)).toBe(real(main));
   const viaEnv = specsSetup({ cwd: tmpdir(), env: { NOS_SPECS_ROOT: main } });

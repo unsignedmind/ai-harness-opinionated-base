@@ -1,17 +1,17 @@
-import { appendFileSync, copyFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { ensureSpecs, templatePath, writeJsonFile } from './config.js';
+import { ensureSpecs, readJsonFile, templatePath, writeJsonFile } from './config.js';
 import { FAILED, NosError } from './exit-codes.js';
 import { git, gitAvailable, gitOut } from './git.js';
 import { DEFAULT_PROJECT_CONFIG, hasProjectConfig, projectConfigPath, specsConfig } from './project-config.js';
-import { isInside, PROJECT_CONFIG_FILE, slash } from './roots.js';
+import { backPointerOf, defaultSpecsDir, isInside, PROJECT_CONFIG_FILE, slash } from './roots.js';
 
-// .specs keeps history in git; the dot entries are local state
+// the specs root keeps history in git; the dot entries are local state
 export const SPECS_GITIGNORE = Object.freeze(['.chat/', '.locks/', '.runs/']);
-// LF working copies in .specs on every OS: a project's .gitattributes does not reach into the nested repo,
+// LF working copies in the specs root on every OS: a project's .gitattributes does not reach into the nested repo,
 // and core.autocrlf=true would check the specs out as CRLF
 export const SPECS_GITATTRIBUTES = '* text=auto eol=lf\n';
-// <specs> (when inside the project) and the run worktrees
+// <specs> (only when it lies inside the project) and the run worktrees
 function projectIgnores(roots) {
   const specs = slash(path.relative(roots.main, roots.specs));
   const inside = specs && !specs.startsWith('../') && !path.isAbsolute(specs);
@@ -75,7 +75,7 @@ function assertInitPlace(roots) {
   }
 }
 
-// git commit in .specs; a missing identity gets the fix in the message
+// git commit in the specs root; a missing identity gets the fix in the message
 function commitSpecs(cwd, message) {
   const res = git(['commit', '-m', message], { cwd });
   if (res.code === 0) return;
@@ -89,10 +89,12 @@ function commitSpecs(cwd, message) {
 }
 
 // Sets up the nos layout of a project; every part is created only when missing, so it can run again.
-//   nos.config.json (from the template), <specs>/ as its own git repo (branch main) with .gitignore and
-//   config.json (id-counters), the project .gitignore entries for <specs> and .claude/worktrees/, the first
-//   <specs> commit "nos: init" (with .gitattributes "* text=auto eol=lf" when <specs> has no commit yet),
-//   and origin = specs.remote when set.
+//   nos.config.json (from the template, specs.dir written explicitly: ../<main folder name>.specs), <specs>/
+//   (default: the sibling folder of the checkout) as its own git repo (branch main) with .gitignore and
+//   config.json (id-counters and the back-pointer "project": main relative to <specs>), the project .gitignore
+//   entry .claude/worktrees/ (plus <specs>/ when it lies inside the project), the first <specs> commit
+//   "nos: init" (with .gitattributes "* text=auto eol=lf" when <specs> has no commit yet), and
+//   origin = specs.remote when set. A missing or stale back-pointer of an existing config.json is (re)written.
 // Commits nothing in the project. Refused inside a worktree: the layout belongs to main.
 export function initProject(roots) {
   if (roots.inWorktree) {
@@ -110,8 +112,10 @@ export function initProject(roots) {
   const madeConfig = !hasProjectConfig(roots.main);
   if (madeConfig) {
     const template = templatePath(roots, PROJECT_CONFIG_FILE);
-    if (existsSync(template)) copyFileSync(template, projectConfig);
-    else writeJsonFile(projectConfig, DEFAULT_PROJECT_CONFIG);
+    const config = existsSync(template) ? readJsonFile(template) : structuredClone(DEFAULT_PROJECT_CONFIG);
+    // explicit, so the project shows where its specs live; roots.specs was resolved from the same default
+    config.specs = { ...config.specs, dir: config.specs?.dir ?? defaultSpecsDir(roots.main) };
+    writeJsonFile(projectConfig, config);
   }
   note(madeConfig, projectConfig);
 
@@ -119,6 +123,12 @@ export function initProject(roots) {
   const { configPath, createdConfig } = ensureSpecs(roots);
   note(!specsExisted, roots.specs);
   note(createdConfig, configPath);
+
+  // the back-pointer lets the resolver walk from inside the specs root (outside the checkout) to the project
+  const project = backPointerOf(roots);
+  const specsConfigData = readJsonFile(configPath);
+  const backPointer = { project, written: specsConfigData.project !== project };
+  if (backPointer.written) writeJsonFile(configPath, { project, ...specsConfigData, project });
 
   const specsIgnore = path.join(roots.specs, '.gitignore');
   const madeSpecsIgnore = !existsSync(specsIgnore);
@@ -130,7 +140,7 @@ export function initProject(roots) {
     gitignoreAdded = ensureIgnored(path.join(roots.main, '.gitignore'), projectIgnores(roots), roots.main);
   }
 
-  // .gitattributes only for a fresh .specs (no history yet); an existing file is never touched
+  // .gitattributes only for a fresh specs root (no history yet); an existing file is never touched
   const specsAttributes = path.join(roots.specs, '.gitattributes');
   const writeAttributes = () => {
     const made = !existsSync(specsAttributes);
@@ -169,5 +179,5 @@ export function initProject(roots) {
     writeAttributes();
   }
 
-  return { created, existing, gitignoreAdded, commit, remote };
+  return { created, existing, gitignoreAdded, backPointer, commit, remote };
 }

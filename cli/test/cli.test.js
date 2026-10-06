@@ -6,8 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reportError, run } from '../src/cli.js';
 import { CONFLICT, FAILED, HELD, NosError } from '../src/exit-codes.js';
-import { slash, SPECS_DIR } from '../src/roots.js';
-import { makeProject, makeTempRoot, writeFile, readJson, STATUS_XML } from './helpers.js';
+import { slash } from '../src/roots.js';
+import { makeProject, makeTempRoot, writeFile, readJson, SPECS_DIR, STATUS_XML } from './helpers.js';
 
 const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'nos.js');
 
@@ -37,8 +37,12 @@ const PLAN = {
   phases: [{ slug: 'setup', name: 'Setup', status: 'open', intent: '', description: '', steps: [{ slug: 'init-repo', intent: 'Init repo', status: 'open', description: '', 'spec-file': '' }] }],
 };
 
-test('init creates nos.config.json, .specs/ and its config.json and prints absolute paths', async (t) => {
+// the default specs root of a project folder: the sibling <name>.specs
+const sibling = (root) => path.join(path.dirname(root), `${path.basename(root)}.specs`);
+
+test('init creates nos.config.json and the sibling specs root with config.json, prints absolute paths', async (t) => {
   const root = makeTempRoot(t);
+  const specs = sibling(root);
 
   const { code, json, err } = await invoke(['init'], { cwd: root });
 
@@ -46,30 +50,44 @@ test('init creates nos.config.json, .specs/ and its config.json and prints absol
   assert.equal(code, 0);
   assert.equal(json.action, 'init');
   assert.equal(json.main, slash(root));
-  assert.equal(json.specs, slash(path.join(root, SPECS_DIR)));
-  for (const file of [slash(path.join(root, 'nos.config.json')), at(root, ''), at(root, 'config.json'), at(root, '.gitignore')]) {
-    assert.ok(json.created.includes(file.replace(/\/$/, '')), `created lists ${file}`);
+  assert.equal(json.specs, slash(specs));
+  for (const file of [path.join(root, 'nos.config.json'), specs, path.join(specs, 'config.json'), path.join(specs, '.gitignore')]) {
+    assert.ok(json.created.includes(slash(file)), `created lists ${file}`);
   }
   assert.deepEqual(json.existing, []);
   assert.deepEqual(json.gitignoreAdded, [], 'no project .gitignore without git');
-  assert.deepEqual(readJson(root, '.specs/config.json'), { 'id-counters': { domain: 1, phase: 1, step: 1 } });
-  assert.equal(readJson(root, 'nos.config.json').specs.dir, '.specs');
+  assert.deepEqual(json.backPointer, { project: '../p', written: true });
+  assert.deepEqual(readJson(specs, 'config.json'), { project: '../p', 'id-counters': { domain: 1, phase: 1, step: 1 } });
+  assert.equal(readJson(root, 'nos.config.json').specs.dir, '../p.specs');
 });
 
-test('init leaves an existing config.json untouched', async (t) => {
+test('init keeps an existing config.json, only the back-pointer is added', async (t) => {
   const root = makeTempRoot(t);
   const existing = { 'id-counters': { domain: 9, phase: 2, step: 3 }, chat: { port: 4700 } };
-  writeFile(root, '.specs/config.json', existing);
+  writeFile(sibling(root), 'config.json', existing);
 
   const { code, json } = await invoke(['init'], { cwd: root });
 
   assert.equal(code, 0);
-  assert.ok(json.existing.includes(at(root, 'config.json')));
-  assert.deepEqual(readJson(root, '.specs/config.json'), existing);
+  assert.ok(json.existing.includes(slash(path.join(sibling(root), 'config.json'))));
+  assert.deepEqual(readJson(sibling(root), 'config.json'), { ...existing, project: '../p' });
+  assert.deepEqual((await invoke(['init'], { cwd: root })).json.backPointer, { project: '../p', written: false });
+});
+
+test('init and roots warn on stderr when the specs root lies inside the checkout, other commands do not', async (t) => {
+  const { root } = makeProject(t);
+
+  for (const command of ['roots', 'init']) {
+    const { code, err } = await invoke([command], { cwd: root });
+    assert.equal(code, 0);
+    assert.match(err, /specs root inside the checkout .*worktree sessions cannot write it \(Claude Code isolation\)/);
+    assert.match(err, /specs\.dir "\.\.\/p\.specs"/);
+  }
+  assert.equal((await invoke(['create-domain', '--idea', '-', '--slug', 'a'], { cwd: root, stdin: '# A\n' })).err, '');
 });
 
 test('roots prints home, work, main, specs and inWorktree with forward slashes', async (t) => {
-  const { root } = makeProject(t);
+  const { root } = makeProject(t, { sibling: true });
   const home = path.join(root, '.claude', 'skills', 'nos');
 
   const { code, json, err } = await invoke(['roots'], { cwd: path.join(root), home });
@@ -81,7 +99,7 @@ test('roots prints home, work, main, specs and inWorktree with forward slashes',
     home: slash(home),
     work: slash(root),
     main: slash(root),
-    specs: slash(path.join(root, SPECS_DIR)),
+    specs: slash(sibling(root)),
     inWorktree: false,
     configured: true,
   });
@@ -98,7 +116,7 @@ test('NOS_SPECS_ROOT sets the work root, --root wins over it', async (t) => {
 });
 
 test('the home guard warns on stderr when this nos is not the project nos, the result still comes', async (t) => {
-  const { root } = makeProject(t);
+  const { root } = makeProject(t, { sibling: true });
   writeFile(root, '.claude/skills/nos/SKILL.md', '# nos');
   const otherHome = path.join(makeTempRoot(t), 'nos');
 

@@ -1,6 +1,6 @@
 # nos-cli
 
-File manager and git driver CLI for the nos harness. `nos` manages the specs root of a project (`.specs/`, its own git repo): it hands out ids from a counter, creates domain and phase folders, and lays out empty spec files for each step of a plan. It is also the only resolver of nos paths (`nos roots`) and owns every git mechanic of a run: branch + worktree per plan or quick step, rebase, quality gate, ff-only merge, locks and the specs commits.
+File manager and git driver CLI for the nos harness. `nos` manages the specs root of a project (`<specs>/`, its own git repo): it hands out ids from a counter, creates domain and phase folders, and lays out empty spec files for each step of a plan. It is also the only resolver of nos paths (`nos roots`) and owns every git mechanic of a run: branch + worktree per plan or quick step, rebase, quality gate, ff-only merge, locks and the specs commits.
 
 It uses no dependencies and needs Node.js 20 or newer.
 
@@ -22,7 +22,7 @@ nos <command> --help
 
 | Command             | Description                                                                 |
 | ------------------- | --------------------------------------------------------------------------- |
-| `init`              | Set up the nos layout: `nos.config.json`, `.specs/` (own git repo), `.gitignore` entries |
+| `init`              | Set up the nos layout: `nos.config.json`, `<specs>/` (own git repo, next to the checkout), `.gitignore` entry |
 | `roots`             | Print the resolved roots: `home`, `work`, `main`, `specs`, `inWorktree`, `configured` |
 | `create-domain`     | Reserve a domain id and create `<specs>/domain-<id>-<slug>/idea.md`         |
 | `create-plan`       | Save a `plan.json` in a domain and create its phase folders and step files (`--hollow`: empty plan, promotes unplanned) |
@@ -42,7 +42,7 @@ General rules:
 - Pass `-` as a file argument to read that input from stdin.
 - Every command accepts `--root <dir>`, the work root (see [Roots](#roots)).
 - Every command except `init`, `roots` and `help` needs a project set up by `nos init`. Without `nos.config.json` it fails (exit 1) with "nos is not set up here: no nos.config.json found from <cwd> up. Run nos init from the project root". `create-domain` no longer creates `<specs>/config.json` itself.
-- Results are printed to stdout as JSON. Every path in a result is absolute with forward slashes (`D:/repo/.specs/...`). Errors go to stderr.
+- Results are printed to stdout as JSON. Every path in a result is absolute with forward slashes (`D:/repo/<specs>/...`). Errors go to stderr.
 - `spec-file` fields in `plan.json` / `quick-steps.json` are relative to the specs root, e.g. `domain-1-user-auth/phases/phase-1-data-model/step-1-user-table.md`. A value with the old `specs/` prefix fails with "legacy spec-file … run the migration" (exit 1).
 - Templates (`config.json`, `nos.config.json`, `status.xml`) are read from `<home>/templates/` of the running nos, never from a copy in the project.
 
@@ -53,20 +53,24 @@ The CLI resolves four folders once per invocation (`src/roots.js`, shared with c
 | Root    | Resolution |
 | ------- | ---------- |
 | `home`  | The nos folder of the running CLI (`NOS_HOME`) |
-| `work`  | `--root` (as given), else `NOS_SPECS_ROOT`, else the nearest folder with `nos.config.json` walking up from the current directory, else the current directory. The checkout you sit in: main or a git worktree. A walk that climbed out of a linked worktree (its branch has no `nos.config.json` yet) is brought back: work = that worktree's top + the project offset |
+| `work`  | `--root` (as given), else `NOS_SPECS_ROOT`, else the nearest folder with `nos.config.json` walking up from the current directory, else the current directory. The checkout you sit in: main or a git worktree. A walk that climbed out of a linked worktree (its branch has no `nos.config.json` yet) is brought back: work = that worktree's top + the project offset. A specs root on the way (`config.json` with `project` and `id-counters`) answers with the project its back-pointer names (needs `nos.config.json` there, else not set up) |
 | `main`  | Top of git's main worktree (parent of `--git-common-dir`; for a submodule the first entry of `git worktree list`) + the project offset. Not a git repo: `work` |
-| `specs` | `main` + `specs.dir` of main's `nos.config.json` (default `.specs`) |
+| `specs` | `main` + `specs.dir` of main's `nos.config.json` (relative to main, or absolute). Default (`null` or missing): `../<main folder name>.specs`, the sibling folder of the checkout, built only by `defaultSpecsDir` in `src/roots.js` |
 
-`inWorktree` is true when `work` is a linked worktree of `main`. `offset` is the project folder inside its repo (`''` unless the project is a subfolder of a monorepo); `worktreeProjectDir(roots, wtTop)` gives `<wtTop>/<offset>`. `configured` is true when `work` or `main` has `nos.config.json`. Git children never inherit `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR` (hooks set them). Walking up to `nos.config.json` first makes nested repos harmless: from `<main>/.claude/skills/nos` or `<main>/.specs` the roots are the project's.
+`inWorktree` is true when `work` is a linked worktree of `main`. `offset` is the project folder inside its repo (`''` unless the project is a subfolder of a monorepo); `worktreeProjectDir(roots, wtTop)` gives `<wtTop>/<offset>`. `configured` is true when `work` or `main` has `nos.config.json`. Git children never inherit `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR` (hooks set them). Walking up to `nos.config.json` first makes nested repos harmless: from `<main>/.claude/skills/nos` or from the specs root (via its back-pointer) the roots are the project's.
 
-Home guard: when `<main>/.claude/skills/nos` exists and is not this nos, or this nos lies under `<main>/.claude/worktrees/`, every command prints one warning line on stderr (the result is unchanged).
+Why outside the checkout: Claude Code's worktree isolation (after `EnterWorktree`) refuses Write/Edit to any path inside the main checkout, for subagents and through junctions too, and blocks git redirected into it (`git -C <main>`, `cd <main> && git`, `GIT_DIR`). A sibling folder outside the repo stays writable from every run worktree. `<specs>/config.json` carries `"project": "<main relative to the specs root>"` (e.g. `../moodo-poc`), so `nos roots` works from inside the specs root too.
+
+Home guard: when `<main>/.claude/skills/nos` exists and is not this nos, or this nos lies under `<main>/.claude/worktrees/`, every command prints one warning line on stderr (the result is unchanged). `nos roots` and `nos init` also warn when the specs root lies inside the checkout ("specs root inside the checkout: worktree sessions cannot write it").
+
+Permissions: setup adds the specs root to `permissions.additionalDirectories` of `.claude/settings.local.json`, so default-mode sessions read and write it without prompts. Read/Grep/Glob get the specs path passed explicitly (it is outside the cwd).
 
 ### Config split
 
 | File | Repo | Content |
 | --- | --- | --- |
-| `nos.config.json` | project (tracked) | `specs: {dir, remote}`, `worktrees: {slots, slotWait}`, `quality-tools`, `project-commands`, `spec-ui.docs-folder` |
-| `<specs>/config.json` | `.specs` | `id-counters`, `chat` |
+| `nos.config.json` | project (tracked) | `specs: {dir, remote}` (`dir` `null` in the template = the default `../<name>.specs`; `nos init` writes it explicitly), `worktrees: {slots, slotWait}`, `quality-tools`, `project-commands`, `spec-ui.docs-folder` |
+| `<specs>/config.json` | `<specs>` | `project` (back-pointer to main), `id-counters`, `chat` |
 
 `src/project-config.js` reads `nos.config.json` with defaults merged: `specs` and `worktrees` from main's file, `quality-tools`, `project-commands` and `spec-ui` from work's file (a branch may change its test command).
 
@@ -105,14 +109,14 @@ How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the
 
 - A session (terminal or chat tab) starts in main. Picking a plan or quick step starts a **run**: `nos run start` creates branch `<kind>-<id>` and the worktree `<main>/.claude/worktrees/<kind>-<id>`, and prints a run token. The session then enters the worktree (`EnterWorktree path=<run.worktree>`, then it works in `enter`); subagents, tests and code commits land there.
 - Run ids: `plan-<domain id>` (one plan per domain) and `quick-<step id>`. One run per domain, one run per session.
-- The specs stay central in `<main>/.specs`, shared by all worktrees. Only the orchestrator commits them (`nos specs commit`), subagents never run git against `.specs`.
+- The specs stay central in `<main>/<specs>`, shared by all worktrees. Only the orchestrator commits them (`nos specs commit`), subagents never run git against `<specs>`.
 - Code commits carry a subject prefix with a colon: `step-<id>: `, `phase-<id>: `, `architect: `, `setup: `. Code and specs are linked by that prefix, never by a sha (shas change on rebase).
 - Main moves only by `nos run finish` (ff-only, under the merge lock). Exceptions: setup and architect commit directly when run on main.
 - Run merged → the session leaves the worktree (`ExitWorktree`, keep), then `nos run cleanup` removes worktree and branch. Windows cannot delete a folder a process sits in, hence the order.
 
 ### Run registry, token and locks
 
-`<specs>/.runs/<kind>-<id>.json`, one file per run (ignored by the `.specs` repo):
+`<specs>/.runs/<kind>-<id>.json`, one file per run (ignored by the `<specs>` repo):
 
 ```json
 { "kind": "quick", "id": 7, "domain": "domain-2-auth", "branch": "quick-7",
@@ -148,9 +152,9 @@ Steps 1–6 run under the short lock `runs` (waits up to 10 s, then 4): two sess
            "worktree": "D:/repo/.claude/worktrees/quick-7", "base": "<sha>", "mainBranch": "main",
            "phase": "develop", "started": "<iso>", "seen": "<iso>" },
   "token": "1a2b3c4d",
-  "roots": { "home": "D:/repo/.claude/skills/nos", "work": "D:/repo/.claude/worktrees/quick-7", "main": "D:/repo", "specs": "D:/repo/.specs" },
+  "roots": { "home": "D:/repo/.claude/skills/nos", "work": "D:/repo/.claude/worktrees/quick-7", "main": "D:/repo", "specs": "D:/repo.specs" },
   "enter": "D:/repo/.claude/worktrees/quick-7",
-  "install": { "code": 0, "log": "D:/repo/.specs/.runs/logs/quick-7/install.log" },
+  "install": { "code": 0, "log": "D:/repo.specs/.runs/logs/quick-7/install.log" },
   "leftovers": null }
 ```
 
@@ -192,7 +196,7 @@ Precondition: the plan or quick step has status `done` (else 1, no lock taken); 
 6. `phase=merge`: `git -C <main> merge --ff-only <branch>` (main's working tree moves along). Refused (main moved, e.g. an architect commit) → steps 1–6 once more, then 1.
 7. `set-status --run <run> merged`, `specs commit "<run>: merged"`, `phase=merged`, release.
 
-Every failure releases the lock and parks the run in `phase=develop` (a failure after the merge keeps `phase=merge`). A crash keeps lock and phase: the same token re-takes its own lock and continues; `phase=merge` with the branch already in main skips to step 7. A finished run (`phase=merged`) returns `{ "action": "run-finish", "run", "merged": true, "already": true }` and releases a merge lock of its token. Main is never pushed.
+Every failure releases the lock and parks the run in `phase=develop` (a failure after the merge keeps `phase=merge`). A crash keeps lock and phase: the same token re-takes its own lock and continues; `phase=merge` with the branch already in main skips to step 7. A finished run (`phase=merged`) returns `{ "action": "run-finish", "run", "merged": true, "already": true }` and releases a merge lock of its token. Nothing is ever pushed: nos never pushes code, the user pushes.
 
 ```json
 { "action": "run-finish", "run": { "...": "...", "phase": "merged" }, "merged": true, "mainBranch": "main",
@@ -237,7 +241,7 @@ Flips a whole run in one write per file. The domain comes from the run file (els
 
 ```json
 { "action": "set-status", "run": "quick-7", "domain": "domain-2-auth", "status": "merged",
-  "file": "D:/repo/.specs/domain-2-auth/quick-steps/quick-steps.json",
+  "file": "D:/repo.specs/domain-2-auth/quick-steps/quick-steps.json",
   "changes": [{ "target": "step", "id": 7, "slug": "fix-login-typo", "previous": "done", "status": "merged" }] }
 ```
 
@@ -262,7 +266,7 @@ $ nos gate
   "pass": false,
   "tools": [
     { "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "signal": null, "timedOut": false,
-      "tail": "<last 60 lines>", "log": "D:/repo/.specs/.runs/logs/quick-7/test.log" },
+      "tail": "<last 60 lines>", "log": "D:/repo.specs/.runs/logs/quick-7/test.log" },
     { "name": "lint", "cmd": null, "status": "not-configured", "exit": null, "signal": null, "timedOut": false,
       "tail": "", "log": null }
   ]
@@ -309,7 +313,7 @@ $ nos specs commit --run quick-7 -m "step-7: develop"
   "committed": true,
   "sha": "<sha, null when nothing was staged>",
   "pushed": false,
-  "files": ["D:/repo/.specs/domain-2-auth/quick-steps/quick-steps.json"]
+  "files": ["D:/repo.specs/domain-2-auth/quick-steps/quick-steps.json"]
 }
 ```
 
@@ -333,7 +337,7 @@ $ nos specs find-step 7
   "slug": "fix-login-typo",
   "intent": "Fix the typo on the login button",
   "status": "open",
-  "specFile": "D:/repo/.specs/domain-2-auth/quick-steps/step-7-fix-login-typo.md"
+  "specFile": "D:/repo.specs/domain-2-auth/quick-steps/step-7-fix-login-typo.md"
 }
 ```
 
@@ -351,7 +355,7 @@ Printed holders (`lock status`, exit-4 details, reclaimed slot leases) never sho
 
 ```sh
 $ nos lock take merge --token 1a2b3c4d --run quick-7
-{ "action": "lock-take", "lock": "merge", "path": "D:/repo/.specs/.locks/merge",
+{ "action": "lock-take", "lock": "merge", "path": "D:/repo.specs/.locks/merge",
   "holder": { "run": "quick-7", "pid": 4242, "command": "lock take", "taken": "<iso>" },
   "reentrant": false }
 $ nos lock release merge --token 1a2b3c4d
@@ -370,23 +374,24 @@ nos init [--root <dir>]
 
 Sets up the nos layout of a project. Idempotent: only missing parts are created. Refused inside a git worktree.
 
-1. Creates `nos.config.json` from `<home>/templates/nos.config.json` if missing.
-2. Creates `.specs/` with `config.json` (id-counters, from `<home>/templates/config.json`) and `.gitignore` (`.chat/`, `.locks/`, `.runs/`).
-3. Git project: appends `.specs/` and `.claude/worktrees/` to the project `.gitignore`, unless a `.gitignore` of the repo already ignores them (`git check-ignore`, so `.claude/*` counts; global excludes and `.git/info/exclude` do not). Appended in the file's line ending (CRLF stays CRLF).
-4. Git available: `git init -b main` in `.specs`. A `.specs` without a commit yet also gets `.gitattributes` (`* text=auto eol=lf`, LF working copies on every OS: the project's `.gitattributes` does not reach into the nested repo, and `core.autocrlf=true` would check out CRLF; an existing file stays untouched) and the first commit `nos: init` (`.gitattributes`, `.gitignore`, `config.json`). A `.specs` with history gets no `.gitattributes`. Then `git remote add origin <specs.remote>` when `specs.remote` is set and `.specs` has no `origin`. An `origin` with another URL is left and reported as `{url, existing, added: false, mismatch: true}`. A commit failing for a missing git identity says to set `user.name` / `user.email`.
+1. Creates `nos.config.json` from `<home>/templates/nos.config.json` if missing, with `specs.dir` written explicitly: `../<main folder name>.specs`.
+2. Creates `<specs>/` (default the sibling folder of the checkout) with `config.json` (id-counters from `<home>/templates/config.json`, plus `project`: main relative to the specs root, e.g. `../repo`) and `.gitignore` (`.chat/`, `.locks/`, `.runs/`). A missing or stale `project` of an existing `config.json` is (re)written (`backPointer: { project, written }`); with a specs repo that has history it stays uncommitted: `nos specs commit --config`.
+3. Git project: appends `.claude/worktrees/` (and `<specs.dir>/` only when the specs root lies inside the project) to the project `.gitignore`, unless a `.gitignore` of the repo already ignores them (`git check-ignore`, so `.claude/*` counts; global excludes and `.git/info/exclude` do not). Appended in the file's line ending (CRLF stays CRLF).
+4. Git available: `git init -b main` in `<specs>`. A `<specs>` without a commit yet also gets `.gitattributes` (`* text=auto eol=lf`, LF working copies on every OS: the project's `.gitattributes` does not reach into the nested repo, and `core.autocrlf=true` would check out CRLF; an existing file stays untouched) and the first commit `nos: init` (`.gitattributes`, `.gitignore`, `config.json`). A `<specs>` with history gets no `.gitattributes`. Then `git remote add origin <specs.remote>` when `specs.remote` is set and `<specs>` has no `origin`. An `origin` with another URL is left and reported as `{url, existing, added: false, mismatch: true}`. A commit failing for a missing git identity says to set `user.name` / `user.email`.
 
-Without `nos.config.json` and without `--root` / `NOS_SPECS_ROOT` it runs only from the project root: refused in a subfolder of a git repo and inside the nos folder (e.g. `<project>/.claude/skills/nos`). It commits nothing in the project (the setup ability does that). Existing files are never changed, except appended `.gitignore` entries.
+Without `nos.config.json` and without `--root` / `NOS_SPECS_ROOT` it runs only from the project root: refused in a subfolder of a git repo and inside the nos folder (e.g. `<project>/.claude/skills/nos`). It commits nothing in the project (the setup ability does that). Existing files are never changed, except appended `.gitignore` entries and the back-pointer. Warns on stderr when the specs root lies inside the checkout.
 
 ```sh
 $ nos init
 {
   "action": "init",
   "main": "D:/repo",
-  "specs": "D:/repo/.specs",
-  "created": ["D:/repo/nos.config.json", "D:/repo/.specs", "D:/repo/.specs/config.json", "D:/repo/.specs/.gitignore", "D:/repo/.specs/.git", "D:/repo/.specs/.gitattributes"],
+  "specs": "D:/repo.specs",
+  "created": ["D:/repo/nos.config.json", "D:/repo.specs", "D:/repo.specs/config.json", "D:/repo.specs/.gitignore", "D:/repo.specs/.git", "D:/repo.specs/.gitattributes"],
   "existing": [],
-  "gitignoreAdded": [".specs/", ".claude/worktrees/"],
-  "commit": "<sha of the first .specs commit, null when it existed>",
+  "gitignoreAdded": [".claude/worktrees/"],
+  "backPointer": { "project": "../repo", "written": true },
+  "commit": "<sha of the first specs commit, null when it existed>",
   "remote": null
 }
 ```
@@ -404,7 +409,7 @@ $ nos roots
   "home": "D:/repo/.claude/skills/nos",
   "work": "D:/repo/.claude/worktrees/quick-7",
   "main": "D:/repo",
-  "specs": "D:/repo/.specs",
+  "specs": "D:/repo.specs",
   "inWorktree": true,
   "configured": true
 }
@@ -428,9 +433,9 @@ $ nos create-domain --idea idea.md --slug user-auth --labels auth,ui
   "action": "create-domain",
   "id": 1,
   "folder": "domain-1-user-auth",
-  "path": "D:/repo/.specs/domain-1-user-auth",
-  "idea": "D:/repo/.specs/domain-1-user-auth/idea.md",
-  "domain": "D:/repo/.specs/domain-1-user-auth/domain.json"
+  "path": "D:/repo.specs/domain-1-user-auth",
+  "idea": "D:/repo.specs/domain-1-user-auth/idea.md",
+  "domain": "D:/repo.specs/domain-1-user-auth/domain.json"
 }
 ```
 
@@ -541,8 +546,8 @@ $ echo '{"slug":"fix-login-typo","intent":"Fix the typo on the login button"}' |
   "action": "create-quick-step",
   "domain": "domain-1-user-auth",
   "id": 7,
-  "path": "D:/repo/.specs/domain-1-user-auth/quick-steps/step-7-fix-login-typo.md",
-  "quick-steps": "D:/repo/.specs/domain-1-user-auth/quick-steps/quick-steps.json"
+  "path": "D:/repo.specs/domain-1-user-auth/quick-steps/step-7-fix-login-typo.md",
+  "quick-steps": "D:/repo.specs/domain-1-user-auth/quick-steps/quick-steps.json"
 }
 ```
 
@@ -567,7 +572,7 @@ $ nos set-status --domain domain-1-user-auth --step 1 --status in-review
 {
   "action": "set-status",
   "domain": "domain-1-user-auth",
-  "plan": "D:/repo/.specs/domain-1-user-auth/plan.json",
+  "plan": "D:/repo.specs/domain-1-user-auth/plan.json",
   "target": "step",
   "id": 1,
   "slug": "user-table",
@@ -587,12 +592,13 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 | Command | What it does |
 | --- | --- |
 | `nos chat` | Server address, version and sessions |
-| `nos chat open [--name n] [--no-open] [--reopen]` | Start the server if needed, open or resume the chat |
+| `nos chat open [--name n] [--no-open] [--reopen]` | Start the server if needed, open or resume the chat. `next_step`: relay mode → run `nos chat await` in the background; runner mode → the chat answers by itself, no await |
 | `nos chat await [--timeout-ms n]` | Block until the user writes or ends the chat; adds `next_step` |
 | `nos chat reply [--text t]` | Send a reply; stdin when `--text` is absent |
 | `nos chat typing [--state thinking\|typing\|idle]` | Presence shown in the page |
 | `nos chat pending` | Sessions with undelivered messages, read from disk |
 | `nos chat end` / `nos chat stop` | End the chat as the agent / shut the server down |
+| `nos chat start` | Start the server unless one of this version runs (`status` `running`: kept with its live tabs and runs; `started`: none ran or an outdated one was replaced). The spec-ui dev server calls it once per start |
 | `nos chat restart` | Shut the server down (running Claude Code runs stop) and start a fresh one |
 | `nos chat pair` | One-time pairing link for a phone (10 min, single use; approve the device on the PC) |
 | `nos chat devices [--approve id] [--deny id] [--revoke id] [--revoke-all]` | Paired devices |
@@ -605,7 +611,7 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
   Without `nos.config.json` in main every command fails with "nos is not set up in <main> …: run nos init" (the hook
   prints nothing). `status` and the server log print main with forward slashes.
 - State: `<specs>/.chat/` (`sessions.json`, `server.json`, `server.log`, `devices.json`, `audit.log`, `tls/`, and a
-  `.gitignore` of `*`; `.specs/.gitignore` of `nos init` ignores `.chat/` too). `src/chat/devices.js` and
+  `.gitignore` of `*`; `<specs>/.gitignore` of `nos init` ignores `.chat/` too). `src/chat/devices.js` and
   `src/chat/paths.js` (with `devices.d.ts` / `paths.d.ts`) are shared with the spec-ui dev server.
 - One server per project on 127.0.0.1, port `"chat": { "port" }` in `<specs>/config.json` (default 4611);
   a port held by another project's server gives a free port, recorded in `server.json` (`root` = main).
@@ -629,34 +635,34 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 
 ```
 <project>/
-├── nos.config.json             # project config (tracked), see "Config split"
-├── .gitignore                  # contains ".specs/" and ".claude/worktrees/"
-├── .claude/
-│   ├── skills/nos/             # NOS_HOME (tracked or ignored)
-│   ├── settings.local.json     # permissions + hook with absolute nos paths (never tracked)
-│   └── worktrees/quick-7/      # one git worktree per run, branch quick-7 / plan-<domain id>
-└── .specs/                     # specs root, its own git repo (branch main)
-    ├── .gitignore              # ".chat/", ".locks/", ".runs/"
-    ├── .gitattributes          # "* text=auto eol=lf" (nos init)
-    ├── config.json             # "id-counters" (managed by nos), "chat"
-    ├── .runs/                  # run registry (quick-7.json), gate logs (logs/)
-    ├── .locks/                 # merge, ids, slot-<n>
-    ├── .chat/                  # chat state
-    └── domain-1-user-auth/
-        ├── idea.md
-        ├── domain.json
-        ├── plan.json
-        ├── phases/
-        │   └── phase-1-data-model/
-        │       └── step-1-user-table.md
-        └── quick-steps/
-            ├── quick-steps.json
-            └── step-7-fix-login-typo.md
+├── nos.config.json             # project config (tracked), see "Config split"; specs.dir "../<project>.specs"
+├── .gitignore                  # contains ".claude/worktrees/"
+└── .claude/
+    ├── skills/nos/             # NOS_HOME (tracked or ignored)
+    ├── settings.local.json     # permissions (+ additionalDirectories: the specs root) with absolute paths (never tracked)
+    └── worktrees/quick-7/      # one git worktree per run, branch quick-7 / plan-<domain id>
+<project>.specs/                # specs root next to the checkout, its own git repo (branch main)
+├── .gitignore                  # ".chat/", ".locks/", ".runs/"
+├── .gitattributes              # "* text=auto eol=lf" (nos init)
+├── config.json                 # "project": "../<project>" (back-pointer), "id-counters" (managed by nos), "chat"
+├── .runs/                      # run registry (quick-7.json), gate logs (logs/)
+├── .locks/                     # merge, ids, slot-<n>
+├── .chat/                      # chat state
+└── domain-1-user-auth/
+    ├── idea.md
+    ├── domain.json
+    ├── plan.json
+    ├── phases/
+    │   └── phase-1-data-model/
+    │       └── step-1-user-table.md
+    └── quick-steps/
+        ├── quick-steps.json
+        └── step-7-fix-login-typo.md
 ```
 
 ### Migrating a project with tracked `specs/`
 
-A project with the old tracked `specs/` folder and `specs/...` spec-file values is not handled by the CLI (a legacy spec-file fails with "run the migration"). Migrate it once by hand, working tree clean, with the rehearsed steps 1–10 in `../ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": history split with `git filter-branch --prune-empty --subdirectory-filter specs` in a bare throw-away clone (not `git subtree split`, which leaks project history when `specs/` was deleted and re-added), `.specs/.gitattributes` before the pull, config split into `nos.config.json` and `.specs/config.json`, spec-file prefix dropped with a JSON-safe script, `specs/` untracked, `nos init --root <project>` for the missing `.gitignore` entries, `settings.local.json` with absolute paths, verify with `nos roots`.
+A project with the old tracked `specs/` folder and `specs/...` spec-file values is not handled by the CLI (a legacy spec-file fails with "run the migration"). Migrate it once by hand, working tree clean, with the rehearsed steps 1–10 in `../ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": history split with `git filter-branch --prune-empty --subdirectory-filter specs` in a bare throw-away clone (not `git subtree split`, which leaks project history when `specs/` was deleted and re-added), `<specs>/.gitattributes` before the pull (target: the sibling folder `../<project>.specs`), config split into `nos.config.json` (`specs.dir` `../<project>.specs`) and `<specs>/config.json`, spec-file prefix dropped with a JSON-safe script, `specs/` untracked, `nos init --root <project>` for the missing `.gitignore` entry and the back-pointer `project`, `settings.local.json` with absolute paths and `additionalDirectories`, verify with `nos roots`.
 
 Ids are global across the project. Phase and step counters are shared by all domains.
 
@@ -671,7 +677,7 @@ npm run test:watch  # rerun the tests on every change
 | ---------------- | ------------------------------------------------ |
 | `bin/nos.js`     | Executable entry point                           |
 | `src/cli.js`     | Argument parsing, help text, JSON output         |
-| `src/roots.js`   | Roots resolver, home guard, `SPECS_DIR`, spec-file checks (`roots.d.ts` for TypeScript) |
+| `src/roots.js`   | Roots resolver, back-pointer walk, home and specs guard, `defaultSpecsDir`, spec-file checks (`roots.d.ts` for TypeScript) |
 | `src/exit-codes.js` | Exit codes and `NosError`                     |
 | `src/git.js`     | `git(args, {cwd})`, `gitOut`, `gitAvailable`, `gitEnv` (`git.d.ts` for TypeScript) |
 | `src/project-config.js` | `nos.config.json` reader with defaults    |

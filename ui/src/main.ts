@@ -1,8 +1,8 @@
-// Entry of the live viewer (dev.html). The dev server reads the specs root (.specs/), the runs and the
+// Entry of the live viewer (dev.html). The dev server reads the specs root (<specs>), the runs and the
 // docs folder on the host (src/serve-specs.ts), so every device on the network sees the same data.
 // Reload fetches again; a change under any of them on the host refreshes by itself. While a run is
 // active the runs are fetched again every 15s too: ahead/behind and dirty change without a file event
-// in .specs. A poll that brings nothing new does not re-render. The chat panel (src/chat.ts) talks to
+// in <specs>. A poll that brings nothing new does not re-render. The chat panel (src/chat.ts) talks to
 // the project's Claude Code session through the same dev server.
 import { mountApp } from './app';
 import { mountChat } from './chat';

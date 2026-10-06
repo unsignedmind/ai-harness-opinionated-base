@@ -122,17 +122,20 @@ function get(port: number, path: string): Promise<{ code: number; body: unknown 
   });
 }
 
-// `nos chat restart`: the chat server of the project (main), fresh (its running Claude Code runs stop).
-// Resolves with the server address, or rejects with why it did not start.
-export function restartChatServer(main: string, cli = nosCli()): Promise<string> {
+// `nos chat start`: the chat server of the project (main). A running server of the CLI's version is kept
+// with its tabs and runs ('running'); none or an outdated one -> a fresh server ('started').
+// Resolves with the server address and what happened, or rejects with why it did not start.
+export type ChatStart = { server: string; status: 'running' | 'started' };
+export function startChatServer(main: string, cli = nosCli()): Promise<ChatStart> {
   return new Promise((done, fail) =>
-    execFile(process.execPath, [cli, 'chat', 'restart', '--root', main], { timeout: 20000 }, (err, stdout) => {
+    execFile(process.execPath, [cli, 'chat', 'start', '--root', main], { timeout: 20000 }, (err, stdout) => {
       try {
         const out = JSON.parse(stdout);
-        if (out.server) return done(String(out.server));
-        fail(new Error(out.error ?? 'nos chat restart failed'));
+        if (out.server)
+          return done({ server: String(out.server), status: out.status === 'running' ? 'running' : 'started' });
+        fail(new Error(out.error ?? 'nos chat start failed'));
       } catch {
-        fail(new Error(err?.message ?? 'nos chat restart failed'));
+        fail(new Error(err?.message ?? 'nos chat start failed'));
       }
     }),
   );

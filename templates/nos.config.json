@@ -1,6 +1,6 @@
 {
   "specs": {
-    "dir": ".specs",
+    "dir": null,
     "remote": null
   },
   "worktrees": {

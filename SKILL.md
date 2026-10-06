@@ -10,7 +10,9 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
         <rule>You only delegate, orchestrate and report the status to the user</rule>
         <rule>Do not read ability skills until the workflow instructs you to do so</rule>
         <rule>the workflow tells you what to do when. reading this first is mandatory</rule>
-        <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". <home> = this skill's base directory, or the "home" from "nos roots". Always forward slashes, after the first "nos roots" its "home" verbatim. Never rely on a linked "nos"</rule>
+        <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in every Bash call. <home> = this skill's base directory, or the "home" from "nos roots". Always forward slashes, after the first "nos roots" its "home" verbatim. Never through a shell variable, function or alias (worktree isolation refuses computed command names), never a linked "nos"</rule>
+        <rule>Never "cd <main> && git …" or "git -C <main>" from a worktree session: worktree isolation blocks git redirected into the main checkout. Git against main runs only inside nos commands</rule>
+        <rule>nos never pushes code; the user pushes</rule>
     </coreRules>
 
     <workflow>
@@ -19,7 +21,7 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
 
     <abilities>
         <ability name="setup">
-            <description>this skill sets up nos for the project: nos.config.json, the .specs repo, quality tools, project commands, slots and chat settings</description>
+            <description>this skill sets up nos for the project: nos.config.json, the specs repo (outside the checkout), quality tools, project commands, slots and chat settings</description>
             <skill>./abilities/setup.md</skill>
         </ability>
         <ability name="idea">

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -11,15 +11,19 @@ import { promoteHandler } from '../src/serve-specs';
 const CLI = resolve('../cli/bin/nos.js');
 // every test spawns nos several times (node + git): slow when other suites run at the same time
 const SPAWN_TIMEOUT = 30_000;
+// tmp holds the project and its default specs root, the sibling folder p.specs
+let tmp = '';
 let root = '';
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
 const nos = (args: string[], input?: string) =>
   JSON.parse(execFileSync(process.execPath, [CLI, ...args, '--root', root], { encoding: 'utf8', input }));
 
-// a project as nos init leaves it (nos.config.json, .specs/ as its own repo) with one unplanned domain
+// a project as nos init leaves it (nos.config.json, ../p.specs as its own repo) with one unplanned domain
 const setup = () => {
-  root = mkdtempSync(join(tmpdir(), 'nos-promote-'));
+  tmp = mkdtempSync(join(tmpdir(), 'nos-promote-'));
+  root = join(tmp, 'p');
+  mkdirSync(root);
   nos(['init']);
   const domain = nos(
     ['create-domain', '--idea', '-', '--slug', 'dark-mode', '--name', 'Dark mode theme'],
@@ -42,13 +46,13 @@ const call = (method: string, url: string) =>
   });
 
 test(
-  'POST /__promote runs nos create-plan --hollow in main, the idea gets an empty open plan in .specs',
+  'POST /__promote runs nos create-plan --hollow in main, the idea gets an empty open plan in the specs root',
   async () => {
     setup();
     const ok = await call('POST', '/__promote?domain=domain-1-dark-mode');
     expect(ok.status).toBe(200);
     expect(JSON.parse(ok.body)).toMatchObject({ action: 'create-plan', hollow: true, phases: [] });
-    expect(JSON.parse(readFileSync(join(root, '.specs/domain-1-dark-mode/plan.json'), 'utf8'))).toStrictEqual({
+    expect(JSON.parse(readFileSync(join(tmp, 'p.specs/domain-1-dark-mode/plan.json'), 'utf8'))).toStrictEqual({
       name: 'Dark mode theme',
       status: 'open',
       phases: [],

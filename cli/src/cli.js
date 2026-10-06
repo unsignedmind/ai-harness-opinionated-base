@@ -10,7 +10,7 @@ import { initProject } from './init.js';
 import { listLocks, lockStatus, publicHolder, releaseLock, takeLock } from './lock.js';
 import { createPlan } from './plan.js';
 import { createQuickStep } from './quick-step.js';
-import { homeGuard, NOS_HOME, resolveRoots, slash } from './roots.js';
+import { homeGuard, NOS_HOME, resolveRoots, slash, specsGuard } from './roots.js';
 import { abandonRun, cleanupRun, finishRun, startRun, syncRun } from './run.js';
 import { readRun, requireToken } from './runs.js';
 import { commitSpecs, domainOfTarget, findStep } from './specs-git.js';
@@ -22,7 +22,7 @@ export const USAGE = `nos - file manager for the nos harness
 Usage: nos <command> [options]
 
 Commands:
-  init               Set up the nos layout: nos.config.json, .specs/ (own git repo), .gitignore entries
+  init               Set up the nos layout: nos.config.json, the specs root (own git repo), .gitignore entry
   roots              Print the resolved roots: home, work, main, specs, inWorktree, configured
   create-domain      Reserve a domain id and create <specs>/domain-<id>-<slug>/idea.md
   create-plan        Save a plan.json in a domain and create its phase folders and step files
@@ -46,7 +46,8 @@ Options:
                      from the current directory, else the current directory)
 
 Roots: work = the checkout you sit in (main or a git worktree), main = the main checkout,
-specs = main + "specs.dir" of nos.config.json (default .specs). See "nos help roots".
+specs = main + "specs.dir" of nos.config.json (default ../<main folder name>.specs, outside the
+checkout). See "nos help roots".
 Every command except init and roots needs a project set up by nos init: without nos.config.json
 it fails with "nos is not set up here".
 Slugs are never generated: they must be lowercase kebab-case (e.g. user-auth).
@@ -63,15 +64,23 @@ Refused inside a git worktree (the layout belongs to the main checkout).
 Without nos.config.json and without --root / NOS_SPECS_ROOT, run it from the project root: refused
 in a subfolder of a git repo and inside the nos folder (e.g. <project>/.claude/skills/nos).
 
-  1. Creates nos.config.json from templates/nos.config.json of this nos if missing
-  2. Creates .specs/ (specs.dir) with config.json (id-counters, from templates/config.json)
-     and .gitignore (.chat/, .locks/, .runs/)
-  3. Git project: appends ".specs/" and ".claude/worktrees/" to the project .gitignore unless a
-     .gitignore of the repo already ignores them (e.g. ".claude/*"), in the file's line ending
-  4. Git available: "git init -b main" in .specs, first commit "nos: init",
+  1. Creates nos.config.json from templates/nos.config.json of this nos if missing, with
+     specs.dir written explicitly: "../<main folder name>.specs"
+  2. Creates the specs root (specs.dir; default the sibling folder <main>/../<name>.specs, outside
+     the checkout: Claude Code's worktree isolation refuses writes into the main checkout) with
+     config.json (id-counters from templates/config.json, plus "project": main relative to the specs
+     root, the back-pointer that lets nos roots work from inside the specs root) and .gitignore
+     (.chat/, .locks/, .runs/)
+  3. Git project: appends ".claude/worktrees/" (and "<specs.dir>/" only when the specs root lies inside
+     the project) to the project .gitignore unless a .gitignore of the repo already ignores them
+     (e.g. ".claude/*"), in the file's line ending
+  4. Git available: "git init -b main" in the specs root, first commit "nos: init",
      and "git remote add origin <specs.remote>" when specs.remote is set and origin is missing
      (an origin with another URL is reported as "mismatch", never changed)
-  Commits nothing in the project. Existing files are never changed (except appended .gitignore entries).
+  Commits nothing in the project. Existing files are never changed, except appended .gitignore entries
+  and a missing or stale "project" back-pointer in <specs>/config.json (left uncommitted when the
+  specs repo already has history: nos specs commit --config).
+  Warns on stderr when the specs root lies inside the checkout.
 
 Options:
   --root <dir>     Project root (default: see nos --help)
@@ -81,11 +90,12 @@ Example:
   {
     "action": "init",
     "main": "D:/repo",
-    "specs": "D:/repo/.specs",
-    "created": ["D:/repo/nos.config.json", "D:/repo/.specs", "D:/repo/.specs/config.json", ...],
+    "specs": "D:/repo.specs",
+    "created": ["D:/repo/nos.config.json", "D:/repo.specs", "D:/repo.specs/config.json", ...],
     "existing": [],
-    "gitignoreAdded": [".specs/", ".claude/worktrees/"],
-    "commit": "<sha of the first .specs commit, null when it existed>",
+    "gitignoreAdded": [".claude/worktrees/"],
+    "backPointer": { "project": "../repo", "written": true },
+    "commit": "<sha of the first specs commit, null when it existed>",
     "remote": null
   }`;
 
@@ -97,16 +107,19 @@ Print the roots every other command uses. The CLI is the only resolver of nos pa
   work        --root, else NOS_SPECS_ROOT, else the nearest folder with nos.config.json
               from the current directory, else the current directory. Main or a worktree.
               A walk that climbed out of a worktree (its branch has no nos.config.json yet)
-              is brought back into it
+              is brought back into it. A specs root on the way (config.json with "project")
+              answers with the project it points back to
   main        the main checkout: top of git's main worktree (+ the project's subfolder in
               the repo, if any). Not a git repo: work
-  specs       main + "specs.dir" of main's nos.config.json (default .specs)
+  specs       main + "specs.dir" of main's nos.config.json (relative to main or absolute;
+              default ../<main folder name>.specs, a sibling of the checkout)
   inWorktree  work is a linked git worktree of main
   configured  a nos.config.json exists in work or main (false: run nos init)
 
 Walking up to nos.config.json first makes nested repos harmless: from <main>/.claude/skills/nos
-or <main>/.specs the result is the project, not the nested repo.
-Warns on stderr when this nos is not <main>/.claude/skills/nos or lies under <main>/.claude/worktrees/.
+or the specs root the result is the project, not the nested repo.
+Warns on stderr when this nos is not <main>/.claude/skills/nos or lies under <main>/.claude/worktrees/,
+and when the specs root lies inside the checkout (worktree sessions cannot write it).
 
 Options:
   --root <dir>     Work root (default: see above)
@@ -118,7 +131,7 @@ Example:
     "home": "D:/repo/.claude/skills/nos",
     "work": "D:/repo/.claude/worktrees/quick-7",
     "main": "D:/repo",
-    "specs": "D:/repo/.specs",
+    "specs": "D:/repo.specs",
     "inWorktree": true,
     "configured": true
   }`;
@@ -145,9 +158,9 @@ Example:
     "action": "create-domain",
     "id": 1,
     "folder": "domain-1-user-auth",
-    "path": "D:/repo/.specs/domain-1-user-auth",
-    "idea": "D:/repo/.specs/domain-1-user-auth/idea.md",
-    "domain": "D:/repo/.specs/domain-1-user-auth/domain.json"
+    "path": "D:/repo.specs/domain-1-user-auth",
+    "idea": "D:/repo.specs/domain-1-user-auth/idea.md",
+    "domain": "D:/repo.specs/domain-1-user-auth/domain.json"
   }`;
 
 const CREATE_PLAN_HELP = `Usage: nos create-plan --domain <domain-<id>-<slug>> (--plan <file|-> | --hollow) [--root <dir>]
@@ -234,17 +247,17 @@ Example:
   {
     "action": "update-plan",
     "domain": "domain-1-user-auth",
-    "plan": "D:/repo/.specs/domain-1-user-auth/plan.json",
+    "plan": "D:/repo.specs/domain-1-user-auth/plan.json",
     "dryRun": false,
     "created": {
-      "phases": [{ "id": 3, "folder": "phase-3-sessions", "path": "D:/repo/.specs/.../phase-3-sessions" }],
-      "steps": [{ "id": 5, "path": "D:/repo/.specs/.../phase-3-sessions/step-5-session-store.md",
+      "phases": [{ "id": 3, "folder": "phase-3-sessions", "path": "D:/repo.specs/.../phase-3-sessions" }],
+      "steps": [{ "id": 5, "path": "D:/repo.specs/.../phase-3-sessions/step-5-session-store.md",
                   "specFile": "domain-1-user-auth/phases/phase-3-sessions/step-5-session-store.md" }]
     },
     "moved": [],
     "deleted": {
       "phases": [],
-      "steps": [{ "id": 2, "path": "D:/repo/.specs/.../phase-1-data-model/step-2-hashing.md", "empty": true }]
+      "steps": [{ "id": 2, "path": "D:/repo.specs/.../phase-1-data-model/step-2-hashing.md", "empty": true }]
     }
   moved entries: { "id", "from", "to" (absolute paths), "specFile" (the new spec-file) }
   }`;
@@ -278,8 +291,8 @@ Example:
     "action": "create-quick-step",
     "domain": "domain-1-user-auth",
     "id": 7,
-    "path": "D:/repo/.specs/domain-1-user-auth/quick-steps/step-7-fix-login-typo.md",
-    "quick-steps": "D:/repo/.specs/domain-1-user-auth/quick-steps/quick-steps.json"
+    "path": "D:/repo.specs/domain-1-user-auth/quick-steps/step-7-fix-login-typo.md",
+    "quick-steps": "D:/repo.specs/domain-1-user-auth/quick-steps/quick-steps.json"
   }`;
 
 const SET_STATUS_HELP = `Usage: nos set-status --domain <domain-<id>-<slug>> [--phase <id>] [--step <id>] --status <status> [--root <dir>]
@@ -320,7 +333,7 @@ Example:
   {
     "action": "set-status",
     "domain": "domain-1-user-auth",
-    "plan": "D:/repo/.specs/domain-1-user-auth/plan.json",
+    "plan": "D:/repo.specs/domain-1-user-auth/plan.json",
     "target": "step",
     "id": 3,
     "slug": "login-endpoint",
@@ -333,7 +346,7 @@ Example:
     "run": "quick-7",
     "domain": "domain-1-user-auth",
     "status": "merged",
-    "file": "D:/repo/.specs/domain-1-user-auth/quick-steps/quick-steps.json",
+    "file": "D:/repo.specs/domain-1-user-auth/quick-steps/quick-steps.json",
     "changes": [{ "target": "step", "id": 7, "slug": "fix-login-typo", "previous": "done", "status": "merged" }]
   }`;
 
@@ -383,9 +396,9 @@ Example:
              "phase": "develop", "started": "<iso>", "seen": "<iso>" },
     "token": "1a2b3c4d",
     "roots": { "home": "D:/repo/.claude/skills/nos", "work": "D:/repo/.claude/worktrees/quick-7",
-               "main": "D:/repo", "specs": "D:/repo/.specs" },
+               "main": "D:/repo", "specs": "D:/repo.specs" },
     "enter": "D:/repo/.claude/worktrees/quick-7",
-    "install": { "code": 0, "log": "D:/repo/.specs/.runs/logs/quick-7/install.log" },
+    "install": { "code": 0, "log": "D:/repo.specs/.runs/logs/quick-7/install.log" },
     "leftovers": null
   }`;
 
@@ -413,7 +426,7 @@ specs commit
     "committed": true,
     "sha": "<sha, null when nothing was staged>",
     "pushed": false,
-    "files": ["D:/repo/.specs/domain-2-auth/quick-steps/quick-steps.json", ...]
+    "files": ["D:/repo.specs/domain-2-auth/quick-steps/quick-steps.json", ...]
   }
 
 specs find-step
@@ -431,7 +444,7 @@ specs find-step
     "slug": "fix-login-typo",
     "intent": "Fix the typo on the login button",
     "status": "open",
-    "specFile": "D:/repo/.specs/domain-2-auth/quick-steps/step-7-fix-login-typo.md"
+    "specFile": "D:/repo.specs/domain-2-auth/quick-steps/step-7-fix-login-typo.md"
   }
   kind "plan": phase is the phase id.`;
 
@@ -462,7 +475,7 @@ Example:
     "pass": false,
     "tools": [
       { "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "signal": null, "timedOut": false,
-        "tail": "<last 60 lines>", "log": "D:/repo/.specs/.runs/logs/quick-7/test.log" },
+        "tail": "<last 60 lines>", "log": "D:/repo.specs/.runs/logs/quick-7/test.log" },
       { "name": "lint", "cmd": null, "status": "not-configured", "exit": null, "signal": null,
         "timedOut": false, "tail": "", "log": null }
     ]
@@ -499,7 +512,7 @@ broken automatically: --break is the user's call. --token falls back to NOS_RUN_
 
 Example:
   nos lock take merge --token 1a2b3c4d --run quick-7
-  { "action": "lock-take", "lock": "merge", "path": "D:/repo/.specs/.locks/merge",
+  { "action": "lock-take", "lock": "merge", "path": "D:/repo.specs/.locks/merge",
     "holder": { "run": "quick-7", "pid": 4242, "command": "lock take", "taken": "<iso>" },
     "reentrant": false }
   nos lock release merge --token 1a2b3c4d
@@ -524,6 +537,7 @@ const COMMANDS = {
         created: result.created.map(slash),
         existing: result.existing.map(slash),
         gitignoreAdded: result.gitignoreAdded,
+        backPointer: result.backPointer,
         commit: result.commit,
         remote: result.remote,
       };
@@ -908,6 +922,7 @@ export async function run(argv, io = {}) {
     action = command.action?.(positionals) ?? name;
     const roots = resolveRoots({ root: values.root, cwd, env, home });
     homeGuard(roots, stderr);
+    if (name === 'roots' || name === 'init') specsGuard(roots, stderr);
     if (!command.setsUp && !roots.configured) throw notSetUp(roots, cwd);
     const result = await command.execute(values, { cwd, env, readStdin, stderr }, roots, positionals);
     // raw: the command printed its own output (exec: the child's stdio) and resolved with its exit code

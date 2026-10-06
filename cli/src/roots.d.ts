@@ -6,7 +6,7 @@ export type Roots = {
   work: string;
   /** the main checkout of the project */
   main: string;
-  /** the specs root (main + specs.dir, default .specs) */
+  /** the specs root (main + specs.dir, default ../<main folder name>.specs) */
   specs: string;
   /** work is a linked git worktree of main */
   inWorktree: boolean;
@@ -20,13 +20,18 @@ export type Roots = {
   via: 'root' | 'env' | 'walk' | 'cwd';
 };
 
-export const SPECS_DIR: string;
+export const SPECS_SUFFIX: string;
 export const PROJECT_CONFIG_FILE: string;
 export const NOS_HOME: string;
 
 export function slash(p: string): string;
 export function isInside(child: string, parent: string): boolean;
 export function findWorkRoot(start: string): string | null;
+/** the default specs.dir of a project: ../<main folder name>.specs */
+export function defaultSpecsDir(main: string): string;
+/** the project a specs root points back to ({ main: null }: points to a folder without nos.config.json) */
+export function projectOfSpecs(dir: string): { main: string | null } | null;
+export function backPointerOf(roots: Pick<Roots, 'main' | 'specs'>): string;
 export function resolveRoots(options?: {
   root?: string;
   cwd?: string;
@@ -36,5 +41,6 @@ export function resolveRoots(options?: {
 /** the project folder inside a worktree of the project: <worktreeTop>/<roots.offset> */
 export function worktreeProjectDir(roots: Roots, worktreeTop: string): string;
 export function homeGuard(roots: Roots, stderr?: { write(text: string): unknown }): string[];
+export function specsGuard(roots: Roots, stderr?: { write(text: string): unknown }): string[];
 export function specFileOf(entry: unknown): string;
 export function specPath(roots: Roots, specFile: string): string;

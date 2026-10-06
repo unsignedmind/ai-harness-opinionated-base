@@ -220,3 +220,35 @@ test('restart: a fresh server process, the tabs survive', async (t) => {
   await nos(['stop'], { cwd: root });
   assert.equal((await nos(['restart'], { cwd: root })).json.status, 'restarted');
 });
+
+test('start: starts a server when none runs, keeps a running one of this version (same process, tabs live)', async (t) => {
+  const root = project(t);
+  t.after(() => nos(['stop'], { cwd: root }));
+  const serverJson = () => JSON.parse(readFileSync(files(stateOf(root)).server, 'utf8'));
+
+  const first = await nos(['start'], { cwd: root });
+  assert.equal(first.json.status, 'started');
+  const before = serverJson();
+  const open = await nos(['open', '--no-open'], { cwd: root });
+
+  const again = await nos(['start'], { cwd: root });
+  assert.equal(again.json.status, 'running');
+  assert.equal(again.json.server, first.json.server);
+  assert.equal(serverJson().pid, before.pid);
+  const tabs = (await request(before.port, 'GET', '/api/sessions')).body.tabs;
+  assert.deepEqual(
+    tabs.map((x) => x.key),
+    [open.json.key],
+  );
+});
+
+test('open in runner mode (the default): the next step says the chat answers by itself, no await', async (t) => {
+  const { root } = makeProject(t);
+  t.after(() => nos(['stop'], { cwd: root }));
+
+  const open = await nos(['open', '--no-open'], { cwd: root });
+
+  assert.equal(open.json.status, 'open');
+  assert.doesNotMatch(open.json.next_step, /^Run `nos chat await`/);
+  assert.match(open.json.next_step, /answers by itself/);
+});

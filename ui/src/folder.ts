@@ -1,7 +1,9 @@
 // Reads a folder (File System Access API in the standalone viewer, the disk on the dev server) into a
-// `path relative to the specs root -> text` map. Accepts the specs root (.specs/) itself or the project
-// folder that contains it (nos.config.json "specs" -> "dir", default .specs). Also reads the docs folder
-// named in the project's nos.config.json ("spec-ui" -> "docs-folder", relative to the project folder).
+// `path relative to the specs root -> text` map. Accepts the specs root itself, or a project folder whose
+// specs root lies inside it (nos.config.json "specs" -> "dir", or a .specs/ child). The default specs root
+// is the sibling folder ../<project>.specs: a picked folder cannot reach outside itself, so then the specs
+// folder itself must be picked (the error says which). Also reads the docs folder named in the project's
+// nos.config.json ("spec-ui" -> "docs-folder", relative to the project folder).
 
 export type FileLike = {
   kind: 'file';
@@ -15,7 +17,9 @@ export type DirLike = {
 };
 
 export const PROJECT_CONFIG_FILE = 'nos.config.json';
-export const DEFAULT_SPECS_DIR = '.specs';
+// a specs root inside the project folder without specs.dir (older layout)
+export const INNER_SPECS_DIR = '.specs';
+export const SPECS_SUFFIX = '.specs';
 export const DEFAULT_DOCS_FOLDER = 'docs';
 
 async function children(dir: DirLike) {
@@ -29,9 +33,10 @@ const isDomain = (h: FileLike | DirLike): h is DirLike => h.kind === 'directory'
 const fileIn = (kids: (FileLike | DirLike)[], name: string) =>
   kids.find((h): h is FileLike => h.kind === 'file' && h.name === name);
 
-// the project's nos.config.json, {} when missing or unreadable
-async function projectConfig(root: DirLike): Promise<Record<string, unknown>> {
-  const cfg = fileIn(await children(root), PROJECT_CONFIG_FILE);
+// a JSON object file of the folder (the project's nos.config.json, the specs root's config.json), {} when
+// missing or unreadable
+async function jsonOf(root: DirLike, name: string): Promise<Record<string, unknown>> {
+  const cfg = fileIn(await children(root), name);
   if (!cfg) return {};
   try {
     const v = JSON.parse(await (await cfg.getFile()).text());
@@ -41,13 +46,15 @@ async function projectConfig(root: DirLike): Promise<Record<string, unknown>> {
   }
 }
 
+const projectConfig = (root: DirLike) => jsonOf(root, PROJECT_CONFIG_FILE);
+
 const setting = (cfg: Record<string, unknown>, section: string, key: string) => {
   const v = (cfg[section] as Record<string, unknown> | undefined)?.[key];
   return typeof v === 'string' && v.trim() ? v.trim() : null;
 };
 
 // "a/b" -> ['a', 'b']; null for an empty path or one that leaves the folder. hidden: segments may
-// start with "." (the specs root .specs), else such a segment (.git, .specs, ..) is refused
+// start with "." (an inner specs root .specs), else such a segment (.git, .specs, ..) is refused
 function segments(path: string, hidden = false): string[] | null {
   const parts = path.split(/[\\/]/).filter((p) => p && p !== '.');
   if (!parts.length || parts.includes('..') || /^[A-Za-z]:$/.test(parts[0])) return null;
@@ -63,25 +70,53 @@ async function descend(dir: DirLike, parts: string[]): Promise<DirLike | null> {
   return dir;
 }
 
+const pathParts = (p: string) => p.split(/[\\/]/).filter((s) => s && s !== '.');
+
+// A specs root picked on its own, as the project sees it: its config.json "project" back-pointer
+// ("../moodo-poc") turns into the way back from the project ("../moodo-poc.specs"); else its own name.
+// Only a back-pointer of the form "../<path>" can be inverted from the folder name alone.
+async function relOfPickedSpecs(picked: DirLike): Promise<string> {
+  const project = (await jsonOf(picked, 'config.json')).project;
+  if (typeof project !== 'string') return picked.name;
+  const [up, ...down] = pathParts(project);
+  if (up !== '..' || down.includes('..')) return picked.name;
+  return '../'.repeat(down.length) + picked.name;
+}
+
+// the folder looks like a specs root: named .specs / <project>.specs, or config.json with id-counters
+async function isSpecsRoot(picked: DirLike, kids: (FileLike | DirLike)[]): Promise<boolean> {
+  if (picked.name.endsWith(SPECS_SUFFIX)) return true;
+  return fileIn(kids, 'config.json') ? 'id-counters' in (await jsonOf(picked, 'config.json')) : false;
+}
+
 // The specs root and the project folder it sits in (null when the specs root itself was picked).
-// The project folder is the one with nos.config.json; its "specs" -> "dir" names the specs root.
-// rel: the specs root relative to the project folder (".specs"); its own name when picked alone.
+// The project folder is the one with nos.config.json; its "specs" -> "dir" names the specs root, without it a
+// .specs/ child counts, else the default sibling ../<project>.specs, which a picked folder cannot reach.
+// rel: the specs root as the project sees it (".specs", "../moodo-poc.specs"); its own name when unknown.
 export async function locateSpecs(picked: DirLike): Promise<{ specs: DirLike; root: DirLike | null; rel: string }> {
   const kids = await children(picked);
-  if (kids.some(isDomain)) return { specs: picked, root: null, rel: picked.name };
+  if (kids.some(isDomain)) return { specs: picked, root: null, rel: await relOfPickedSpecs(picked) };
+  const inner = kids.find((h): h is DirLike => h.kind === 'directory' && h.name === INNER_SPECS_DIR);
   if (fileIn(kids, PROJECT_CONFIG_FILE)) {
-    const dir = setting(await projectConfig(picked), 'specs', 'dir') ?? DEFAULT_SPECS_DIR;
+    const configured = setting(await projectConfig(picked), 'specs', 'dir');
+    if (!configured && inner) return { specs: inner, root: picked, rel: INNER_SPECS_DIR };
+    const dir = configured ?? `../${picked.name}${SPECS_SUFFIX}`;
     const parts = segments(dir, true);
-    const specs = parts && (await descend(picked, parts));
+    if (!parts) {
+      const name = pathParts(dir).pop() ?? dir;
+      throw new Error(
+        `The specs root of "${picked.name}/" lies outside it (${dir}), out of the browser's reach from here: pick the specs folder ${name}/ instead.`,
+      );
+    }
+    const specs = await descend(picked, parts);
     if (specs) return { specs, root: picked, rel: parts.join('/') };
     throw new Error(`"${picked.name}/" has no ${dir}/ folder: run nos init there, or pick the specs folder itself.`);
   }
-  const specs = kids.find((h): h is DirLike => h.kind === 'directory' && h.name === DEFAULT_SPECS_DIR);
-  if (specs) return { specs, root: picked, rel: DEFAULT_SPECS_DIR };
+  if (inner) return { specs: inner, root: picked, rel: INNER_SPECS_DIR };
   // a specs root without any domain yet
-  if (picked.name === DEFAULT_SPECS_DIR) return { specs: picked, root: null, rel: picked.name };
+  if (await isSpecsRoot(picked, kids)) return { specs: picked, root: null, rel: await relOfPickedSpecs(picked) };
   throw new Error(
-    `"${picked.name}/" has no domain-* folders and no ${PROJECT_CONFIG_FILE}: pick the project folder or its ${DEFAULT_SPECS_DIR}/ folder.`,
+    `"${picked.name}/" has no domain-* folders and no ${PROJECT_CONFIG_FILE}: pick the project's specs folder (by default <project>${SPECS_SUFFIX}, next to the project folder).`,
   );
 }
 
@@ -140,7 +175,7 @@ export async function readDocs(specs: DirLike, root: DirLike | null): Promise<Do
     return {
       folder: DEFAULT_DOCS_FOLDER,
       files: {},
-      error: `${specs.name}/ was opened on its own. Open the project folder to see its docs as well.`,
+      error: `${specs.name}/ was opened on its own: the project's docs are out of its reach. The live viewer (npm run dev) shows them; so does the project folder when the specs root lies inside it.`,
     };
   const docsSetting = await docsFolderOf(root);
   const parts = segments(docsSetting);
