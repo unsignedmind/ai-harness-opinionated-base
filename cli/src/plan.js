@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { reserveIds, specsDir, SPECS_DIR } from './config.js';
+import { reserveIds, specsDir } from './config.js';
 import { defaultName, DOMAIN_FILE, IDEA_FILE } from './domain.js';
 import { assertSlug } from './slug.js';
-import { readValidStatuses, STATUS_FILE_PATH } from './status.js';
+import { readValidStatuses, statusFilePath } from './status.js';
 
 export const PLAN_FILE = 'plan.json';
 export const PHASES_DIR = 'phases';
@@ -29,14 +29,14 @@ export function parsePlan(plan, command = 'create-plan') {
   return parsed;
 }
 
-export function resolveDomain(root, domain, command = 'create-plan') {
+export function resolveDomain(roots, domain, command = 'create-plan') {
   if (!domain) {
     throw new Error(`Missing input: domain. ${command} requires a "domain-<id>-<slug>" folder name`);
   }
   if (!DOMAIN_PATTERN.test(domain)) {
     throw new Error(`Domain "${domain}" does not match "domain-<id>-<slug>"`);
   }
-  const domainDir = path.join(specsDir(root), domain);
+  const domainDir = path.join(specsDir(roots), domain);
   if (!existsSync(domainDir)) {
     throw new Error(`Domain folder ${domainDir} does not exist`);
   }
@@ -75,23 +75,23 @@ export function isHollowPlan(domainDir) {
 }
 
 // name from domain.json, else the idea heading; status: first plan status of status.xml (open)
-function hollowPlan(root, domainDir, domain) {
+function hollowPlan(roots, domainDir, domain) {
   const meta = readJsonOr(path.join(domainDir, DOMAIN_FILE), {});
   const ideaPath = path.join(domainDir, IDEA_FILE);
   const idea = existsSync(ideaPath) ? readFileSync(ideaPath, 'utf8') : '';
   const slug = domain.replace(/^domain-\d+-/, '');
   const name = (typeof meta?.name === 'string' && meta.name.trim()) || defaultName(idea, slug);
-  const status = existsSync(path.join(root, STATUS_FILE_PATH)) ? readValidStatuses(root).plans[0] : 'open';
+  const status = existsSync(statusFilePath(roots)) ? readValidStatuses(roots).plans[0] : 'open';
   return { name, status, phases: [] };
 }
 
-export function createPlan(root, { domain, plan, hollow = false } = {}) {
-  const domainDir = resolveDomain(root, domain);
+export function createPlan(roots, { domain, plan, hollow = false } = {}) {
+  const domainDir = resolveDomain(roots, domain);
   const planPath = path.join(domainDir, PLAN_FILE);
   if (hollow) {
     if (plan != null) throw new Error('create-plan --hollow takes no plan');
     if (existsSync(planPath)) throw new Error(`Domain ${domain} already has a plan.json`);
-    writeFileSync(planPath, JSON.stringify(hollowPlan(root, domainDir, domain), null, 2) + '\n');
+    writeFileSync(planPath, JSON.stringify(hollowPlan(roots, domainDir, domain), null, 2) + '\n');
     return { domain, planPath, phases: [], hollow: true };
   }
   const parsed = parsePlan(plan);
@@ -104,18 +104,18 @@ export function createPlan(root, { domain, plan, hollow = false } = {}) {
   mkdirSync(phasesDir, { recursive: true });
 
   const created = phases.map((phase) => {
-    const [phaseId] = reserveIds(root, 'phase');
+    const [phaseId] = reserveIds(roots, 'phase');
     const phaseFolder = `phase-${phaseId}-${phase.slug}`;
     const phaseDir = path.join(phasesDir, phaseFolder);
     mkdirSync(phaseDir);
 
     const steps = asList(phase.steps);
-    const stepIds = reserveIds(root, 'step', steps.length);
+    const stepIds = reserveIds(roots, 'step', steps.length);
     const createdSteps = steps.map((step, j) => {
       const file = `step-${stepIds[j]}-${step.slug}.md`;
       const stepPath = path.join(phaseDir, file);
       writeFileSync(stepPath, '');
-      step['spec-file'] = [SPECS_DIR, domain, PHASES_DIR, phaseFolder, file].join('/');
+      step['spec-file'] = [domain, PHASES_DIR, phaseFolder, file].join('/');
       return { id: stepIds[j], file, path: stepPath, specFile: step['spec-file'] };
     });
 

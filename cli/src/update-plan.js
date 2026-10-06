@@ -1,13 +1,15 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { peekIds, reserveIds, SPECS_DIR } from './config.js';
+import { peekIds, reserveIds } from './config.js';
 import { asList, parsePlan, resolveDomain, validatePlan, PHASES_DIR, PLAN_FILE } from './plan.js';
+import { slash, specFileOf, specPath } from './roots.js';
 
 const PHASE_FOLDER = /^phase-(\d+)-([a-z0-9-]+)$/;
 const STEP_FILE = /^step-(\d+)-([a-z0-9-]+)\.md$/;
 
 // Phases and steps as they exist on disk, the source of truth for what already exists.
-function scanPhases(root, domain, phasesDir) {
+// specFile is relative to the specs root, as stored in plan.json.
+function scanPhases(domain, phasesDir) {
   if (!existsSync(phasesDir)) return [];
   return readdirSync(phasesDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && PHASE_FOLDER.test(entry.name))
@@ -27,7 +29,7 @@ function scanPhases(root, domain, phasesDir) {
           id: Number(match[1]),
           file: child.name,
           path: stepPath,
-          specFile: [SPECS_DIR, domain, PHASES_DIR, entry.name, child.name].join('/'),
+          specFile: [domain, PHASES_DIR, entry.name, child.name].join('/'),
           empty: statSync(stepPath).size === 0,
         });
       }
@@ -40,7 +42,9 @@ function indexExisting(existing) {
   const stepsBySpec = new Map();
   for (const phase of existing) {
     if (phasesBySlug.has(phase.slug)) {
-      throw new Error(`Two phase folders use the slug "${phase.slug}": ${phasesBySlug.get(phase.slug).folder}, ${phase.folder}`);
+      throw new Error(
+        `Two phase folders use the slug "${phase.slug}": ${phasesBySlug.get(phase.slug).folder}, ${phase.folder}`,
+      );
     }
     phasesBySlug.set(phase.slug, phase);
     for (const step of phase.steps) stepsBySpec.set(step.specFile, step);
@@ -57,7 +61,7 @@ function matchPlan(phases, domain, { phasesBySlug, stepsBySpec }) {
     slugs.add(phase.slug);
 
     const steps = asList(phase.steps).map((step) => {
-      const specFile = String(step['spec-file'] ?? '').trim().replaceAll('\\', '/');
+      const specFile = specFileOf(step);
       if (!specFile) return { step, source: null };
       const source = stepsBySpec.get(specFile);
       if (!source) {
@@ -74,8 +78,8 @@ function matchPlan(phases, domain, { phasesBySlug, stepsBySpec }) {
   });
 }
 
-export function updatePlan(root, { domain, plan, force = false, dryRun = false } = {}) {
-  const domainDir = resolveDomain(root, domain, 'update-plan');
+export function updatePlan(roots, { domain, plan, force = false, dryRun = false } = {}) {
+  const domainDir = resolveDomain(roots, domain, 'update-plan');
   const parsed = parsePlan(plan, 'update-plan');
   const phases = validatePlan(parsed);
   const planPath = path.join(domainDir, PLAN_FILE);
@@ -84,7 +88,7 @@ export function updatePlan(root, { domain, plan, force = false, dryRun = false }
   }
 
   const phasesDir = path.join(domainDir, PHASES_DIR);
-  const existing = scanPhases(root, domain, phasesDir);
+  const existing = scanPhases(domain, phasesDir);
   const matched = matchPlan(phases, domain, indexExisting(existing));
 
   const keptPhases = new Set(matched.map((m) => m.existing).filter(Boolean));
@@ -98,7 +102,7 @@ export function updatePlan(root, { domain, plan, force = false, dryRun = false }
   ];
   if (withContent.length > 0 && !force) {
     throw new Error(
-      `The update would delete files with content: ${withContent.map((f) => rel(root, f)).join(', ')}. ` +
+      `The update would delete files with content: ${withContent.map(slash).join(', ')}. ` +
         'Keep their spec-file in the plan, or pass --force to delete them',
     );
   }
@@ -106,40 +110,41 @@ export function updatePlan(root, { domain, plan, force = false, dryRun = false }
   const takeIds = dryRun ? peekIds : reserveIds;
   const newPhaseCount = matched.filter((m) => !m.existing).length;
   const newStepCount = matched.reduce((n, m) => n + m.steps.filter((s) => !s.source).length, 0);
-  const phaseIds = newPhaseCount ? takeIds(root, 'phase', newPhaseCount) : [];
-  const stepIds = newStepCount ? takeIds(root, 'step', newStepCount) : [];
+  const phaseIds = newPhaseCount ? takeIds(roots, 'phase', newPhaseCount) : [];
+  const stepIds = newStepCount ? takeIds(roots, 'step', newStepCount) : [];
 
   const changes = { created: { phases: [], steps: [] }, moved: [], deleted: { phases: [], steps: [] } };
-  const specPath = (folder, file) => [SPECS_DIR, domain, PHASES_DIR, folder, file].join('/');
+  const specFileIn = (folder, file) => [domain, PHASES_DIR, folder, file].join('/');
   const operations = [];
 
   for (const { phase, existing: kept, steps } of matched) {
     const phaseId = kept ? kept.id : phaseIds.shift();
     const folder = kept ? kept.folder : `phase-${phaseId}-${phase.slug}`;
     if (!kept) {
-      changes.created.phases.push({ id: phaseId, folder, path: [SPECS_DIR, domain, PHASES_DIR, folder].join('/') });
+      changes.created.phases.push({ id: phaseId, folder, path: path.join(phasesDir, folder) });
       operations.push(() => mkdirSync(path.join(phasesDir, folder), { recursive: true }));
     }
     for (const { step, source } of steps) {
       const stepId = source ? source.id : stepIds.shift();
-      const target = specPath(folder, `step-${stepId}-${step.slug}.md`);
+      const target = specFileIn(folder, `step-${stepId}-${step.slug}.md`);
+      const targetPath = specPath(roots, target);
       if (!source) {
-        changes.created.steps.push({ id: stepId, path: target });
-        operations.push(() => writeFileSync(abs(root, target), ''));
+        changes.created.steps.push({ id: stepId, path: targetPath, specFile: target });
+        operations.push(() => writeFileSync(targetPath, ''));
       } else if (source.specFile !== target) {
-        changes.moved.push({ id: stepId, from: source.specFile, to: target });
-        operations.push(() => renameSync(source.path, abs(root, target)));
+        changes.moved.push({ id: stepId, from: source.path, to: targetPath, specFile: target });
+        operations.push(() => renameSync(source.path, targetPath));
       }
       step['spec-file'] = target;
     }
   }
 
   for (const step of removedSteps) {
-    changes.deleted.steps.push({ id: step.id, path: step.specFile, empty: step.empty });
+    changes.deleted.steps.push({ id: step.id, path: step.path, empty: step.empty });
     operations.push(() => rmSync(step.path));
   }
   for (const phase of removedPhases) {
-    changes.deleted.phases.push({ id: phase.id, folder: phase.folder, path: rel(root, phase.dir) });
+    changes.deleted.phases.push({ id: phase.id, folder: phase.folder, path: phase.dir });
     operations.push(() => rmSync(phase.dir, { recursive: true, force: true }));
   }
 
@@ -150,6 +155,3 @@ export function updatePlan(root, { domain, plan, force = false, dryRun = false }
   }
   return { domain, planPath, dryRun, ...changes };
 }
-
-const rel = (root, target) => path.relative(root, target).split(path.sep).join('/');
-const abs = (root, specFile) => path.join(root, ...specFile.split('/'));

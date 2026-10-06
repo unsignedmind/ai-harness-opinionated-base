@@ -12,6 +12,8 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 const setup = () => {
   root = mkdtempSync(join(tmpdir(), 'nos-promote-'));
+  // the CLI resolves the specs root from nos.config.json (default .specs); this fixture keeps specs/ until P6
+  writeFileSync(join(root, 'nos.config.json'), JSON.stringify({ specs: { dir: 'specs' } }));
   mkdirSync(join(root, 'specs/domain-1-dark-mode'), { recursive: true });
   writeFileSync(join(root, 'specs/domain-1-dark-mode/idea.md'), '# Idea: Dark mode\n');
   writeFileSync(join(root, 'specs/domain-1-dark-mode/domain.json'), JSON.stringify({ name: 'Dark mode theme' }));

@@ -1,15 +1,20 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { templatePath } from './config.js';
 import { asList, resolveDomain, PLAN_FILE } from './plan.js';
 import { quickStepId, quickStepsPath, readQuickSteps, writeQuickSteps } from './quick-step.js';
+import { slash, specFileOf } from './roots.js';
 
-export const STATUS_FILE_PATH = '.claude/skills/nos/templates/status.xml';
+export const STATUS_FILE = 'status.xml';
 const CATEGORIES = { plan: 'plans', phase: 'phases', step: 'steps' };
 
-export function readValidStatuses(root) {
-  const file = path.join(root, STATUS_FILE_PATH);
+// status.xml of the running nos (roots.home/templates)
+export const statusFilePath = (roots) => templatePath(roots, STATUS_FILE);
+
+export function readValidStatuses(roots) {
+  const file = statusFilePath(roots);
   if (!existsSync(file)) {
-    throw new Error(`Missing ${file}. set-status validates statuses against it`);
+    throw new Error(`Missing ${slash(file)}. set-status validates statuses against it`);
   }
   const xml = readFileSync(file, 'utf8');
   const section = (tag) => {
@@ -29,14 +34,17 @@ function parseId(value, label) {
   return id;
 }
 
-// Ids are not stored in plan.json; they are read back from each step's spec-file path.
+// Ids are not stored in plan.json; they are read back from each step's spec-file path
+// (relative to the specs root: <domain>/phases/phase-<id>-<slug>/step-<id>-<slug>.md).
 function idsOf(step) {
-  const specFile = step?.['spec-file'] ?? '';
-  const match = specFile.match(/\/phase-(\d+)-[^/]+\/step-(\d+)-[^/]+\.md$/);
+  const match = specFileOf(step).match(/\/phase-(\d+)-[^/]+\/step-(\d+)-[^/]+\.md$/);
   return match ? { phase: Number(match[1]), step: Number(match[2]) } : {};
 }
 
-const phaseId = (phase) => asList(phase.steps).map(idsOf).find((ids) => ids.phase)?.phase;
+const phaseId = (phase) =>
+  asList(phase.steps)
+    .map(idsOf)
+    .find((ids) => ids.phase)?.phase;
 
 function findPhase(phases, id) {
   const phase = phases.find((p) => phaseId(p) === id);
@@ -61,19 +69,21 @@ function findStep(phases, id, inPhase) {
     const step = asList(phase.steps).find((s) => idsOf(s).step === id);
     if (step) return step;
   }
-  throw new Error(inPhase ? `Step ${id} is not in phase ${phaseId(inPhase)}` : `Step ${id} is not in this plan or its quick steps`);
+  throw new Error(
+    inPhase ? `Step ${id} is not in phase ${phaseId(inPhase)}` : `Step ${id} is not in this plan or its quick steps`,
+  );
 }
 
-export function setStatus(root, { domain, phase, step, status } = {}) {
+export function setStatus(roots, { domain, phase, step, status } = {}) {
   if (typeof status !== 'string' || !status.trim()) {
     throw new Error('Missing input: status. set-status requires the new status');
   }
-  const domainDir = resolveDomain(root, domain, 'set-status');
+  const domainDir = resolveDomain(roots, domain, 'set-status');
   const phaseNumber = parseId(phase, 'phase');
   const stepNumber = parseId(step, 'step');
 
   const target = stepNumber ? 'step' : phaseNumber ? 'phase' : 'plan';
-  const allowed = readValidStatuses(root)[CATEGORIES[target]];
+  const allowed = readValidStatuses(roots)[CATEGORIES[target]];
   if (!allowed.includes(status)) {
     throw new Error(`Invalid status "${status}" for a ${target}. Valid statuses: ${allowed.join(', ')}`);
   }
@@ -89,7 +99,16 @@ export function setStatus(root, { domain, phase, step, status } = {}) {
       const previous = quick.status;
       quick.status = status;
       writeQuickSteps(domainDir, quickSteps);
-      return { domain, planPath: quickStepsPath(domainDir), target, id: stepNumber, slug: quick.slug, previous, status, quick: true };
+      return {
+        domain,
+        planPath: quickStepsPath(domainDir),
+        target,
+        id: stepNumber,
+        slug: quick.slug,
+        previous,
+        status,
+        quick: true,
+      };
     }
     if (!plan) throw new Error(`Step ${stepNumber} is not a quick step of ${domain} and the domain has no plan.json`);
   }
@@ -100,7 +119,7 @@ export function setStatus(root, { domain, phase, step, status } = {}) {
 
   const phases = asList(plan.phases);
   const parentPhase = phaseNumber ? findPhase(phases, phaseNumber) : undefined;
-  const item = target === 'step' ? findStep(phases, stepNumber, parentPhase) : parentPhase ?? plan;
+  const item = target === 'step' ? findStep(phases, stepNumber, parentPhase) : (parentPhase ?? plan);
 
   const previous = item.status;
   item.status = status;
@@ -116,4 +135,3 @@ export function setStatus(root, { domain, phase, step, status } = {}) {
     status,
   };
 }
-

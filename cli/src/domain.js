@@ -21,11 +21,14 @@ export function parseLabels(labels) {
 
 // first "# " heading of the idea without an "Idea:" prefix, else the slug
 export function defaultName(idea, slug) {
-  const heading = /^#\s+(.+)$/m.exec(idea)?.[1].replace(/^idea:\s*/i, '').trim();
+  const heading = /^#\s+(.+)$/m
+    .exec(idea)?.[1]
+    .replace(/^idea:\s*/i, '')
+    .trim();
   return heading || slug.replaceAll('-', ' ');
 }
 
-export function createDomain(root, { idea, slug, name, labels } = {}) {
+export function createDomain(roots, { idea, slug, name, labels } = {}) {
   if (typeof idea !== 'string' || !idea.trim()) {
     throw new Error('Missing input: idea. create-domain requires the idea content');
   }
@@ -36,8 +39,8 @@ export function createDomain(root, { idea, slug, name, labels } = {}) {
     'cross-cutting': false,
   };
 
-  const { specsDir } = ensureSpecs(root);
-  const [id] = reserveIds(root, 'domain');
+  const { specsDir } = ensureSpecs(roots);
+  const [id] = reserveIds(roots, 'domain');
   const folder = `domain-${id}-${slug}`;
   const domainPath = path.join(specsDir, folder);
 

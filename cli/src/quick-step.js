@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { reserveIds, SPECS_DIR } from './config.js';
+import { reserveIds } from './config.js';
 import { resolveDomain } from './plan.js';
+import { specFileOf } from './roots.js';
 import { assertSlug } from './slug.js';
 
 export const QUICK_STEPS_DIR = 'quick-steps';
@@ -29,8 +30,9 @@ export function writeQuickSteps(domainDir, steps) {
   writeFileSync(quickStepsPath(domainDir), JSON.stringify(steps, null, 2) + '\n');
 }
 
+// The id is read from the spec-file (relative to the specs root): <domain>/quick-steps/step-<id>-<slug>.md
 export function quickStepId(step) {
-  const match = (step?.['spec-file'] ?? '').match(/\/quick-steps\/step-(\d+)-[^/]+\.md$/);
+  const match = specFileOf(step).match(/\/quick-steps\/step-(\d+)-[^/]+\.md$/);
   return match ? Number(match[1]) : undefined;
 }
 
@@ -46,8 +48,8 @@ function parseStep(step) {
   }
 }
 
-export function createQuickStep(root, { domain, step } = {}) {
-  const domainDir = resolveDomain(root, domain, 'create-quick-step');
+export function createQuickStep(roots, { domain, step } = {}) {
+  const domainDir = resolveDomain(roots, domain, 'create-quick-step');
   const parsed = parseStep(step);
   if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Quick step must be a single JSON object');
@@ -58,7 +60,7 @@ export function createQuickStep(root, { domain, step } = {}) {
   }
   const steps = readQuickSteps(domainDir);
 
-  const [id] = reserveIds(root, 'step');
+  const [id] = reserveIds(roots, 'step');
   const file = `step-${id}-${parsed.slug}.md`;
   const dir = path.join(domainDir, QUICK_STEPS_DIR);
   mkdirSync(dir, { recursive: true });
@@ -73,7 +75,7 @@ export function createQuickStep(root, { domain, step } = {}) {
     description: '',
     ...parsed,
     status: 'open',
-    'spec-file': [SPECS_DIR, domain, QUICK_STEPS_DIR, file].join('/'),
+    'spec-file': [domain, QUICK_STEPS_DIR, file].join('/'),
   };
   steps.push(saved);
   writeQuickSteps(domainDir, steps);
