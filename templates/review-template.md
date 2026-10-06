@@ -12,7 +12,7 @@ One or two sentences: what was checked, what stands out
 - ( ) F2 should-fix · quality · src/cart/total.ts:10: what is wrong and the evidence → suggested fix · judgment
 
 ### Fixes
-- F1: what changed (abc1234)
+- F1: what changed (step-12:)
 
 <rules>
     <rule>ACn is the nth AC of the spec. Phase review → S<step id>-AC<n> across all its steps</rule>
@@ -22,5 +22,6 @@ One or two sentences: what was checked, what stands out
     <rule>should-fix: naming, style, missed optimization, missing non-critical test</rule>
     <rule>mechanical: local fix, no behavior decision. judgment: needs a decision or changes behavior</rule>
     <rule>Findings marked by review-fixing: (x) fixed, (!) not fixable, out of scope or needs a user decision</rule>
+    <rule>Fixes reference the commit prefix (step-<id>: or phase-<id>:), never a sha: shas change on rebase</rule>
     <rule>Leave out Findings when there are none, Criteria when there is no spec, Fixes until review-fixing writes it</rule>
 </rules>

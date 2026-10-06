@@ -1,17 +1,16 @@
 # nos-cli
 
-File manager CLI for the nos harness. `nos` manages the specs root of a project (`.specs/`, its own git repo): it hands out ids from a counter, creates domain and phase folders, and lays out empty spec files for each step of a plan. It is also the only resolver of nos paths (`nos roots`).
+File manager and git driver CLI for the nos harness. `nos` manages the specs root of a project (`.specs/`, its own git repo): it hands out ids from a counter, creates domain and phase folders, and lays out empty spec files for each step of a plan. It is also the only resolver of nos paths (`nos roots`) and owns every git mechanic of a run: branch + worktree per plan or quick step, rebase, quality gate, ff-only merge, locks and the specs commits.
 
 It uses no dependencies and needs Node.js 20 or newer.
 
 ## Installation
 
 ```sh
-npm install
-npm link        # makes the `nos` command available globally
+npm install     # no dependencies; nothing else to install
 ```
 
-You can also run it without linking: `node bin/nos.js <command>`. Orchestrator and abilities always call it by absolute path: `node <home>/cli/bin/nos.js`.
+Invocation: `nos` = `node <home>/cli/bin/nos.js`, `<home>` = the nos folder (e.g. `D:/repo/.claude/skills/nos`). Orchestrator, abilities, hooks and permissions always use this absolute form; they never rely on a linked `nos` (`npm link` still works for your own terminal). In this README `nos` stands for that call. Runs need git.
 
 ## Usage
 
@@ -29,7 +28,13 @@ nos <command> --help
 | `create-plan`       | Save a `plan.json` in a domain and create its phase folders and step files (`--hollow`: empty plan, promotes unplanned) |
 | `update-plan`       | Save an updated `plan.json` and create, move or delete phases and steps     |
 | `create-quick-step` | Add a quick step (one step outside any plan) to a domain                    |
-| `set-status`        | Change the status of a plan, phase, step or quick step                      |
+| `set-status`        | Change the status of a plan, phase, step or quick step (`--run`: merged/discarded for a whole run) |
+| `run start\|sync\|finish\|cleanup\|abandon` | Run lifecycle: branch + worktree, rebase onto main, gate + ff-only merge, removal |
+| `gate`              | Run the quality tools of the checkout's `nos.config.json`, JSON per tool    |
+| `exec`              | Run a project command (`install`, `dev`, `deploy-test`)                     |
+| `specs commit`      | Commit the specs of one run or domain in `.specs`                           |
+| `specs find-step`   | Find the spec file of a step id in any domain                              |
+| `lock`              | Take, release or show a lock (`merge`, `ids`, `slot-<n>`)                   |
 
 General rules:
 
@@ -39,6 +44,7 @@ General rules:
 - Results are printed to stdout as JSON. Every path in a result is absolute with forward slashes (`D:/repo/.specs/...`). Errors go to stderr.
 - `spec-file` fields in `plan.json` / `quick-steps.json` are relative to the specs root, e.g. `domain-1-user-auth/phases/phase-1-data-model/step-1-user-table.md`. A value with the old `specs/` prefix fails with "legacy spec-file … run the migration" (exit 1).
 - Templates (`config.json`, `nos.config.json`, `status.xml`) are read from `<home>/templates/` of the running nos, never from a copy in the project.
+- Every command except `roots`, `help` and `init` refuses to run without a `nos.config.json` ("run nos init").
 
 ### Roots
 
@@ -78,6 +84,153 @@ Home guard: when `<main>/.claude/skills/nos` exists and is not this nos, or this
 | `7`  | Timeout waiting for a slot                     |
 
 For codes 3–7 stdout also gets `{ "action", "error", "exit", "details" }` (details: holder, file lists) and stderr one line. Codes and `NosError` live in `src/exit-codes.js`.
+
+How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the same command again. 4 / 6 → report holder and age, the user decides (`--take-over` or stop). 5 → commit the leftover work with the current step prefix, or park. 7 and 1 → park and report.
+
+### Process model
+
+- A session (terminal or chat tab) starts in main. Picking a plan or quick step starts a **run**: `nos run start` creates branch `<kind>-<id>` and the worktree `<main>/.claude/worktrees/<kind>-<id>`, and prints a run token. The session then enters the worktree (`EnterWorktree path=<enter>`); subagents, tests and code commits land there.
+- Run ids: `plan-<domain id>` (one plan per domain) and `quick-<step id>`. One run per domain, one run per session.
+- The specs stay central in `<main>/.specs`, shared by all worktrees. Only the orchestrator commits them (`nos specs commit`), subagents never run git against `.specs`.
+- Code commits carry a subject prefix with a colon: `step-<id>: `, `phase-<id>: `, `architect: `, `setup: `. Code and specs are linked by that prefix, never by a sha (shas change on rebase).
+- Main moves only by `nos run finish` (ff-only, under the merge lock). Exceptions: setup and architect commit directly when run on main.
+- Run merged → the session leaves the worktree (`ExitWorktree`, keep), then `nos run cleanup` removes worktree and branch. Windows cannot delete a folder a process sits in, hence the order.
+
+### Run registry, token and locks
+
+`<specs>/.runs/<kind>-<id>.json`, one file per run (ignored by the `.specs` repo):
+
+```json
+{ "kind": "quick", "id": 7, "domain": "domain-2-auth", "branch": "quick-7",
+  "worktree": "D:/repo/.claude/worktrees/quick-7", "base": "<main sha the branch builds on>", "mainBranch": "main",
+  "token": "<8 hex>", "started": "<iso>", "seen": "<iso>",
+  "phase": "develop | integrate | gate | merge | merged | abandoned" }
+```
+
+- **Token = holder.** `run start` mints it. Every mutating run command needs `--token <t>` (fallback env `NOS_RUN_TOKEN`). Missing → exit 1 "--token required", another token → exit 4. Every token call updates `seen`. Cooperative guard for solo use, not a security boundary.
+- **Locks:** `<specs>/.locks/<name>/holder.json`, created by `mkdir` (atomic). Holder `{run, token, pid, command, taken}`. Reentrant for the same token, so a crashed `finish` resumes. Never broken automatically; `--break` is the user's call. Names: `merge` (finish), `ids` (id counters, CLI internal), `slot-<n>` (gate e2e, exec dev).
+
+### `run start`
+
+```sh
+nos run start --domain <domain> (--plan | --quick <stepId>) [--token <t>] [--take-over]
+```
+
+1. Needs git. Validates the target: a plan with at least one phase and status not merged/discarded, or an existing quick step.
+2. Run file exists: same token → idempotent resume (recreates a missing worktree). Other token → exit 4 with holder and age. `--take-over` → new token.
+3. Another run in the same domain → exit 6.
+4. Uncommitted specs of this domain (leftovers of a crashed session) → committed as `<run>: leftovers`, reported.
+5. Branch `<kind>-<id>` (reused, or created from the current main branch), `git worktree add <main>/.claude/worktrees/<kind>-<id>`, run file with `base` and `phase: develop`, `branch` written into `plan.json` / the quick step entry.
+6. `project-commands.install` in the worktree. A failure is reported; the run stays.
+
+```json
+{ "action": "run-start", "run": "quick-7", "token": "1a2b3c4d",
+  "roots": { "home": "D:/repo/.claude/skills/nos", "work": "D:/repo/.claude/worktrees/quick-7", "main": "D:/repo", "specs": "D:/repo/.specs" },
+  "enter": "D:/repo/.claude/worktrees/quick-7" }
+```
+
+### `run sync`
+
+```sh
+nos run sync --token <t>
+```
+
+Rebases the run branch onto the main branch, in the worktree. Rebase already in progress → 3 with the unmerged files. Dirty worktree → 5 with the files (never autostashed). Conflict → 3 with the conflict list, the rebase is left open for the `integrate` ability. Clean → updates `base` and prints `{ahead, behind, base}`.
+
+### `run finish`
+
+```sh
+nos run finish --token <t>
+```
+
+Precondition: the plan or quick step has status `done` (else 1). Then, under lock `merge`, recorded in the run file's `phase`:
+
+1. `phase=integrate`.
+2. Main busy (`MERGE_HEAD`, `REBASE_HEAD`, `CHERRY_PICK_HEAD`) → release, 1.
+3. Main dirty on the paths the branch touches → release, 1 with the list.
+4. Sync → 3 or 5 → release, same code.
+5. `phase=gate`: the full gate, e2e included when configured. Fail → release, 1, gate JSON in `details`.
+6. `phase=merge`: `git -C <main> merge --ff-only <branch>`. Refused → back to 4 once, then 1.
+7. `set-status --run <run> merged`, `specs commit "<run>: merged"`, `phase=merged`, release.
+
+A crash resumes: the same token re-takes its own lock and continues at the recorded phase. Main is never pushed.
+
+### `run cleanup`
+
+```sh
+nos run cleanup --token <t>
+```
+
+Run from main, never from inside the worktree (refused: "ExitWorktree keep first"). Needs `phase` `merged` or `abandoned`. Removes the worktree, deletes the branch (`-d` merged, `-D` abandoned) and the run file. The `branch` field stays in the specs as history. A Windows lock error hints at a running dev server. Prints `{"action": "run-cleanup", …}`.
+
+### `run abandon`
+
+```sh
+nos run abandon --token <t>
+```
+
+`set-status --run <run> discarded`, `specs commit`, `phase=abandoned`, then the cleanup. Cleanup can be retried. Prints `{"action": "run-abandon", …}`.
+
+### `set-status --run`
+
+```sh
+nos set-status --run <kind>-<id> merged|discarded
+```
+
+Flips a whole run in one write per file. Plan merged: plan `done → merged`, steps `done → merged`, phases unchanged. Plan discarded: plan and every step not merged → `discarded`. Quick: the step `done → merged`, or any status except merged → `discarded`. A violation → 1. Plain `set-status --status merged|discarded` is refused: only `run finish` and `run abandon` call it.
+
+### `gate`
+
+```sh
+nos gate [--e2e]
+```
+
+Runs the `quality-tools` of the work root's `nos.config.json` in the work root: test, lint, format-check, typecheck, each `additional` entry, then e2e with `--e2e`. Every tool runs, also after a failure. Env: `NOS_HOME`, and `NOS_SLOT` for e2e, which runs under a slot lease. Full logs in `<specs>/.runs/logs/<run|main>/<tool>.log`.
+
+```json
+{ "action": "gate", "pass": false,
+  "tools": [{ "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "tail": "<last 60 lines>", "log": "D:/repo/.specs/.runs/logs/quick-7/test.log" }] }
+```
+
+`status`: `pass`, `fail`, `not-configured`. Exit 1 on any fail or when `quality-tools` is missing ("not set up"), 7 when no slot is free within `slotWait`.
+
+### `exec`
+
+```sh
+nos exec <install|dev|deploy-test>
+```
+
+Runs the work root's `project-commands` entry with stdio inherited; the exit code is the command's. `dev` holds a slot lease (`NOS_SLOT`) until the server exits and forwards Ctrl+C. A `null` command → 1, an unknown name → 2, no slot within `slotWait` → 7.
+
+### Slots
+
+A slot is a lease on a set of ports: `<specs>/.locks/slot-<n>`, `n` in `1..worktrees.slots`. `gate --e2e` and `exec dev` take the smallest free one, poll every 2s up to `worktrees.slotWait` seconds, then exit 7. The project derives ports from `NOS_SLOT` (e.g. dev `5173 + NOS_SLOT`).
+
+### `specs commit`
+
+```sh
+nos specs commit (--run <kind>-<id> | --domain <domain>) -m "<message>"
+```
+
+`git -C <specs> add config.json <domain dir>` and a commit when anything is staged. Never `add -A`: exact because one run owns its domain. Retries a held `index.lock` (5×). Pushes when `specs.remote` is set (a failed push is a warning). `--domain` is for idea, plan and quick step creation outside a run. Prints `{committed, sha, pushed}`.
+
+Messages: `step-<id>: <ability>`, `phase-<id>: <ability>` inside a run, `<ability>: <domain>` outside.
+
+### `specs find-step`
+
+```sh
+nos specs find-step <id>
+```
+
+Scans every `domain-*/plan.json` and `quick-steps.json`. Prints `{domain, kind, phase, step, specFile}` (`specFile` absolute). Not found → 1. Used by the `integrate` ability to read the specs behind the `step-<id>:` commits already on main.
+
+### `lock`
+
+```sh
+nos lock take|release|status <name> --token <t> [--break]
+```
+
+Manual access to the locks above. `release` needs the holder's token, or `--break` (the user's decision, e.g. a stale holder after a crash). A held lock → 4 with `{holder, ageSec, pidAlive}`.
 
 ### `init`
 
@@ -312,13 +465,15 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 | `nos chat server [--port n]` | Run the server in the foreground |
 | `nos chat hook` | Stop hook (relay mode only): hands queued messages to Claude Code |
 
-- The project root is the nearest folder with `specs/` from the current directory (or `--root`).
-- State: `specs/.chat/` (`sessions.json`, `server.json`, `server.log`, `devices.json`, `audit.log`, `tls/`, and a
-  `.gitignore` of `*`). `src/chat/devices.js` (with `devices.d.ts`) is shared with the spec-ui dev server.
-- One server per project on 127.0.0.1, port `"chat": { "port" }` in `specs/config.json` (default 4611);
+- The project is resolved like every command (`nos roots`): main, also when called from a run's worktree.
+- State: `<specs>/.chat/` (`sessions.json`, `server.json`, `server.log`, `devices.json`, `audit.log`, `tls/`), ignored
+  by the `.specs` repo. `src/chat/devices.js` (with `devices.d.ts`) is shared with the spec-ui dev server.
+- One server per project on 127.0.0.1, port `"chat": { "port" }` in `<specs>/config.json` (default 4611);
   a port held by another project's server gives a free port, recorded in `server.json`.
-- `"chat"` in `specs/config.json`: `port`, `runner` (default true), `permissionMode` (default `auto`), `model`,
+- `"chat"` in `<specs>/config.json`: `port`, `runner` (default true), `permissionMode` (default `auto`), `model`,
   `claude` (path of the executable).
+- Permissions and the relay Stop hook live in the project's `.claude/settings.local.json` with the absolute
+  `node <home>/cli/bin/nos.js chat …` (written by the setup ability).
 - Env for tests: `NOS_CHAT_STATE_DIR`, `NOS_CHAT_PORT`, `NOS_CHAT_IDLE_MS` (`0`/`off` disables the 30 min idle exit).
 - Design: `../ui/requirements/Technical design local web chat for Claude Code.md` and
   `../ui/requirements/Concept spec-ui chat integration.md`.
@@ -329,9 +484,16 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 <project>/
 ├── nos.config.json             # project config (tracked), see "Config split"
 ├── .gitignore                  # contains ".specs/" and ".claude/worktrees/"
+├── .claude/
+│   ├── skills/nos/             # NOS_HOME (tracked or ignored)
+│   ├── settings.local.json     # permissions + hook with absolute nos paths (never tracked)
+│   └── worktrees/quick-7/      # one git worktree per run, branch quick-7 / plan-<domain id>
 └── .specs/                     # specs root, its own git repo (branch main)
     ├── .gitignore              # ".chat/", ".locks/", ".runs/"
     ├── config.json             # "id-counters" (managed by nos), "chat"
+    ├── .runs/                  # run registry (quick-7.json), gate logs (logs/)
+    ├── .locks/                 # merge, ids, slot-<n>
+    ├── .chat/                  # chat state
     └── domain-1-user-auth/
         ├── idea.md
         ├── domain.json
@@ -344,7 +506,9 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
             └── step-7-fix-login-typo.md
 ```
 
-Migration note: a project with the old tracked `specs/` folder and `specs/...` spec-file values is not handled by the CLI; it is migrated once by hand (see `../ui/requirements/Concept specs repo and worktrees.md`, "Migration").
+### Migrating a project with tracked `specs/`
+
+A project with the old tracked `specs/` folder and `specs/...` spec-file values is not handled by the CLI (a legacy spec-file fails with "run the migration"). Migrate it once by hand, working tree clean, with the steps 1–10 in `../ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": history split into `.specs`, config split into `nos.config.json` and `.specs/config.json`, spec-file prefix dropped, `specs/` untracked, `settings.local.json` with absolute paths, verify with `nos roots`.
 
 Ids are global across the project. Phase and step counters are shared by all domains.
 
@@ -369,6 +533,14 @@ npm run test:watch  # rerun the tests on every change
 | `src/plan.js`    | `create-plan`                                    |
 | `src/update-plan.js` | `update-plan`                                |
 | `src/quick-step.js` | `create-quick-step`, `quick-steps.json` access |
-| `src/status.js`  | `set-status` and `status.xml` parsing            |
+| `src/status.js`  | `set-status` (also `--run`) and `status.xml` parsing |
+| `src/run.js`     | `run start\|sync\|finish\|cleanup\|abandon`     |
+| `src/runs.js`    | Run registry, tokens                             |
+| `src/lock.js`    | `mkdir` locks, `lock` command                    |
+| `src/slots.js`   | Slot leases, `NOS_SLOT`                          |
+| `src/gate.js`    | `gate`                                           |
+| `src/exec.js`    | `exec`                                           |
+| `src/specs-git.js` | `specs commit`, `specs find-step`              |
+| `src/proc.js`    | Process tree kill (Windows `taskkill /T /F`)     |
 | `src/slug.js`    | Slug validation                                  |
 | `src/chat/`     | `nos chat`: session store, server, guard, page, client, Stop hook |
