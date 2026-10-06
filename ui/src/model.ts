@@ -82,6 +82,9 @@ export type Model = {
   // folder, nos.config.json specs.dir), absolute only on another drive; spec paths shown to the user and to
   // Claude start with it
   specsRel: string;
+  // the specs root as an absolute path with forward slashes ('' when unknown: the standalone viewer). Paths sent
+  // to Claude use it, because a chat session may sit in a worktree where specsRel does not lead to the specs
+  specsAbs: string;
 };
 
 // fallback when the loader names none (tests, an older dev server)
@@ -174,6 +177,7 @@ export function buildModel(
   input: Record<string, string>,
   runs: Run[] = [],
   specsRel: string = DEFAULT_SPECS_REL,
+  specsAbs = '',
 ): Model {
   const files = new Map<string, string>();
   for (const [p, text] of Object.entries(input)) files.set(normPath(p), text);
@@ -190,7 +194,7 @@ export function buildModel(
   const phases = ideas.flatMap((i) => i.phases);
   const steps = ideas.flatMap((i) => i.steps);
   const labels = [...new Set(ideas.flatMap((i) => i.labels))].sort();
-  return { ideas, phases, steps, labels, specsRel };
+  return { ideas, phases, steps, labels, specsRel, specsAbs };
 }
 
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);

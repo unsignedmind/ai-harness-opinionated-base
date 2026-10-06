@@ -53,7 +53,7 @@ The CLI resolves four folders once per invocation (`src/roots.js`, shared with c
 | Root    | Resolution |
 | ------- | ---------- |
 | `home`  | The nos folder of the running CLI (`NOS_HOME`) |
-| `work`  | `--root` (as given), else `NOS_SPECS_ROOT`, else the nearest folder with `nos.config.json` walking up from the current directory, else the current directory. The checkout you sit in: main or a git worktree. A walk that climbed out of a linked worktree (its branch has no `nos.config.json` yet) is brought back: work = that worktree's top + the project offset. A specs root on the way (`config.json` with `project` and `id-counters`) answers with the project its back-pointer names (needs `nos.config.json` there, else not set up) |
+| `work`  | `--root` (as given), else `NOS_SPECS_ROOT`, else the nearest folder with `nos.config.json` walking up from the current directory, else the current directory. The checkout you sit in: main or a git worktree. A walk that climbed out of a linked worktree (its branch has no `nos.config.json` yet) is brought back: work = that worktree's top + the project offset. A specs root on the way (`config.json` with `project` and `id-counters`) answers with the project its back-pointer names, but only when that project has `nos.config.json` and its specs root is this folder (real paths: symlinks and junctions resolved; the walk starts from the real cwd). Otherwise the walk stops (not set up) with a stderr warning "back-pointer of <dir> points to <main>, whose specs root is <x>: run nos init there". `--root` / `NOS_SPECS_ROOT` may name the specs root too, with the same check |
 | `main`  | Top of git's main worktree (parent of `--git-common-dir`; for a submodule the first entry of `git worktree list`) + the project offset. Not a git repo: `work` |
 | `specs` | `main` + `specs.dir` of main's `nos.config.json` (relative to main, or absolute). Default (`null` or missing): `../<main folder name>.specs`, the sibling folder of the checkout, built only by `defaultSpecsDir` in `src/roots.js` |
 
@@ -69,7 +69,7 @@ Permissions: setup adds the specs root to `permissions.additionalDirectories` of
 
 | File | Repo | Content |
 | --- | --- | --- |
-| `nos.config.json` | project (tracked) | `specs: {dir, remote}` (`dir` `null` in the template = the default `../<name>.specs`; `nos init` writes it explicitly), `worktrees: {slots, slotWait}`, `quality-tools`, `project-commands`, `spec-ui.docs-folder` |
+| `nos.config.json` | project (tracked) | `specs: {dir, remote}` (`dir` `null` = the default `../<main folder name>.specs`, resolved on every call, so it follows a renamed project folder; an explicit value wins), `worktrees: {slots, slotWait}`, `quality-tools`, `project-commands`, `spec-ui.docs-folder` |
 | `<specs>/config.json` | `<specs>` | `project` (back-pointer to main), `id-counters`, `chat` |
 
 `src/project-config.js` reads `nos.config.json` with defaults merged: `specs` and `worktrees` from main's file, `quality-tools`, `project-commands` and `spec-ui` from work's file (a branch may change its test command).
@@ -374,7 +374,7 @@ nos init [--root <dir>]
 
 Sets up the nos layout of a project. Idempotent: only missing parts are created. Refused inside a git worktree.
 
-1. Creates `nos.config.json` from `<home>/templates/nos.config.json` if missing, with `specs.dir` written explicitly: `../<main folder name>.specs`.
+1. Creates `nos.config.json` from `<home>/templates/nos.config.json` if missing; `specs.dir` stays `null` (the default `../<main folder name>.specs`), the result's `specs` names the resolved root.
 2. Creates `<specs>/` (default the sibling folder of the checkout) with `config.json` (id-counters from `<home>/templates/config.json`, plus `project`: main relative to the specs root, e.g. `../repo`) and `.gitignore` (`.chat/`, `.locks/`, `.runs/`). A missing or stale `project` of an existing `config.json` is (re)written (`backPointer: { project, written }`); with a specs repo that has history it stays uncommitted: `nos specs commit --config`.
 3. Git project: appends `.claude/worktrees/` (and `<specs.dir>/` only when the specs root lies inside the project) to the project `.gitignore`, unless a `.gitignore` of the repo already ignores them (`git check-ignore`, so `.claude/*` counts; global excludes and `.git/info/exclude` do not). Appended in the file's line ending (CRLF stays CRLF).
 4. Git available: `git init -b main` in `<specs>`. A `<specs>` without a commit yet also gets `.gitattributes` (`* text=auto eol=lf`, LF working copies on every OS: the project's `.gitattributes` does not reach into the nested repo, and `core.autocrlf=true` would check out CRLF; an existing file stays untouched) and the first commit `nos: init` (`.gitattributes`, `.gitignore`, `config.json`). A `<specs>` with history gets no `.gitattributes`. Then `git remote add origin <specs.remote>` when `specs.remote` is set and `<specs>` has no `origin`. An `origin` with another URL is left and reported as `{url, existing, added: false, mismatch: true}`. A commit failing for a missing git identity says to set `user.name` / `user.email`.
@@ -585,7 +585,7 @@ $ nos set-status --domain domain-1-user-auth --step 1 --status in-review
 
 Local chat of the project in the spec-ui (or the chat page). By default the chat server answers every
 chat tab with its own headless Claude Code session (`src/chat/runner.js`: `claude -p --output-format stream-json`,
-`--session-id`/`--resume`, `--permission-mode auto`, `--permission-prompts none`, started in the main checkout).
+`--session-id`/`--resume`, `--permission-mode auto`, `--permission-prompts none`, `--add-dir <specs>` so a tab reads and writes the specs root outside the checkout whatever `settings.local.json` says, started in the main checkout).
 `"chat": { "runner": false }` switches to relay: a terminal session answers with `await` / `reply`.
 Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat --help`.
 
@@ -598,7 +598,7 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 | `nos chat typing [--state thinking\|typing\|idle]` | Presence shown in the page |
 | `nos chat pending` | Sessions with undelivered messages, read from disk |
 | `nos chat end` / `nos chat stop` | End the chat as the agent / shut the server down |
-| `nos chat start` | Start the server unless one of this version runs (`status` `running`: kept with its live tabs and runs; `started`: none ran or an outdated one was replaced). The spec-ui dev server calls it once per start |
+| `nos chat start` | Start the server unless one with this CLI's code runs: same version and same code fingerprint (hash of `cli/src/**/*.js`, in `/health` and `server.json`). `status` `running`: kept with its live tabs and runs; `started`: none ran, or other code ran and was replaced. The spec-ui dev server calls it once per start; `open` checks the same |
 | `nos chat restart` | Shut the server down (running Claude Code runs stop) and start a fresh one |
 | `nos chat pair` | One-time pairing link for a phone (10 min, single use; approve the device on the PC) |
 | `nos chat devices [--approve id] [--deny id] [--revoke id] [--revoke-all]` | Paired devices |
@@ -635,7 +635,7 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 
 ```
 <project>/
-├── nos.config.json             # project config (tracked), see "Config split"; specs.dir "../<project>.specs"
+├── nos.config.json             # project config (tracked), see "Config split"; specs.dir null = ../<project>.specs"
 ├── .gitignore                  # contains ".claude/worktrees/"
 └── .claude/
     ├── skills/nos/             # NOS_HOME (tracked or ignored)
@@ -662,7 +662,7 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 
 ### Migrating a project with tracked `specs/`
 
-A project with the old tracked `specs/` folder and `specs/...` spec-file values is not handled by the CLI (a legacy spec-file fails with "run the migration"). Migrate it once by hand, working tree clean, with the rehearsed steps 1–10 in `../ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": history split with `git filter-branch --prune-empty --subdirectory-filter specs` in a bare throw-away clone (not `git subtree split`, which leaks project history when `specs/` was deleted and re-added), `<specs>/.gitattributes` before the pull (target: the sibling folder `../<project>.specs`), config split into `nos.config.json` (`specs.dir` `../<project>.specs`) and `<specs>/config.json`, spec-file prefix dropped with a JSON-safe script, `specs/` untracked, `nos init --root <project>` for the missing `.gitignore` entry and the back-pointer `project`, `settings.local.json` with absolute paths and `additionalDirectories`, verify with `nos roots`.
+A project with the old tracked `specs/` folder and `specs/...` spec-file values is not handled by the CLI (a legacy spec-file fails with "run the migration"). Migrate it once by hand, working tree clean, with the rehearsed steps 1–10 in `../ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": history split with `git filter-branch --prune-empty --subdirectory-filter specs` in a bare throw-away clone (not `git subtree split`, which leaks project history when `specs/` was deleted and re-added), `<specs>/.gitattributes` before the pull (target: the sibling folder `../<project>.specs`), config split into `nos.config.json` (`specs.dir` `null`: the default `../<project>.specs`) and `<specs>/config.json`, spec-file prefix dropped with a JSON-safe script, `specs/` untracked, `nos init --root <project>` for the missing `.gitignore` entry and the back-pointer `project`, `settings.local.json` with absolute paths and `additionalDirectories`, verify with `nos roots`.
 
 Ids are global across the project. Phase and step counters are shared by all domains.
 

@@ -11,7 +11,7 @@ description: Open the local chat of the project (spec-ui chat button, desktop or
 </coreRules>
 
 <workflow>
-    <step1>Open: "nos chat open --no-open". Tell the user: chat button in the spec-ui header (start it with "npm run dev" in <home>/ui), or the printed url. Its "next_step" says whether to listen: runner → the chat answers by itself, nothing to run; relay → section relay</step1>
+    <step1>Open: "nos chat open --no-open". It starts the server only when none with this nos code runs (a running one keeps its tabs). Tell the user: chat button in the spec-ui header (start it with "npm run dev" in <home>/ui), or the printed url. Its "next_step" says whether to listen: runner → the chat answers by itself, nothing to run; relay → section relay</step1>
     <step2>On the phone: the user starts the spec-ui with "npm run dev-to-lan" (HTTPS), accepts the certificate once (fingerprint printed in the terminal), and scans the one-time pairing QR code / link printed there (or "Pair a device" in the chat panel). The user allows the device on the PC when both show the same number. Never pair or approve devices for the user</step2>
     <step3>Tell the user: each tab ("+") is its own Claude Code session; "Stop" ends the current run; a tab's tooltip shows "claude --resume <id>" to continue it in a terminal</step3>
 </workflow>

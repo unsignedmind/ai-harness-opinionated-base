@@ -1,10 +1,10 @@
-import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ensureSpecs, readJsonFile, templatePath, writeJsonFile } from './config.js';
 import { FAILED, NosError } from './exit-codes.js';
 import { git, gitAvailable, gitOut } from './git.js';
 import { DEFAULT_PROJECT_CONFIG, hasProjectConfig, projectConfigPath, specsConfig } from './project-config.js';
-import { backPointerOf, defaultSpecsDir, isInside, PROJECT_CONFIG_FILE, slash } from './roots.js';
+import { backPointerOf, isInside, PROJECT_CONFIG_FILE, slash } from './roots.js';
 
 // the specs root keeps history in git; the dot entries are local state
 export const SPECS_GITIGNORE = Object.freeze(['.chat/', '.locks/', '.runs/']);
@@ -89,7 +89,7 @@ function commitSpecs(cwd, message) {
 }
 
 // Sets up the nos layout of a project; every part is created only when missing, so it can run again.
-//   nos.config.json (from the template, specs.dir written explicitly: ../<main folder name>.specs), <specs>/
+//   nos.config.json (from the template, specs.dir null = the default ../<main folder name>.specs), <specs>/
 //   (default: the sibling folder of the checkout) as its own git repo (branch main) with .gitignore and
 //   config.json (id-counters and the back-pointer "project": main relative to <specs>), the project .gitignore
 //   entry .claude/worktrees/ (plus <specs>/ when it lies inside the project), the first <specs> commit
@@ -112,10 +112,10 @@ export function initProject(roots) {
   const madeConfig = !hasProjectConfig(roots.main);
   if (madeConfig) {
     const template = templatePath(roots, PROJECT_CONFIG_FILE);
-    const config = existsSync(template) ? readJsonFile(template) : structuredClone(DEFAULT_PROJECT_CONFIG);
-    // explicit, so the project shows where its specs live; roots.specs was resolved from the same default
-    config.specs = { ...config.specs, dir: config.specs?.dir ?? defaultSpecsDir(roots.main) };
-    writeJsonFile(projectConfig, config);
+    // specs.dir stays as the template has it (null = the default ../<main folder name>.specs, which follows a
+    // renamed project folder); the result reports the resolved specs root
+    if (existsSync(template)) copyFileSync(template, projectConfig);
+    else writeJsonFile(projectConfig, DEFAULT_PROJECT_CONFIG);
   }
   note(madeConfig, projectConfig);
 

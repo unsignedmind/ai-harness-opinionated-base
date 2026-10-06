@@ -16,6 +16,7 @@ import { askPrompt, contextOf, type AskKind } from './views/chat';
 let model = buildModel({});
 let specs: Record<string, string> = {};
 let specsRel = DEFAULT_SPECS_REL;
+let specsAbs = '';
 let runs: Run[] = [];
 let shownRuns = '';
 let runsLoading: Promise<void> | null = null;
@@ -48,7 +49,7 @@ async function get(url: string) {
 const getRuns = () => get('/__runs').then(parseRuns, () => [] as Run[]);
 
 function show() {
-  model = buildModel(specs, runs, specsRel);
+  model = buildModel(specs, runs, specsRel, specsAbs);
   shownRuns = runsKey(runs);
   app.setModel(model);
   // poll only while a run is active (merged/abandoned only wait for their cleanup)
@@ -65,6 +66,7 @@ async function refresh() {
     const [s, docs, r] = await Promise.all([get('/__specs'), get('/__docs'), getRuns()]);
     specs = s?.files ?? {};
     specsRel = typeof s?.specsRel === 'string' && s.specsRel ? s.specsRel : DEFAULT_SPECS_REL;
+    specsAbs = typeof s?.specsAbs === 'string' ? s.specsAbs : '';
     runs = r;
     show();
     app.setDocs(buildDocs(docs));

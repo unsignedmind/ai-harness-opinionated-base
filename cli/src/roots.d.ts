@@ -18,6 +18,8 @@ export type Roots = {
   configured: boolean;
   /** how work was found */
   via: 'root' | 'env' | 'walk' | 'cwd';
+  /** why the resolver stopped short (an invalid back-pointer of a specs root) */
+  warnings?: string[];
 };
 
 export const SPECS_SUFFIX: string;
@@ -27,10 +29,13 @@ export const NOS_HOME: string;
 export function slash(p: string): string;
 export function isInside(child: string, parent: string): boolean;
 export function findWorkRoot(start: string): string | null;
+export function walkToWorkRoot(start: string): { dir: string | null; warning?: string };
 /** the default specs.dir of a project: ../<main folder name>.specs */
 export function defaultSpecsDir(main: string): string;
 /** the project a specs root points back to ({ main: null }: points to a folder without nos.config.json) */
-export function projectOfSpecs(dir: string): { main: string | null } | null;
+export function projectOfSpecs(
+  dir: string,
+): { main: string; warning?: undefined } | { main: null; warning: string } | null;
 export function backPointerOf(roots: Pick<Roots, 'main' | 'specs'>): string;
 export function resolveRoots(options?: {
   root?: string;

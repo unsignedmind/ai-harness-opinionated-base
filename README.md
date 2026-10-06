@@ -71,7 +71,7 @@ open ──► in-specification ──► specified ──► in-progress ──
 
 Idempotent: on a fresh project it sets everything up, on a set up one it only checks and fills gaps. Run it on main.
 
-1. Runs `nos init`: creates `nos.config.json` (`specs.dir` `../<project>.specs`), `<specs>/` next to the checkout as its own git repo (first commit `nos: init`, `config.json` with the back-pointer `project`) and the `.gitignore` entry `.claude/worktrees/`. Existing files and id counters stay untouched. Adds the specs root to `permissions.additionalDirectories` in `.claude/settings.local.json`.
+1. Runs `nos init`: creates `nos.config.json` (`specs.dir` `null` = the default `../<project>.specs`), `<specs>/` next to the checkout as its own git repo (first commit `nos: init`, `config.json` with the back-pointer `project`) and the `.gitignore` entry `.claude/worktrees/`. Existing files and id counters stay untouched. Adds the specs root to `permissions.additionalDirectories` in `.claude/settings.local.json`.
 2. Detects the tooling: package manager, `package.json` scripts, Makefile, pyproject, go.mod, …
 3. Proposes the commands per key, the docs folder for the viewer and the slots (3 when e2e is configured, else 1), and asks you to confirm or adjust.
 4. Writes `quality-tools`, `project-commands`, `spec-ui` and `worktrees` into `nos.config.json`.
@@ -475,7 +475,7 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
 ### Templates
 
 - **config.json**: initial id counters for domain, phase and step. `nos init` copies it to `<specs>/config.json` (which also holds the `chat` settings). Ids are global across all domains.
-- **nos.config.json**: initial project config, copied to the project root by `nos init`: `specs` (`dir`, `remote`; `dir` `null` = the default `../<project>.specs`, which `nos init` writes in explicitly), `worktrees` (`slots`, `slotWait`), empty `quality-tools` and `project-commands`, and `spec-ui.docs-folder` (`docs`, the folder the viewer's Docs view shows).
+- **nos.config.json**: initial project config, copied to the project root by `nos init`: `specs` (`dir`, `remote`; `dir` `null` = the default `../<project>.specs`, resolved on every call; an explicit value wins), `worktrees` (`slots`, `slotWait`), empty `quality-tools` and `project-commands`, and `spec-ui.docs-folder` (`docs`, the folder the viewer's Docs view shows).
 - **domain.json**: domain structure. It has a name, labels and `cross-cutting` (`false` for now, reserved for an upcoming spec UI change). Written by `nos create-domain`.
 - **plan.json**: plan structure. It has a name, status and phases. Phases have a name, status, intent, `human-validation-needed`, `review-needed`, a description and steps. Steps have an intent, status, `human-validation-needed`, `review-needed`, a description and `spec-file`, and every phase and step also has a slug. `spec-file` is filled by `nos`.
 - **status.xml**: valid statuses. `nos set-status` rejects anything else.
@@ -719,7 +719,7 @@ The dev server finds the project with the nos resolver: it walks up from `ui/` t
 | --- | --- |
 | `NOS_SPECS_ROOT=<project>` | serve another project than the one nos sits in (also turns the browser auto-open off) |
 | `NOS_UI_OPEN=0` / `1` | never / always open `dev.html` in the browser on start (default: open, except under `NOS_SPECS_ROOT`, vitest or CI) |
-| `NOS_CHAT_PORT` | port of the chat server the dev server starts (`nos chat start`: a running server of the same version is kept with its tabs) |
+| `NOS_CHAT_PORT` | port of the chat server the dev server starts (`nos chat start`: a running server with the same version and code fingerprint is kept with its tabs; other code is replaced) |
 
 Runs (`nos run start`) show live: `/__runs` lists `<specs>/.runs/*.json` with ahead/behind main and a dirty worktree. A chat tab working in a run shows its id (`quick-7`). Domains, quick steps and cards get a dot: pulsing = running, grey = stale (not seen for 2h), green = merged/abandoned, awaiting `nos run cleanup`. Statuses `merged` and `discarded` have their own pills; Board and Backlog hide `discarded` unless the status filter asks for it.
 
@@ -745,7 +745,7 @@ headless Claude Code session in the project root, run by the chat server (`claud
 **Stop** ends the current run, a tab's tooltip names
 `claude --resume <id>` to continue it in a terminal. While Claude works, the current tool call shows under the log.
 On a desktop the chat is a drawer next to the views; on a phone or tablet (≤ 860px) a full-size dialog that the back
-gesture closes. Messages carry the spec you look at as `[context: …]`; detail pages offer **Ask Claude** buttons
+gesture closes. Messages carry the spec you look at as `[context: …]` (absolute path from the live viewer, so a tab inside a run worktree finds it; each tab gets the specs root via `--add-dir`); detail pages offer **Ask Claude** buttons
 (specify, develop, review, plan) that prefill a message. `"chat": { "runner": false }` in `<specs>/config.json` switches
 to relay: a terminal session answers with `nos chat await` / `reply`.
 
@@ -862,4 +862,4 @@ Run inside `cli/`: `npm test` (node:test) or `npm run test:watch`. Code lives in
 
 ### Migrating a project with tracked `specs/`
 
-Older nos versions kept the specs in a tracked `specs/` folder with `specs/config.json`. The new nos does not detect or convert that layout (a `spec-file` starting with `specs/` fails with "run the migration"). Migrate once by hand, working tree clean, following the rehearsed steps 1–10 in `ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": split the `specs/` history with `git filter-branch --prune-empty --subdirectory-filter specs` in a bare throw-away clone (not `git subtree split`: it leaks project history when `specs/` was deleted and re-added), write `<specs>/.gitattributes` (`* text=auto eol=lf`) before pulling it into the `<specs>` repo (target: the sibling folder `../<project>.specs`), move `.chat`, split the config into `nos.config.json` (`specs.dir` `../<project>.specs`) and `<specs>/config.json`, drop the `specs/` prefix of every `spec-file` with a JSON-safe script, untrack `specs/`, run `nos init --root <project>` (adds the missing `.gitignore` entry and the back-pointer `project`), commit both repos, write `.claude/settings.local.json` with absolute paths and `additionalDirectories`, and verify with `nos roots`.
+Older nos versions kept the specs in a tracked `specs/` folder with `specs/config.json`. The new nos does not detect or convert that layout (a `spec-file` starting with `specs/` fails with "run the migration"). Migrate once by hand, working tree clean, following the rehearsed steps 1–10 in `ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": split the `specs/` history with `git filter-branch --prune-empty --subdirectory-filter specs` in a bare throw-away clone (not `git subtree split`: it leaks project history when `specs/` was deleted and re-added), write `<specs>/.gitattributes` (`* text=auto eol=lf`) before pulling it into the `<specs>` repo (target: the sibling folder `../<project>.specs`), move `.chat`, split the config into `nos.config.json` (`specs.dir` `null`: the default `../<project>.specs`) and `<specs>/config.json`, drop the `specs/` prefix of every `spec-file` with a JSON-safe script, untrack `specs/`, run `nos init --root <project>` (adds the missing `.gitignore` entry and the back-pointer `project`), commit both repos, write `.claude/settings.local.json` with absolute paths and `additionalDirectories`, and verify with `nos roots`.

@@ -122,8 +122,9 @@ function get(port: number, path: string): Promise<{ code: number; body: unknown 
   });
 }
 
-// `nos chat start`: the chat server of the project (main). A running server of the CLI's version is kept
-// with its tabs and runs ('running'); none or an outdated one -> a fresh server ('started').
+// `nos chat start`: the chat server of the project (main). A running server with the CLI's code (version + code
+// fingerprint) is kept with its tabs and runs ('running'); none, or one running other code -> a fresh server
+// ('started').
 // Resolves with the server address and what happened, or rejects with why it did not start.
 export type ChatStart = { server: string; status: 'running' | 'started' };
 export function startChatServer(main: string, cli = nosCli()): Promise<ChatStart> {

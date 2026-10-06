@@ -50,6 +50,12 @@ test('contextOf names the spec of the routed step, phase or domain', () => {
   );
   expect(contextOf(model, parseRoute('#domains/dark-mode'))?.path).toBe('.specs/domain-2-dark-mode/');
   expect(contextOf(model, parseRoute('#board'))).toBeNull();
+  // the dev server names the absolute specs root: Claude gets absolute paths (its cwd may be a worktree)
+  const live = buildModel(fixtureFiles(), [], '../moodo.specs', 'D:/x/moodo.specs');
+  expect(contextOf(live, parseRoute(STEP))?.path).toBe(
+    'D:/x/moodo.specs/domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md',
+  );
+  expect(live.specsRel).toBe('../moodo.specs');
   expect(askPrompt('specify', step!)).toContain('"specify"');
 });
 

@@ -33,6 +33,24 @@ test('args: stream-json in and out, new session by id with a name, later resumed
   assert.ok(!b.includes('--name'));
   assert.ok(argsFor({ sessionId: ID, mode: 'nonsense' }).join(' ').includes('--permission-mode auto'));
   assert.throws(() => argsFor({ sessionId: 'x; rm -rf /' }));
+  assert.ok(!a.includes('--add-dir'));
+  const c = argsFor({ sessionId: ID, addDirs: ['D:/x/p.specs'] });
+  assert.deepEqual(c.slice(c.indexOf('--add-dir'), c.indexOf('--add-dir') + 2), ['--add-dir', 'D:/x/p.specs']);
+});
+
+test('every spawned session gets the specs root as --add-dir (it lies outside the cwd)', () => {
+  const calls = [];
+  const fn = (bin, args, opts) => {
+    calls.push({ args, opts });
+    throw Object.assign(new Error('stop here'), { code: 'ENOENT' });
+  };
+  try {
+    createRunner({ root: '/proj', specs: '/proj.specs', spawnFn: fn }).open({ sessionId: ID });
+  } catch {
+    // the fake spawn stops the run
+  }
+  const { args } = calls[0];
+  assert.equal(args[args.indexOf('--add-dir') + 1], '/proj.specs');
 });
 
 test('env: the variables of the calling Claude Code session are dropped', () => {

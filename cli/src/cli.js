@@ -64,8 +64,9 @@ Refused inside a git worktree (the layout belongs to the main checkout).
 Without nos.config.json and without --root / NOS_SPECS_ROOT, run it from the project root: refused
 in a subfolder of a git repo and inside the nos folder (e.g. <project>/.claude/skills/nos).
 
-  1. Creates nos.config.json from templates/nos.config.json of this nos if missing, with
-     specs.dir written explicitly: "../<main folder name>.specs"
+  1. Creates nos.config.json from templates/nos.config.json of this nos if missing. specs.dir
+     stays null there: the default "../<main folder name>.specs" (the result prints the resolved
+     specs root). An explicit specs.dir is honored
   2. Creates the specs root (specs.dir; default the sibling folder <main>/../<name>.specs, outside
      the checkout: Claude Code's worktree isolation refuses writes into the main checkout) with
      config.json (id-counters from templates/config.json, plus "project": main relative to the specs
@@ -108,7 +109,9 @@ Print the roots every other command uses. The CLI is the only resolver of nos pa
               from the current directory, else the current directory. Main or a worktree.
               A walk that climbed out of a worktree (its branch has no nos.config.json yet)
               is brought back into it. A specs root on the way (config.json with "project")
-              answers with the project it points back to
+              answers with the project it points back to, when that project's specs root is
+              this folder (else a warning and not set up). --root / NOS_SPECS_ROOT may name
+              the specs root too
   main        the main checkout: top of git's main worktree (+ the project's subfolder in
               the repo, if any). Not a git repo: work
   specs       main + "specs.dir" of main's nos.config.json (relative to main or absolute;
@@ -922,6 +925,7 @@ export async function run(argv, io = {}) {
     action = command.action?.(positionals) ?? name;
     const roots = resolveRoots({ root: values.root, cwd, env, home });
     homeGuard(roots, stderr);
+    for (const warning of roots.warnings ?? []) stderr.write(`${warning}\n`);
     if (name === 'roots' || name === 'init') specsGuard(roots, stderr);
     if (!command.setsUp && !roots.configured) throw notSetUp(roots, cwd);
     const result = await command.execute(values, { cwd, env, readStdin, stderr }, roots, positionals);

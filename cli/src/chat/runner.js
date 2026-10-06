@@ -4,6 +4,7 @@
 // user's own login; nothing here reads a token. Tool calls become activity lines, text blocks are replies,
 // subagents are tracked from the task events, the nos run of the tab from the CLI's run results.
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 import { killTree } from '../proc.js';
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -251,7 +252,9 @@ export function isRunCall(name, input) {
   return SHELL_TOOLS.has(name) && typeof input?.command === 'string' && RUN_CALL.test(input.command);
 }
 
-export function argsFor({ sessionId, resume, mode = 'auto', model, title }) {
+// addDirs: folders outside the cwd the session may read and write (the specs root, which lies next to the
+// project checkout), independent of .claude/settings.local.json
+export function argsFor({ sessionId, resume, mode = 'auto', model, title, addDirs = [] }) {
   if (!UUID.test(sessionId)) throw new Error('invalid session id');
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'];
   args.push('--permission-prompts', 'none');
@@ -259,11 +262,20 @@ export function argsFor({ sessionId, resume, mode = 'auto', model, title }) {
   args.push(resume ? '--resume' : '--session-id', sessionId);
   if (!resume && title) args.push('--name', `nos chat: ${short(title, 40)}`);
   if (model && /^[\w.:-]+$/.test(model)) args.push('--model', model);
+  for (const dir of addDirs) if (dir) args.push('--add-dir', dir);
   args.push('--append-system-prompt', SYSTEM_NOTE);
   return args;
 }
 
-export function createRunner({ root, bin = 'claude', mode = 'auto', model, env = process.env, spawnFn = spawn }) {
+export function createRunner({
+  root,
+  specs,
+  bin = 'claude',
+  mode = 'auto',
+  model,
+  env = process.env,
+  spawnFn = spawn,
+}) {
   return {
     mode,
     // One long-lived Claude Code process for a tab: user messages go in on stdin as stream-json,
@@ -284,7 +296,8 @@ export function createRunner({ root, bin = 'claude', mode = 'auto', model, env =
       onRun = () => {},
       onExit = () => {},
     }) {
-      const child = spawnFn(bin, argsFor({ sessionId, resume, mode, model, title }), {
+      const addDirs = specs ? [specs.split(path.sep).join('/')] : [];
+      const child = spawnFn(bin, argsFor({ sessionId, resume, mode, model, title, addDirs }), {
         cwd: root,
         env: cleanEnv(env),
         stdio: ['pipe', 'pipe', 'pipe'],

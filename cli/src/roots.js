@@ -47,10 +47,14 @@ export function isInside(child, parent) {
 // jsdom's, which fileURLToPath refuses
 export const NOS_HOME = canonical(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'));
 
-// The back-pointer of dir's config.json: { main } when it has "project" (relative to dir) and "id-counters" and
-// that folder has nos.config.json, { main: null } for a back-pointer to a folder without it, null for no
-// back-pointer at all (no file, no "project" key, not JSON).
-export function projectOfSpecs(dir) {
+const samePath = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+
+// The back-pointer of dir's config.json ("project", relative to dir, next to "id-counters"), validated both
+// ways: the folder it names has nos.config.json and that project's specs root is dir itself (a copied, moved or
+// foreign specs root is never followed). { main } when valid, { main: null, warning } when not, null for no
+// back-pointer at all (no file, no "project" key, not JSON). Paths are compared real (symlinks, junctions).
+export function projectOfSpecs(start) {
+  const dir = canonical(start);
   const file = path.join(dir, SPECS_CONFIG_FILE);
   if (!existsSync(file)) return null;
   let config;
@@ -61,29 +65,44 @@ export function projectOfSpecs(dir) {
   }
   const project = config?.project;
   if (typeof project !== 'string' || !project.trim() || !config['id-counters']) return null;
-  const main = path.resolve(dir, project.trim());
-  return { main: existsSync(path.join(main, PROJECT_CONFIG_FILE)) ? main : null };
+  const main = canonical(path.resolve(dir, project.trim()));
+  const invalid = (why) => ({
+    main: null,
+    warning: `nos: warning: back-pointer of ${slash(dir)} points to ${slash(main)}, ${why}: run nos init there`,
+  });
+  if (!existsSync(path.join(main, PROJECT_CONFIG_FILE))) return invalid('which has no nos.config.json');
+  let specs;
+  try {
+    specs = canonical(path.resolve(main, specsDirOf(main)));
+  } catch {
+    return invalid('whose nos.config.json cannot be read');
+  }
+  return samePath(specs, dir) ? { main } : invalid(`whose specs root is ${slash(specs)}`);
 }
 
 // The back-pointer a specs root stores in its config.json: main relative to the specs root, forward slashes
 export const backPointerOf = (roots) => slash(path.relative(roots.specs, roots.main)) || '.';
 
-// Walks up from start to the first folder with nos.config.json, null when there is none.
+// Walks up from start (real path: a symlink or junction is followed first) to the first folder with
+// nos.config.json: { dir }, { dir: null } when there is none.
 // Walking first makes nested repos (nos itself, an inner specs root) harmless: git is asked from the project,
 // not from them. A specs root on the way (config.json with a "project" back-pointer) answers with its project,
-// so the walk works from the specs root outside the checkout too; a back-pointer to a folder without
-// nos.config.json ends the walk (not set up).
-export function findWorkRoot(start) {
-  let dir = path.resolve(start);
+// so the walk works from the specs root outside the checkout too. An invalid back-pointer ends the walk
+// (not set up) with { dir: null, warning }.
+export function walkToWorkRoot(start) {
+  let dir = canonical(start);
   for (;;) {
-    if (existsSync(path.join(dir, PROJECT_CONFIG_FILE))) return dir;
+    if (existsSync(path.join(dir, PROJECT_CONFIG_FILE))) return { dir };
     const back = projectOfSpecs(dir);
-    if (back) return back.main;
+    if (back) return back.main ? { dir: back.main } : { dir: null, warning: back.warning };
     const parent = path.dirname(dir);
-    if (parent === dir) return null;
+    if (parent === dir) return { dir: null };
     dir = parent;
   }
 }
+
+// The work root the walk finds, null when there is none
+export const findWorkRoot = (start) => walkToWorkRoot(start).dir;
 
 // specs.dir of main's nos.config.json (relative to main, or absolute), else the default sibling folder
 function specsDirOf(main) {
@@ -129,11 +148,20 @@ export function resolveRoots({ root, cwd = process.cwd(), env = process.env, hom
   let work;
   let info;
   let found = null;
+  const warnings = [];
   if (given) {
     work = canonical(path.resolve(cwd, given));
+    // --root / NOS_SPECS_ROOT naming a specs root: its validated back-pointer gives the project
+    if (!existsSync(path.join(work, PROJECT_CONFIG_FILE))) {
+      const back = projectOfSpecs(work);
+      if (back?.main) work = back.main;
+      else if (back) warnings.push(back.warning);
+    }
     info = gitInfo(work);
   } else {
-    found = findWorkRoot(cwd);
+    const walk = walkToWorkRoot(cwd);
+    if (walk.warning) warnings.push(walk.warning);
+    found = walk.dir;
     work = canonical(found ?? cwd);
     info = gitInfo(work);
     const here = found && info ? gitInfo(cwd) : null;
@@ -164,6 +192,8 @@ export function resolveRoots({ root, cwd = process.cwd(), env = process.env, hom
     offset,
     configured,
     via: found || given ? via : 'cwd',
+    // why the resolver stopped short (an invalid back-pointer); the CLI prints them on stderr
+    warnings,
   };
 }
 

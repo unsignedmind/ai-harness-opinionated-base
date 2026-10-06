@@ -3,10 +3,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { request } from '../../src/chat/client.js';
+import { codeFingerprint, FINGERPRINT, request, VERSION, writeServerJson } from '../../src/chat/client.js';
+import { createChatServer } from '../../src/chat/server.js';
+import { createSessionStore } from '../../src/chat/sessions.js';
 import { runChat } from '../../src/chat/commands.js';
 import { runHook } from '../../src/chat/hook.js';
-import { files, keyOf } from '../../src/chat/paths.js';
+import { files, keyOf, realDir } from '../../src/chat/paths.js';
 import { saveState } from '../../src/chat/sessions.js';
 import { gitOk, hasGit, makeProject, makeTempRoot } from '../helpers.js';
 
@@ -251,4 +253,46 @@ test('open in runner mode (the default): the next step says the chat answers by 
   assert.equal(open.json.status, 'open');
   assert.doesNotMatch(open.json.next_step, /^Run `nos chat await`/);
   assert.match(open.json.next_step, /answers by itself/);
+});
+
+test('code fingerprint: changes with the content of any .js under the folder, not with line endings', (t) => {
+  const dir = makeTempRoot(t);
+  writeFileSync(path.join(dir, 'a.js'), 'one\n');
+  mkdirSync(path.join(dir, 'sub'));
+  writeFileSync(path.join(dir, 'sub', 'b.js'), 'two\n');
+  writeFileSync(path.join(dir, 'notes.md'), 'x');
+  const first = codeFingerprint(dir);
+  writeFileSync(path.join(dir, 'a.js'), 'one\r\n');
+  writeFileSync(path.join(dir, 'notes.md'), 'y');
+  assert.equal(codeFingerprint(dir), first);
+  writeFileSync(path.join(dir, 'sub', 'b.js'), 'changed\n');
+  assert.notEqual(codeFingerprint(dir), first);
+  assert.match(FINGERPRINT(), /^[0-9a-f]{16}$/);
+});
+
+test('start: a server of the same version but other code (fingerprint) is replaced', async (t) => {
+  const root = project(t);
+  t.after(() => nos(['stop'], { cwd: root }));
+  const state = stateOf(root);
+  mkdirSync(state, { recursive: true });
+  // an older build of this version: same version, other fingerprint
+  const old = createChatServer({
+    store: createSessionStore({ file: files(state).sessions }),
+    version: VERSION,
+    fingerprint: 'stale-code',
+    root: realDir(root),
+  });
+  const port = await old.listen(0);
+  t.after(() => old.stop());
+  writeServerJson(state, { pid: process.pid, port, version: VERSION, root: realDir(root) });
+  assert.equal((await request(port, 'GET', '/health')).body.fingerprint, 'stale-code');
+
+  const started = await nos(['start'], { cwd: root });
+
+  assert.equal(started.json.status, 'started');
+  assert.equal(started.json.fingerprint, FINGERPRINT());
+  const now = JSON.parse(readFileSync(files(state).server, 'utf8'));
+  assert.notEqual(now.pid, process.pid);
+  assert.equal(now.fingerprint, FINGERPRINT());
+  assert.equal((await request(now.port, 'GET', '/health')).body.fingerprint, FINGERPRINT());
 });

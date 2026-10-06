@@ -29,7 +29,7 @@ Constraints:
 ## Layout
 ```
 <project>/                      project repo, main worktree. main moves by ff merges (exceptions: setup, migration)
-  nos.config.json               tracked: project config, see config split. Root marker for the resolver. specs.dir "../<project>.specs"
+  nos.config.json               tracked: project config, see config split. Root marker for the resolver. specs.dir null = ../<project>.specs
   .gitignore                    contains ".claude/worktrees/"
   .claude/skills/nos/           NOS_HOME (tracked or ignored, does not matter)
   .claude/settings.local.json   written by setup: permissions (incl. additionalDirectories = the specs root) and hook, absolute paths. Never tracked
@@ -62,7 +62,7 @@ Junctions are machine/OS-specific and hold absolute paths → conflict with port
 3. **Main root**: `git -C <work> rev-parse --path-format=absolute --git-common-dir` → parent. Not a git repo: work root.
 4. **Specs root**: main root + `specs.dir` (relative to main or absolute; default `../<main folder name>.specs`, built once in `roots.js` `defaultSpecsDir`). Why outside: worktree isolation, see Layout.
 
-Order matters: walking to `nos.config.json` first is what makes nested repos harmless. From inside nos, `--git-common-dir` would answer with the nested repo (verified); the walk lands on the project before git is asked. From inside the specs root (outside the project) the walk meets `<specs>/config.json` with `project` + `id-counters` first: work = main = that folder, verified to hold `nos.config.json` (else not set up). `nos init` writes the back-pointer.
+Order matters: walking to `nos.config.json` first is what makes nested repos harmless. From inside nos, `--git-common-dir` would answer with the nested repo (verified); the walk lands on the project before git is asked. From inside the specs root (outside the project) the walk meets `<specs>/config.json` with `project` + `id-counters` first: work = main = that folder, only if it holds `nos.config.json` and its own specs root is this folder (real paths, junctions resolved); a copied, moved or foreign specs root is never followed: warning, not set up. `--root` / `NOS_SPECS_ROOT` naming a specs root get the same treatment. `nos init` writes the back-pointer.
 
 Rules:
 - **The CLI is the only resolver.** `nos roots` prints `{home, work, main, specs, inWorktree}`. Every CLI result prints absolute paths. `spec-file` fields are stored relative to the specs root, no `specs/` prefix. Migration rewrites existing entries, keeps `/quick-steps/step-<id>-` intact.
@@ -162,7 +162,7 @@ Parallel develops collide on ports, not on git. A slot is only needed while a se
 
 ## Setup skill (idempotent, any project)
 No migration logic in nos. Two states:
-1. Fresh: `nos init` creates `nos.config.json` from template with `specs.dir "../<project>.specs"`, `git init -b main` in the sibling `<specs>`, writes `<specs>/.gitignore` (`.chat/`, `.locks/`, `.runs/`), `<specs>/.gitattributes` (`* text=auto eol=lf`) and `<specs>/config.json` (id-counters, back-pointer `project`), the project `.gitignore` entry `.claude/worktrees/` (plus `<specs.dir>/` only for a specs root inside the project), then quality tools + project commands + slots + slot verification.
+1. Fresh: `nos init` creates `nos.config.json` from template (`specs.dir` `null` = the default `../<project>.specs`, resolved on every call; the init result names the resolved root), `git init -b main` in the sibling `<specs>`, writes `<specs>/.gitignore` (`.chat/`, `.locks/`, `.runs/`), `<specs>/.gitattributes` (`* text=auto eol=lf`) and `<specs>/config.json` (id-counters, back-pointer `project`), the project `.gitignore` entry `.claude/worktrees/` (plus `<specs.dir>/` only for a specs root inside the project), then quality tools + project commands + slots + slot verification.
 2. New layout exists: check only, fill a missing config, offer a remote.
 3. Optional remote (backup only): `nos.config.json` → `specs.remote`. Fresh clone setup runs `git clone <remote> <specs>`; `<specs>/.chat` is recreated by `ensureStateDir`.
 Settings: `permissions.additionalDirectories` = the absolute specs root, permissions and hook entries for the chat go to `.claude/settings.local.json`, pointing at `node <NOS_HOME>/cli/bin/nos.js`. `settings.json` is never written. Setup commits `nos.config.json` and `.gitignore` directly on main (listed exception).
@@ -176,7 +176,7 @@ Preconditions: chat server and spec-ui stopped; `git status --short` empty; `git
 2. `git init -b main $S`, write `$S/.gitattributes` (`* text=auto eol=lf`; moodo: plus `slop-to-clean-arch-migration/** -text`) **before** `git -C $S pull --ff-only $T/specs-split.git main`. The project's `.gitattributes` does not reach into the specs repo; with `core.autocrlf=true` the working copies would come out CRLF. Check `git -C $S ls-files --eol`
 3. move `specs/.chat` (incl. tls, sessions) to `$S/.chat`, write `$S/.gitignore` (`.chat/`, `.locks/`, `.runs/`)
 4. `$S/config.json`: keep `id-counters` (+ `chat` if present), drop the rest; add the back-pointer `"project": "../moodo-poc"` (or let step 7's `nos init` add it). Steps 4 and 5 are one node script
-5. `nos.config.json` from the template: `specs.dir "../moodo-poc.specs"`, `worktrees {slots, slotWait}`, `quality-tools` (template `timeout` kept), `project-commands`, `spec-ui.docs-folder` from the old config. Project formats JSON with prettier → `npx prettier --write nos.config.json` (else `format-check` fails on it)
+5. `nos.config.json` from the template: `specs.dir` `null` (the default `../moodo-poc.specs`), `worktrees {slots, slotWait}`, `quality-tools` (template `timeout` kept), `project-commands`, `spec-ui.docs-folder` from the old config. Project formats JSON with prettier → `npx prettier --write nos.config.json` (else `format-check` fails on it)
 6. drop the `specs/` prefix of every `spec-file` in `plan.json` / `quick-steps.json` with a JSON-safe node script (not sed): keeps indentation and EOL, reports stale paths (left as they are, fixed separately). Check: no `"spec-file": "specs/` left, the diff touches only spec-file lines
 7. project: `git rm -r -q --cached specs`, delete folder, `nos init --root $P` (idempotent: appends only the missing `.claude/worktrees/` entry, via `git check-ignore`, no `.specs/` entry since `$S` lies outside; writes a missing back-pointer into `$S/config.json`; no specs commit since `$S` has a HEAD), `git add .gitignore nos.config.json`, commit `nos: move specs to own repo`
 8. `git -C $S add -A && git -C $S commit -m "nos: config split"` (`.gitattributes`, `.gitignore`, config with back-pointer, rewritten plans; `.runs/`, `.locks/`, `.chat/` ignored), delete `$T/specs-split.git`

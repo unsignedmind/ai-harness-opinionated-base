@@ -2,15 +2,17 @@
 // cli/src/roots.js, by default the sibling folder ../<project>.specs, outside the checkout: read with node fs
 // and watched by absolute path, so vite's fs restrictions do not apply) from its own disk on every request,
 // so any device on the network sees it without picking a folder. Serves `/` as dev.html, `GET /__specs` as
-// `{ specsRel, files: path -> text }` (paths relative to the specs root, specsRel = the specs root relative
-// to main, e.g. "../moodo-poc.specs"), `GET /__docs` as the docs folder named in main's nos.config.json
+// `{ specsRel, specsAbs, files: path -> text }` (paths relative to the specs root, specsRel = the specs root
+// relative to main for display, e.g. "../moodo-poc.specs", specsAbs = absolute with forward slashes for paths
+// handed to Claude), `GET /__docs` as the docs folder named in main's nos.config.json
 // (relative to main), `GET /__runs` as the runs (src/serve-runs.ts), and pushes "specs:changed",
 // "runs:changed" (a run file in <specs>/.runs/) and "docs:changed" when a file under them changes.
 // `POST /__promote?domain=<folder>` runs `nos create-plan --domain <folder> --hollow --root <main>`
 // (Manual promote on the Ideas page). `/__chat/*` is the chat with Claude Code in the project
 // (src/chat-proxy.ts). Every request, the HMR websocket included, passes src/access.ts first: this
 // machine, or a paired device. Every start of the dev server runs `nos chat start` once per process: a
-// running chat server of the CLI's version is kept with its live tabs; none or an outdated one is (re)started.
+// running chat server with the CLI's code (version + code fingerprint) is kept with its live tabs; none, or one
+// running other code, is (re)started.
 // Not set up (no nos.config.json in main, no specs root): the server still starts and answers every
 // data route with the reason, so the page says "run nos init" instead of failing.
 import { execFile } from 'node:child_process';
@@ -85,7 +87,7 @@ export const openBrowser = (env: Record<string, string | undefined>) =>
   env.NOS_UI_OPEN === '1' || (env.NOS_UI_OPEN !== '0' && !env.NOS_SPECS_ROOT && !env.VITEST && !env.CI);
 
 // GET /__specs
-export type SpecsData = { specsRel: string; files: Record<string, string> };
+export type SpecsData = { specsRel: string; specsAbs: string; files: Record<string, string> };
 
 const DOMAIN = /^domain-\d+-[a-z0-9-]+$/;
 
@@ -172,6 +174,7 @@ export function serveSpecs(setup: SpecsSetup, serveOpts: ServeOptions = {}): Plu
   const dir = resolve(roots.specs);
   const root = roots.main;
   const specsRel = specsRelOf(roots);
+  const specsAbs = dir.split(sep).join('/');
   // set on each /__docs request, since the config may change
   let docsDir: string | null = null;
   const promote = promoteHandler(root);
@@ -210,7 +213,7 @@ export function serveSpecs(setup: SpecsSetup, serveOpts: ServeOptions = {}): Plu
         if (path !== '/__specs' && path !== '/__docs') return next();
         const read =
           path === '/__specs'
-            ? readSpecsFolder(nodeDir(dir)).then((files): SpecsData => ({ specsRel, files }))
+            ? readSpecsFolder(nodeDir(dir)).then((files): SpecsData => ({ specsRel, specsAbs, files }))
             : readDocs(nodeDir(dir), nodeDir(root)).then((docs) => {
                 if (!docs.error) {
                   docsDir = resolve(root, docs.folder);

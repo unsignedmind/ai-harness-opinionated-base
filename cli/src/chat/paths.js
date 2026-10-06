@@ -17,7 +17,8 @@ export const KEY = /^[a-f0-9]{12}$/;
 export function chatRoots({ root, cwd = process.cwd(), env = process.env } = {}) {
   const roots = resolveRoots({ root, cwd, env });
   if (!existsSync(path.join(roots.main, PROJECT_CONFIG_FILE))) {
-    throw new Error(`nos is not set up in ${slash(roots.main)} (no ${PROJECT_CONFIG_FILE}): run nos init`);
+    const why = roots.warnings?.length ? ` (${roots.warnings.join('; ')})` : '';
+    throw new Error(`nos is not set up in ${slash(roots.main)} (no ${PROJECT_CONFIG_FILE}): run nos init${why}`);
   }
   return roots;
 }

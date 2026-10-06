@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync } from 'node:fs';
+import { cpSync, mkdirSync, renameSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/cli.js';
 import { git, gitEnv } from '../src/git.js';
@@ -109,16 +109,92 @@ test('back-pointer to a folder without nos.config.json: not set up, the walk sto
   const specs = siblingOf(root);
   writeFile(specs, 'config.json', { project: '../gone', 'id-counters': { domain: 1, phase: 1, step: 1 } });
 
-  assert.deepEqual(projectOfSpecs(specs), { main: null });
+  const back = projectOfSpecs(specs);
+  assert.equal(back.main, null);
+  assert.match(
+    back.warning,
+    /back-pointer of .*p\.specs points to .*gone, which has no nos\.config\.json: run nos init there/,
+  );
   assert.equal(findWorkRoot(specs), null);
   const roots = resolveRoots({ cwd: specs, env: {} });
   assert.equal(roots.configured, false);
   assert.equal(roots.via, 'cwd');
+  assert.deepEqual(roots.warnings, [back.warning]);
   // a config.json without "project" (or id-counters) is no back-pointer
   writeFile(specs, 'config.json', { 'id-counters': { domain: 1, phase: 1, step: 1 } });
   assert.equal(projectOfSpecs(specs), null);
   writeFile(specs, 'config.json', { project: '../p' });
   assert.equal(projectOfSpecs(specs), null);
+});
+
+test('a back-pointer to another project (whose specs root is elsewhere) is never followed', async (t) => {
+  const { root } = makeProject(t, { sibling: true });
+  const other = makeProject(t, { sibling: true }).root;
+  const specs = siblingOf(root);
+  // points at the other project, which has its own specs root
+  writeFile(specs, 'config.json', {
+    project: path.relative(specs, other),
+    'id-counters': { domain: 1, phase: 1, step: 1 },
+  });
+
+  const back = projectOfSpecs(specs);
+  assert.equal(back.main, null);
+  assert.match(back.warning, /points to .*, whose specs root is .*p\.specs: run nos init there/);
+  assert.equal(findWorkRoot(path.join(specs)), null);
+  const roots = resolveRoots({ cwd: specs, env: {} });
+  assert.equal(roots.configured, false);
+  assert.notEqual(roots.main, other);
+});
+
+test('a stale back-pointer after the specs root was moved or copied is not followed', async (t) => {
+  const { root } = makeProject(t, { sibling: true });
+  const specs = siblingOf(root);
+  const moved = path.join(path.dirname(root), 'elsewhere', 'p.specs');
+  mkdirSync(path.dirname(moved));
+  renameSync(specs, moved);
+  // "../p" from the moved folder names a folder that does not exist
+  assert.equal(findWorkRoot(moved), null);
+  // a copy next to the project still points at p, but p's specs root is the original
+  cpSync(moved, specs, { recursive: true });
+  const copy = path.join(path.dirname(root), 'copy.specs');
+  cpSync(specs, copy, { recursive: true });
+  assert.equal(findWorkRoot(specs), root);
+  assert.equal(findWorkRoot(copy), null);
+  assert.match(projectOfSpecs(copy).warning, /whose specs root is .*p\.specs/);
+});
+
+test('a symlink or junction to the specs root resolves to the project', async (t) => {
+  const { root } = makeProject(t, { sibling: true });
+  const specs = siblingOf(root);
+  const link = path.join(makeTempRoot(t), 'specs-link');
+  try {
+    symlinkSync(specs, link, 'junction');
+  } catch (err) {
+    t.skip(`no junction/symlink here: ${err.code}`);
+    return;
+  }
+  mkdirSync(path.join(specs, 'domain-1-a'));
+  for (const cwd of [link, path.join(link, 'domain-1-a')]) {
+    const roots = resolveRoots({ cwd, env: {} });
+    assert.equal(roots.main, root, cwd);
+    assert.equal(roots.specs, specs, cwd);
+  }
+});
+
+test('--root and NOS_SPECS_ROOT may name the specs root: its validated back-pointer gives the project', async (t) => {
+  const { root } = makeProject(t, { sibling: true });
+  const specs = siblingOf(root);
+  const elsewhere = makeTempRoot(t);
+  for (const roots of [
+    resolveRoots({ root: specs, cwd: elsewhere, env: {} }),
+    resolveRoots({ cwd: elsewhere, env: { NOS_SPECS_ROOT: specs } }),
+  ]) {
+    assert.deepEqual([roots.work, roots.main, roots.specs, roots.configured], [root, root, specs, true]);
+  }
+  writeFile(specs, 'config.json', { project: '../gone', 'id-counters': { domain: 1, phase: 1, step: 1 } });
+  const bad = resolveRoots({ root: specs, cwd: elsewhere, env: {} });
+  assert.equal(bad.configured, false);
+  assert.match(bad.warnings[0], /back-pointer of/);
 });
 
 test('main repo: main = work, git true, not in a worktree', noGit, (t) => {

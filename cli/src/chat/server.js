@@ -61,6 +61,7 @@ const CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self
 export function createChatServer({
   store,
   version,
+  fingerprint = null,
   root = '',
   thinkingMs = 90000,
   typingMs = 30000,
@@ -381,7 +382,8 @@ export function createChatServer({
     const m = req.method;
     let k;
 
-    if (m === 'GET' && p === '/health') return json(res, 200, { ok: true, app: 'nos-chat', version, root });
+    if (m === 'GET' && p === '/health')
+      return json(res, 200, { ok: true, app: 'nos-chat', version, fingerprint, root });
     if (m === 'POST' && p === '/shutdown') {
       json(res, 200, { status: 'stopping' });
       setImmediate(() => void stop());

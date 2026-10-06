@@ -218,9 +218,11 @@ export function contextOf(model: Model, r: Route): ChatContext | null {
   if (r.view !== 'domains' && r.view !== 'ideas') return null;
   const idea = r.idea ? model.ideas.find((i) => i.slug === r.idea) : undefined;
   if (!idea) return null;
-  // spec paths as Claude sees them from main: <specsRel>/<path relative to the specs root>
-  const base = specsPathOf(model.specsRel, `${idea.folder}/`);
-  const spec = (s: { specPath: string }) => (s.specPath ? specsPathOf(model.specsRel, s.specPath) : '');
+  // spec paths Claude can open from any cwd (main or a run's worktree): the absolute specs root when the
+  // loader knows it, else <specsRel>/<path relative to the specs root>
+  const root = model.specsAbs || model.specsRel;
+  const base = specsPathOf(root, `${idea.folder}/`);
+  const spec = (s: { specPath: string }) => (s.specPath ? specsPathOf(root, s.specPath) : '');
   if (r.phase === QUICK_SEGMENT) {
     const s = r.step ? idea.quickSteps.find((q) => q.slug === r.step) : undefined;
     return s

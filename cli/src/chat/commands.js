@@ -14,6 +14,7 @@ import {
   request,
   restartServer,
   VERSION,
+  FINGERPRINT,
   writeServerJson,
 } from './client.js';
 import { runHook } from './hook.js';
@@ -41,8 +42,9 @@ Commands:
   typing            Set presence: thinking, typing or idle         [--name n] [--state s]
   pending           Sessions with undelivered messages (read from disk)
   end               End the chat as the agent                      [--name n]
-  start             Start the server unless one of this version runs (an outdated one is restarted);
-                    a current server and its tabs are left alone. The spec-ui calls it on start
+  start             Start the server unless one with this CLI's code runs (version and a hash of
+                    cli/src: an outdated or locally edited one is restarted); a current server and
+                    its tabs are left alone. The spec-ui calls it on start
   stop              Shut the server down
   restart           Shut the server down (running Claude Code runs stop) and start a fresh one
   pair              One-time pairing link for a phone or tablet (10 min, single use; the device
@@ -138,12 +140,13 @@ async function serve(roots, stateDir, port, { env, stderr }) {
   const store = createSessionStore({ file: files(stateDir).sessions });
   const cfg = chatConfig(roots);
   const runner = cfg.runner
-    ? createRunner({ root, bin: cfg.claude, mode: cfg.permissionMode, model: cfg.model, env })
+    ? createRunner({ root, specs: roots.specs, bin: cfg.claude, mode: cfg.permissionMode, model: cfg.model, env })
     : null;
   const chat = createChatServer({
     runner,
     store,
     version: VERSION,
+    fingerprint: FINGERPRINT(),
     root,
     idleMs: idleOf(env),
     onStop: () => {
@@ -163,6 +166,7 @@ async function serve(roots, stateDir, port, { env, stderr }) {
     pid: process.pid,
     port: bound,
     version: VERSION,
+    fingerprint: FINGERPRINT(),
     root,
     startedAt: new Date().toISOString(),
   });
@@ -251,8 +255,13 @@ export async function runChat(argv, io = {}) {
       case 'start': {
         const before = await liveServer(root, stateDir);
         const port = await ensureServer(roots, stateDir, { env, log: (m) => stderr.write(`nos chat: ${m}\n`) });
-        const kept = before?.port === port && before.version === VERSION;
-        print({ status: kept ? 'running' : 'started', server: `http://127.0.0.1:${port}/`, version: VERSION });
+        const kept = before?.port === port && before.version === VERSION && before.fingerprint === FINGERPRINT();
+        print({
+          status: kept ? 'running' : 'started',
+          server: `http://127.0.0.1:${port}/`,
+          version: VERSION,
+          fingerprint: FINGERPRINT(),
+        });
         return 0;
       }
       case 'restart': {

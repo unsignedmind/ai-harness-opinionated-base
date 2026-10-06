@@ -1,6 +1,7 @@
 // Loopback HTTP calls of the CLI and the Stop hook, and starting the chat server of a project.
 import { spawn } from 'node:child_process';
-import { closeSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +9,28 @@ import { ensureStateDir, files, portOf, realDir } from './paths.js';
 
 export const BIN = fileURLToPath(new URL('../../bin/nos.js', import.meta.url));
 export const VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
+
+// The code a chat server runs: a hash of the version and the content of every cli/src/**/*.js (paths sorted,
+// line endings ignored). A server with another fingerprint runs other code than this CLI: nos chat start
+// replaces it, so local nos edits reach the chat without a version bump. dir: tests point it elsewhere.
+export function codeFingerprint(dir = fileURLToPath(new URL('..', import.meta.url))) {
+  const hash = createHash('sha256').update(VERSION);
+  const walk = (folder, rel) => {
+    for (const e of readdirSync(folder, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const full = path.join(folder, e.name);
+      const name = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(full, name);
+      else if (e.isFile() && e.name.endsWith('.js'))
+        hash.update(`\0${name}\0`).update(readFileSync(full, 'utf8').replace(/\r\n/g, '\n'));
+    }
+  };
+  walk(dir, '');
+  return hash.digest('hex').slice(0, 16);
+}
+
+let fingerprint = null;
+// this CLI's fingerprint, computed once per process
+export const FINGERPRINT = () => (fingerprint ??= codeFingerprint());
 
 // JSON over loopback. Leading spaces (await heartbeats) are trimmed before parsing.
 export function request(port, method, urlPath, body, { timeoutMs = 0 } = {}) {
@@ -75,7 +98,9 @@ export async function liveServer(main, stateDir) {
   const s = readServerJson(stateDir);
   if (!s) return null;
   const h = await health(s.port);
-  return h && h.root === realDir(main) ? { port: s.port, version: h.version } : null;
+  return h && h.root === realDir(main)
+    ? { port: s.port, version: h.version, fingerprint: h.fingerprint ?? null }
+    : null;
 }
 
 // Reuse, restart (other version) or start the server of this project (roots from chatRoots), always for
@@ -87,8 +112,12 @@ export async function ensureServer(roots, stateDir, { env = process.env, log = (
   const port = known?.port ?? portOf(roots, env);
   const h = await health(port);
   if (h && h.root === me) {
-    if (h.version === VERSION) return port;
-    log(`chat server ${h.version} is outdated, restarting`);
+    if (h.version === VERSION && h.fingerprint === FINGERPRINT()) return port;
+    log(
+      h.version === VERSION
+        ? 'chat server runs other nos code (fingerprint), restarting'
+        : `chat server ${h.version} is outdated, restarting`,
+    );
     await request(port, 'POST', '/shutdown', {}).catch(() => {});
     for (let i = 0; i < 50 && (await health(port, 200)); i++) await sleep(100);
   }

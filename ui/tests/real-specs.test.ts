@@ -2,7 +2,7 @@
 import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { locateSpecs, readDocs, readSpecsFolder } from '../src/folder';
+import { readDocs, readSpecsFolder } from '../src/folder';
 import { buildModel } from '../src/model';
 import { nodeDir, specsSetup } from '../src/serve-specs';
 
@@ -31,8 +31,8 @@ describe.skipIf(!roots)('the real specs of the project', () => {
   });
 
   test('the docs folder named in nos.config.json loads', async () => {
-    const { specs, root } = await locateSpecs(nodeDir(roots!.main));
-    const docs = await readDocs(specs, root);
+    // like the dev server: the specs root may lie outside main (default ../<project>.specs)
+    const docs = await readDocs(nodeDir(roots!.specs), nodeDir(roots!.main));
     expect(docs.error).toBeUndefined();
     expect(Object.keys(docs.files).length).toBeGreaterThan(0);
   });

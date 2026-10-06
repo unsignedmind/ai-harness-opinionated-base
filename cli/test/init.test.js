@@ -37,10 +37,8 @@ test(
     const specs = siblingOf(root);
     const template = JSON.parse(read(path.join(NOS_HOME, 'templates', 'nos.config.json')));
     assert.equal(template.specs.dir, null, 'the template leaves specs.dir to the default');
-    assert.deepEqual(readJson(root, 'nos.config.json'), {
-      ...template,
-      specs: { ...template.specs, dir: '../p.specs' },
-    });
+    // specs.dir stays null: the default ../<folder>.specs follows the project folder
+    assert.deepEqual(readJson(root, 'nos.config.json'), template);
     assert.deepEqual(readJson(specs, 'config.json'), {
       project: '../p',
       'id-counters': { domain: 1, phase: 1, step: 1 },

@@ -58,7 +58,7 @@ test('init creates nos.config.json and the sibling specs root with config.json, 
   assert.deepEqual(json.gitignoreAdded, [], 'no project .gitignore without git');
   assert.deepEqual(json.backPointer, { project: '../p', written: true });
   assert.deepEqual(readJson(specs, 'config.json'), { project: '../p', 'id-counters': { domain: 1, phase: 1, step: 1 } });
-  assert.equal(readJson(root, 'nos.config.json').specs.dir, '../p.specs');
+  assert.equal(readJson(root, 'nos.config.json').specs.dir, null, 'the default stays dynamic');
 });
 
 test('init keeps an existing config.json, only the back-pointer is added', async (t) => {
