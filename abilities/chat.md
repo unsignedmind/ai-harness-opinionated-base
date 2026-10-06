@@ -4,14 +4,14 @@ description: Open the local chat of the project (spec-ui chat button, desktop or
 ---
 
 <coreRules>
-    <rule>Run from the project root (the folder with specs/). The chat belongs to the project, never to the nos folder</rule>
-    <rule>"nos" not linked → use "node .claude/skills/nos/cli/bin/nos.js" in place of "nos"</rule>
+    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". <home> = the given home, or the nos folder that holds this ability's abilities/ folder. Forward slashes, verbatim. Never rely on a linked "nos"</rule>
+    <rule>The chat belongs to the project (its main checkout), never to the nos folder. Run it from main or a run's worktree: both resolve to the same chat. State: <specs>/.chat</rule>
     <rule>Default (runner): the chat server starts its own headless Claude Code session per chat tab ("claude -p", permission mode "auto", no permission prompts). This session does not listen and does not answer chat messages</rule>
-    <rule>Relay ("chat": { "runner": false } in specs/config.json): this session answers instead → section relay</rule>
+    <rule>Relay ("chat": { "runner": false } in <specs>/config.json): this session answers instead → section relay</rule>
 </coreRules>
 
 <workflow>
-    <step1>Open: "nos chat open --no-open". Tell the user: chat button in the spec-ui header (start it with "npm run dev" in .claude/skills/nos/ui), or the printed url</step1>
+    <step1>Open: "nos chat open --no-open". Tell the user: chat button in the spec-ui header (start it with "npm run dev" in <home>/ui), or the printed url</step1>
     <step2>On the phone: the user starts the spec-ui with "npm run dev-to-lan" (HTTPS), accepts the certificate once (fingerprint printed in the terminal), and scans the one-time pairing QR code / link printed there (or "Pair a device" in the chat panel). The user allows the device on the PC when both show the same number. Never pair or approve devices for the user</step2>
     <step3>Tell the user: each tab ("+") is its own Claude Code session; "Stop" ends the current run; a tab's tooltip shows "claude --resume <id>" to continue it in a terminal</step3>
 </workflow>
@@ -32,7 +32,7 @@ description: Open the local chat of the project (spec-ui chat button, desktop or
 </relay>
 
 <limits>
-    <limit>Runner: nobody can answer permission prompts. Auto mode decides; what it refuses is refused. Allow more in .claude/settings.json if needed</limit>
+    <limit>Runner: nobody can answer permission prompts. Auto mode decides; what it refuses is refused. Allow more in .claude/settings.local.json of the project if needed (absolute paths, never settings.json)</limit>
     <limit>Runner: anyone holding a paired device can make Claude Code act in the project with auto mode. Lost device → "nos chat devices --revoke <id>" or Devices in the chat panel</limit>
     <limit>No streaming: a reply appears whole; the chat shows the current tool call meanwhile</limit>
 </limits>

@@ -6,9 +6,11 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
     <coreRules>
         <rule>You are the orchestrator</rule>
         <rule>You MUST never implement or run verifications</rule>
+        <rule>Exception, only for nos exit code 5 (dirty worktree): you may run git status, git add -- <files> and git commit in <work> as workflow.md says</rule>
         <rule>You only delegate, orchestrate and report the status to the user</rule>
         <rule>Do not read ability skills until the workflow instructs you to do so</rule>
         <rule>the workflow tells you what to do when. reading this first is mandatory</rule>
+        <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". <home> = this skill's base directory, or the "home" from "nos roots". Always forward slashes, after the first "nos roots" its "home" verbatim. Never rely on a linked "nos"</rule>
     </coreRules>
 
     <workflow>
@@ -17,7 +19,7 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
 
     <abilities>
         <ability name="setup">
-            <description>this skill sets up nos for the project: specs folder, config.json, quality tools and project commands</description>
+            <description>this skill sets up nos for the project: nos.config.json, the .specs repo, quality tools, project commands, slots and chat settings</description>
             <skill>./abilities/setup.md</skill>
         </ability>
         <ability name="idea">
@@ -51,6 +53,10 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
         <ability name="review-fixing">
             <description>this skill initiates a review of the instructed target and fixes issues.</description>
             <skill>./abilities/review-fixing/SKILL.md</skill>
+        </ability>
+        <ability name="integrate">
+            <description>this skill is the merge agent: it resolves a stopped rebase of a run branch onto main by the intent of both specs, then runs the gate</description>
+            <skill>./abilities/integrate.md</skill>
         </ability>
         <ability name="chat">
             <description>this skill opens the local chat in the spec-ui (desktop or phone); the chat answers with its own Claude Code sessions, one per tab. Runs in the main session, not in a subagent</description>

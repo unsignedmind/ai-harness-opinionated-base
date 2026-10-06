@@ -4,6 +4,8 @@
         <status><name>in-progress</name><description>AI sessions are working on the plan</description></status>
         <status><name>on-hold</name><description>The plan is paused or discontinued</description></status>
         <status><name>done</name><description>The plan is fully implemented and verified</description></status>
+        <status><name>merged</name><description>The plan's branch is merged into main. Set only by nos run finish</description></status>
+        <status><name>discarded</name><description>The plan was abandoned, its branch not merged. Set only by nos run abandon</description></status>
     </plans>
     <phases>
         <status><name>open</name><description>First status. The phase has not been started</description></status>
@@ -22,5 +24,7 @@
         <status><name>in-review</name><description>Review agents verify the implementation</description></status>
         <status><name>reviewed</name><description>Review agents COMPLETED verifying the implementation</description></status>
         <status><name>done</name><description>The step is fully implemented and verified</description></status>
+        <status><name>merged</name><description>The step's branch is merged into main. Set only by nos run finish</description></status>
+        <status><name>discarded</name><description>The step was abandoned, its branch not merged. Set only by nos run abandon</description></status>
     </steps>
 </valid-statuses>
