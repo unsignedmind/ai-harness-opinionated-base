@@ -1,5 +1,8 @@
-// Turns the raw files of specs/ into ideas -> phases -> steps. Pure: the loader hands over
-// `repo-relative path -> text`, so tests feed fixtures and the app feeds `import.meta.glob`.
+// Turns the raw files of the specs root (.specs/) into ideas -> phases -> steps. Pure: the loader
+// hands over `path relative to the specs root -> text` (src/folder.ts readSpecsFolder), so tests feed
+// fixtures. spec-file values in plan.json / quick-steps.json are relative to the specs root as well.
+// Runs (GET /__runs) are joined in: a plan run by its domain, a quick run by its step.
+import type { Run } from './runs';
 import { normStatus, type Status } from './status';
 
 export type Progress = { done: number; total: number };
@@ -26,6 +29,10 @@ export type Idea = {
   // plan steps and quick steps
   steps: Step[];
   quickSteps: Step[];
+  // branch of the plan (plan.json "branch", set by nos run start), null when it never ran
+  branch: string | null;
+  // the running plan run of this domain
+  run: Run | null;
 };
 
 export type Phase = {
@@ -56,10 +63,14 @@ export type Step = {
   ac: Progress;
   tasks: Progress;
   idea: Idea;
-  // null for a quick step: a single step outside the plan (specs/<domain>/quick-steps/)
+  // null for a quick step: a single step outside the plan (<domain>/quick-steps/)
   phase: Phase | null;
   quick: boolean;
   labels: string[];
+  // quick step: its own branch ("branch" of the entry); plan step: the plan's
+  branch: string | null;
+  // quick step: its quick run; plan step: the plan run of its domain
+  run: Run | null;
 };
 
 export type Model = {
@@ -67,7 +78,16 @@ export type Model = {
   phases: Phase[];
   steps: Step[];
   labels: string[];
+  // the specs root as the project sees it: relative to main (".specs", nos.config.json specs.dir), or
+  // absolute when it lies outside; spec paths shown to the user and to Claude start with it
+  specsRel: string;
 };
+
+export const DEFAULT_SPECS_REL = '.specs';
+
+// <specsRel>/<rel>, forward slashes
+export const specsPathOf = (specsRel: string | undefined, rel: string) =>
+  `${(specsRel || DEFAULT_SPECS_REL).replace(/\/+$/, '')}/${rel}`;
 
 type RawStep = Partial<{
   slug: string;
@@ -77,7 +97,7 @@ type RawStep = Partial<{
   description: string;
   'spec-file': string;
 }>;
-type RawQuickStep = RawStep & Partial<{ labels: string[] }>;
+type RawQuickStep = RawStep & Partial<{ labels: string[]; branch: string }>;
 type RawPhase = Partial<{
   slug: string;
   name: string;
@@ -90,6 +110,7 @@ type RawPhase = Partial<{
 type RawPlan = Partial<{
   name: string;
   status: string;
+  branch: string;
   phases: RawPhase[];
 }>;
 type RawDomain = Partial<{
@@ -147,30 +168,36 @@ const numberIn = (path: string, prefix: string) => {
   return m ? Number(m[1]) : null;
 };
 
-export function buildModel(input: Record<string, string>): Model {
+export function buildModel(
+  input: Record<string, string>,
+  runs: Run[] = [],
+  specsRel: string = DEFAULT_SPECS_REL,
+): Model {
   const files = new Map<string, string>();
   for (const [p, text] of Object.entries(input)) files.set(normPath(p), text);
 
   const folders = new Set<string>();
   for (const p of files.keys()) {
-    const m = /^specs\/(domain-[^/]+)\//.exec(p);
+    const m = /^(domain-[^/]+)\//.exec(p);
     if (m) folders.add(m[1]);
   }
 
-  const ideas = [...folders].map((folder) => buildIdea(folder, files));
+  const ideas = [...folders].map((folder) => buildIdea(folder, files, runs));
   ideas.sort((a, b) => a.number - b.number || a.folder.localeCompare(b.folder));
 
   const phases = ideas.flatMap((i) => i.phases);
   const steps = ideas.flatMap((i) => i.steps);
   const labels = [...new Set(ideas.flatMap((i) => i.labels))].sort();
-  return { ideas, phases, steps, labels };
+  return { ideas, phases, steps, labels, specsRel };
 }
 
-function buildIdea(folder: string, files: Map<string, string>): Idea {
+const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+
+function buildIdea(folder: string, files: Map<string, string>, runs: Run[]): Idea {
   const m = /^domain-(\d+)-(.*)$/.exec(folder);
-  const md = files.get(`specs/${folder}/idea.md`) ?? null;
-  const domainJson = files.get(`specs/${folder}/domain.json`) ?? null;
-  const planJson = files.get(`specs/${folder}/plan.json`) ?? null;
+  const md = files.get(`${folder}/idea.md`) ?? null;
+  const domainJson = files.get(`${folder}/domain.json`) ?? null;
+  const planJson = files.get(`${folder}/plan.json`) ?? null;
 
   let domain: RawDomain | null = null;
   let raw: RawPlan | null = null;
@@ -215,6 +242,9 @@ function buildIdea(folder: string, files: Map<string, string>): Idea {
     phases: [],
     steps: [],
     quickSteps: [],
+    branch: str(raw?.branch),
+    // a plan run's id is the domain id
+    run: runs.find((r) => r.kind === 'plan' && (r.domain === folder || (!!m && r.id === Number(m[1])))) ?? null,
   };
 
   let stepIndex = 0;
@@ -243,7 +273,7 @@ function buildIdea(folder: string, files: Map<string, string>): Idea {
     idea.phases.push(phase);
   });
 
-  const quickJson = files.get(`specs/${folder}/${QUICK_STEPS_JSON}`);
+  const quickJson = files.get(`${folder}/${QUICK_STEPS_JSON}`);
   if (quickJson !== undefined) {
     try {
       const rawQuick = JSON.parse(quickJson) as RawQuickStep[];
@@ -251,6 +281,12 @@ function buildIdea(folder: string, files: Map<string, string>): Idea {
       rawQuick.forEach((rs, qi) => {
         const step = buildStep(rs, files, idea, null, qi + 1);
         step.labels = rs.labels ?? idea.labels;
+        step.branch = str(rs.branch);
+        // only a step whose id is known (from its spec-file), never the list position
+        const known = numberIn(step.specPath, 'step') !== null;
+        step.run = known
+          ? (runs.find((r) => r.kind === 'quick' && r.id === step.number && r.domain === folder) ?? null)
+          : null;
         idea.quickSteps.push(step);
         idea.steps.push(step);
       });
@@ -289,5 +325,7 @@ function buildStep(rs: RawStep, files: Map<string, string>, idea: Idea, phase: P
     phase,
     quick: !phase,
     labels: idea.labels,
+    branch: phase ? idea.branch : null,
+    run: phase ? idea.run : null,
   };
 }

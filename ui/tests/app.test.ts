@@ -150,14 +150,14 @@ test('backlog: clicking a row opens the step', () => {
 test('setModel re-renders with new data', () => {
   const app = shell();
   const files = fixtureFiles();
-  delete files['specs/domain-1-i18n/idea.md'];
+  delete files['domain-1-i18n/idea.md'];
   app.setModel(buildModel(files));
   expect(main().querySelectorAll('.detail .card[data-href]')).toHaveLength(1);
 });
 
 test('status line and overview count in singular for one', () => {
   const files = fixtureFiles();
-  delete files['specs/domain-1-i18n/idea.md'];
+  delete files['domain-1-i18n/idea.md'];
   shell().setModel(buildModel(files));
   expect(document.getElementById('status')?.textContent).toBe('1 idea · 3 steps');
   expect(main().querySelector('.detail > p.muted')?.textContent).toBe('1 domain · 2 phases · 3 steps');
@@ -168,7 +168,7 @@ test('status line and overview count in singular for one', () => {
 test('without specs the overview offers to open the specs folder', () => {
   shell({}, { canPick: true });
   const btn = main().querySelector<HTMLButtonElement>('.empty button[data-action="pick"]');
-  expect(btn?.textContent).toBe('Open the specs/ folder');
+  expect(btn?.textContent).toBe('Open the project folder');
 });
 
 test('without the File System Access API the empty state says which browsers work', () => {

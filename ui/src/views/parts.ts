@@ -2,6 +2,7 @@
 import type { Item } from '../filter';
 import { esc } from '../markdown';
 import type { Progress } from '../model';
+import { age, ageOf, isActive, isStale, runId, type Run } from '../runs';
 import { STATUS_ORDER, statusLabel, type Status, type StatusKey } from '../status';
 
 export const pill = (st: Status) =>
@@ -40,6 +41,42 @@ export const hvnBadge = (on: boolean) =>
 
 export const quickBadge = (on: boolean) =>
   on ? '<span class="quick" title="quick step: a single step outside the plan">⚡ quick</span>' : '';
+
+// the branch a plan or quick step runs (or ran) in
+export const branchBadge = (branch: string | null | undefined) =>
+  branch ? `<span class="branch mono" title="branch ${esc(branch)}">⎇ ${esc(branch)}</span>` : '';
+
+// running (pulses), stale (active but not seen for STALE_SEC, greyed) or done (merged/abandoned,
+// waiting for nos run cleanup)
+export type RunState = 'running' | 'stale' | 'cleanup';
+export const runState = (run: Run, now = Date.now()): RunState =>
+  !isActive(run) ? 'cleanup' : isStale(run, now) ? 'stale' : 'running';
+
+function runTitle(run: Run, now: number) {
+  const state = runState(run, now);
+  const seen = `last seen ${age(ageOf(run, now))} ago`;
+  if (state === 'cleanup') return `${runId(run)} ${run.phase}: awaiting cleanup (nos run cleanup), ${seen}`;
+  return `${state === 'stale' ? 'stale' : 'running'}: ${runId(run)}, phase ${run.phase || '?'}, ${seen}`;
+}
+
+// a run: state dot, run id and phase, ahead/behind main, dirty worktree, git trouble
+export function runBadge(run: Run | null | undefined, now = Date.now()): string {
+  if (!run) return '';
+  const state = runState(run, now);
+  const ab =
+    run.ahead == null || run.behind == null
+      ? ''
+      : `<span class="ab" title="${run.ahead} ahead of, ${run.behind} behind main">↑${run.ahead} ↓${run.behind}</span>`;
+  const dirty = run.dirty ? '<span class="dirty" title="uncommitted changes in the worktree">● dirty</span>' : '';
+  const err = run.error ? `<span class="err" title="${esc(run.error)}">⚠</span>` : '';
+  const what = state === 'cleanup' ? `${run.phase}, awaiting cleanup` : run.phase || '?';
+  const title = runTitle(run, now) + (run.worktree ? `, worktree ${run.worktree}` : '');
+  return `<span class="run ${state}" title="${esc(title)}">${runDot(run, now)}<span class="mono">${esc(runId(run))}</span> ${esc(what)}${ab}${dirty}${err}</span>`;
+}
+
+// the state dot alone (tree, cards)
+export const runDot = (run: Run | null | undefined, now = Date.now()) =>
+  run ? `<span class="dot ${runState(run, now)}" title="${esc(runTitle(run, now))}"></span>` : '';
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 

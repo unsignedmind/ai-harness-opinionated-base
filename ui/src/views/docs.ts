@@ -106,9 +106,11 @@ function empty(docs: Docs, canPick: boolean | undefined) {
     : docs.folder
       ? `<p class="muted">No text files under <code>${esc(docs.folder)}/</code>.</p>`
       : '<p class="muted">No docs loaded.</p>';
-  const pick = canPick ? '<button type="button" class="primary" data-action="pick">Open the repo folder</button>' : '';
+  const pick = canPick
+    ? '<button type="button" class="primary" data-action="pick">Open the project folder</button>'
+    : '';
   return `<h1>Docs</h1><div class="empty">${why}${pick}
-    <p class="muted">The docs folder is set in <code>specs/config.json</code>: <code>"spec-ui": { "docs-folder": "docs" }</code>, relative to the repo root.</p></div>`;
+    <p class="muted">The docs folder is set in the project's <code>nos.config.json</code>: <code>"spec-ui": { "docs-folder": "docs" }</code>, relative to the project folder.</p></div>`;
 }
 
 export function renderDocs(docs: Docs, r: Route, ui: ExploreUi): string {

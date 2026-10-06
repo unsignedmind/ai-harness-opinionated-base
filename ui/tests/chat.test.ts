@@ -43,12 +43,12 @@ test('context line round trip', () => {
 test('contextOf names the spec of the routed step, phase or domain', () => {
   const model = buildModel(fixtureFiles());
   const step = contextOf(model, parseRoute(STEP));
-  expect(step?.path).toBe('specs/domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md');
+  expect(step?.path).toBe('.specs/domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md');
   expect(step?.label).toMatch(/^S1 /);
   expect(contextOf(model, parseRoute('#domains/dark-mode/tokens'))?.path).toBe(
-    'specs/domain-2-dark-mode/phases/phase-1-tokens/',
+    '.specs/domain-2-dark-mode/phases/phase-1-tokens/',
   );
-  expect(contextOf(model, parseRoute('#domains/dark-mode'))?.path).toBe('specs/domain-2-dark-mode/');
+  expect(contextOf(model, parseRoute('#domains/dark-mode'))?.path).toBe('.specs/domain-2-dark-mode/');
   expect(contextOf(model, parseRoute('#board'))).toBeNull();
   expect(askPrompt('specify', step!)).toContain('"specify"');
 });
@@ -649,4 +649,37 @@ test('a subagent opened from its step; one that cannot be resumed has no compose
   expect(dialog.querySelector<HTMLElement>('.chat-inspect')!.hidden).toBe(true);
   // back in the details view of the tab
   expect(FakeES.steps!.url).toBe(`/__chat/transcript-events?key=${A}`);
+});
+
+test('renderTabs shows the run of a tab next to its title, escaped', () => {
+  const base: ChatTab = {
+    key: 'aaaaaaaaaaaa',
+    title: 'Sync',
+    presence: 'ready',
+    running: false,
+    activity: null,
+    claudeSession: null,
+  };
+  const box = document.createElement('div');
+  box.innerHTML = renderTabs(
+    [
+      { ...base, run: { kind: 'quick', id: 7, domain: 'domain-1-sync', branch: 'quick-7<b>', worktree: 'D:/p/wt' } },
+      { ...base, key: 'bbbbbbbbbbbb', title: 'Main', run: null },
+    ],
+    'aaaaaaaaaaaa',
+    {},
+  );
+  const [withRun, without] = box.querySelectorAll('.chat-tab-name');
+  expect(withRun.querySelector('.run-tag')?.textContent).toBe('quick-7');
+  expect(withRun.getAttribute('title')).toBe('Sync — run quick-7 on branch quick-7<b>');
+  expect(withRun.querySelector('b')).toBeNull();
+  expect(without.querySelector('.run-tag')).toBeNull();
+});
+
+test('contextOf uses the specs root of the model, also a non-default one', () => {
+  const m = buildModel(fixtureFiles(), [], 'plans/specs');
+  expect(contextOf(m, parseRoute('#domains/dark-mode'))?.path).toBe('plans/specs/domain-2-dark-mode/');
+  expect(contextOf(m, parseRoute('#domains/dark-mode/tokens/extract-tokens'))?.path).toBe(
+    'plans/specs/domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md',
+  );
 });

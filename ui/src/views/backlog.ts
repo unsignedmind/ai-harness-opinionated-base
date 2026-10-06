@@ -3,19 +3,25 @@ import { applyFilters, itemsAt, sortItems, titleOf, type Filters, type SortKey }
 import { esc } from '../markdown';
 import type { Model } from '../model';
 import { hrefOf, viewHref } from '../route';
-import { STATUS_ORDER, statusLabel, type StatusKey } from '../status';
+import { HIDDEN_BY_DEFAULT, STATUS_ORDER, statusLabel, type StatusKey } from '../status';
 import { filterBar } from './filterbar';
 import { dots, hvnBadge, itemId, labelChips, pill, progressText, quickBadge } from './parts';
 
 export function renderBacklog(model: Model, f: Filters): string {
   const all = itemsAt(model, f.level);
   // tiles count everything the other filters let through, so they show where to narrow next
-  const pool = applyFilters(all, { ...f, statuses: [] });
+  // (every status, discarded included: its tile shows when there are any)
+  const pool = applyFilters(all, { ...f, statuses: [...STATUS_ORDER] });
   const byStatus: Partial<Record<StatusKey, number>> = {};
   for (const it of pool) byStatus[it.status.key] = (byStatus[it.status.key] ?? 0) + 1;
   const single = f.statuses.length === 1 ? f.statuses[0] : null;
+  // the "all" tile is the default view: without the statuses hidden by default
+  const hidden = HIDDEN_BY_DEFAULT.reduce((n, k) => n + (byStatus[k] ?? 0), 0);
+  const allTitle = hidden
+    ? ` title="without ${HIDDEN_BY_DEFAULT.map((k) => statusLabel(k)).join(', ')} (${hidden})"`
+    : '';
   const tiles =
-    `<a class="stat all${f.statuses.length ? '' : ' active'}" href="${esc(viewHref('backlog', { ...f, statuses: [] }))}"><b>${pool.length}</b> ${f.level}</a>` +
+    `<a class="stat all${f.statuses.length ? '' : ' active'}"${allTitle} href="${esc(viewHref('backlog', { ...f, statuses: [] }))}"><b>${pool.length - hidden}</b> ${f.level}</a>` +
     STATUS_ORDER.filter((k) => byStatus[k])
       .map(
         (k) =>

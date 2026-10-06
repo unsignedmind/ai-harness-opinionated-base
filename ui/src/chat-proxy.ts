@@ -15,15 +15,18 @@
 //                              deny|revoke|rename ?id=
 // Who may call: this machine, or a paired device (src/access.ts gates every request before this).
 // Mutating calls must come from the page itself (Origin host == Host). Chat actions and details
-// views go to the audit log (specs/.chat/audit.log) with the device that did them.
+// views go to the audit log (<specs>/.chat/audit.log) with the device that did them.
+// The project is the main checkout (roots.main): the chat state dir and the session keys come from
+// cli/src/chat/paths.js, so the CLI, the chat server and this proxy agree on them.
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { audit } from '../../cli/src/chat/devices.js';
+import { keyOf, stateDirOf } from '../../cli/src/chat/paths.js';
+import type { Roots } from '../../cli/src/roots.js';
 import { createAccess, sameOrigin, type Access } from './access.ts';
 
 type Req = http.IncomingMessage;
@@ -31,21 +34,8 @@ type Res = http.ServerResponse;
 
 const MAX_BODY = 1024 * 1024;
 
-const nosCli = () => fileURLToPath(new URL('../../cli/bin/nos.js', import.meta.url));
-
-export const stateDirOf = (root: string, env = process.env) =>
-  env.NOS_CHAT_STATE_DIR ? resolve(env.NOS_CHAT_STATE_DIR) : join(root, 'specs', '.chat');
-
-const realDir = (dir: string) => {
-  try {
-    return realpathSync.native(dir);
-  } catch {
-    return resolve(dir);
-  }
-};
-
-// same as keyOf in cli/src/chat/paths.js: sha256 of the real project path, first 12 hex chars
-export const keyOf = (root: string) => createHash('sha256').update(realDir(root)).digest('hex').slice(0, 12);
+// the nos CLI next to the viewer (from the file path: under jsdom new URL(…, import.meta.url) is jsdom's URL)
+export const nosCli = () => resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'cli', 'bin', 'nos.js');
 
 function readBody(req: Req): Promise<Buffer> {
   return new Promise((done, fail) => {
@@ -132,11 +122,11 @@ function get(port: number, path: string): Promise<{ code: number; body: unknown 
   });
 }
 
-// `nos chat restart`: the chat server of the project, fresh (its running Claude Code runs stop).
+// `nos chat restart`: the chat server of the project (main), fresh (its running Claude Code runs stop).
 // Resolves with the server address, or rejects with why it did not start.
-export function restartChatServer(root: string, cli = nosCli()): Promise<string> {
+export function restartChatServer(main: string, cli = nosCli()): Promise<string> {
   return new Promise((done, fail) =>
-    execFile(process.execPath, [cli, 'chat', 'restart', '--root', root], { timeout: 20000 }, (err, stdout) => {
+    execFile(process.execPath, [cli, 'chat', 'restart', '--root', main], { timeout: 20000 }, (err, stdout) => {
       try {
         const out = JSON.parse(stdout);
         if (out.server) return done(String(out.server));
@@ -154,8 +144,9 @@ export type ChatHandlerOptions = {
   access?: Access;
 };
 
-export function chatHandler(root: string, opts: ChatHandlerOptions = {}) {
-  const stateDir = opts.stateDir ?? stateDirOf(root);
+export function chatHandler(roots: Pick<Roots, 'main' | 'specs'>, opts: ChatHandlerOptions = {}) {
+  const root = roots.main;
+  const stateDir = opts.stateDir ?? stateDirOf(roots);
   const cli = opts.cli ?? nosCli();
   const access = opts.access ?? createAccess({ stateDir });
   const key = keyOf(root);

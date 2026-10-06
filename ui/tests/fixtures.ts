@@ -1,4 +1,4 @@
-// A small specs/ tree as the loader hands it over: repo-relative path -> file text.
+// A small specs root (.specs/) as the loader hands it over: path relative to the specs root -> file text.
 export const IDEA_MD = `# Idea: Dark mode
 
 ## Intent
@@ -33,7 +33,7 @@ export const PLAN = {
           status: 'done',
           'human-validation-needed': false,
           description: '- grep colours',
-          'spec-file': 'specs/domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md',
+          'spec-file': 'domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md',
         },
       ],
     },
@@ -51,7 +51,7 @@ export const PLAN = {
           status: 'in-review',
           'human-validation-needed': false,
           description: '',
-          'spec-file': 'specs/domain-2-dark-mode/phases/phase-2-switch/step-2-media-query.md',
+          'spec-file': 'domain-2-dark-mode/phases/phase-2-switch/step-2-media-query.md',
         },
         {
           slug: 'toggle-button',
@@ -85,12 +85,12 @@ Pull colours out.
 `;
 
 export const fixtureFiles = (): Record<string, string> => ({
-  'specs/domain-1-i18n/idea.md': '# Idea: i18n support\n\n## Intent\nTwo languages.\n',
-  'specs/domain-2-dark-mode/idea.md': IDEA_MD,
-  'specs/domain-2-dark-mode/domain.json': JSON.stringify(DOMAIN),
-  'specs/domain-2-dark-mode/plan.json': JSON.stringify(PLAN),
-  'specs/domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md': STEP_1_MD,
-  'specs/domain-2-dark-mode/phases/phase-2-switch/step-2-media-query.md': '',
+  'domain-1-i18n/idea.md': '# Idea: i18n support\n\n## Intent\nTwo languages.\n',
+  'domain-2-dark-mode/idea.md': IDEA_MD,
+  'domain-2-dark-mode/domain.json': JSON.stringify(DOMAIN),
+  'domain-2-dark-mode/plan.json': JSON.stringify(PLAN),
+  'domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md': STEP_1_MD,
+  'domain-2-dark-mode/phases/phase-2-switch/step-2-media-query.md': '',
 });
 
 // fixtureFiles plus quick steps: one in the planned idea, one in the idea without a plan
@@ -102,21 +102,21 @@ export const QUICK_STEPS = [
     'human-validation-needed': true,
     'review-needed': true,
     description: '',
-    'spec-file': 'specs/domain-2-dark-mode/quick-steps/step-4-fix-contrast.md',
+    'spec-file': 'domain-2-dark-mode/quick-steps/step-4-fix-contrast.md',
   },
 ];
 
 export const quickFixtureFiles = (): Record<string, string> => ({
   ...fixtureFiles(),
-  'specs/domain-2-dark-mode/quick-steps/quick-steps.json': JSON.stringify(QUICK_STEPS),
-  'specs/domain-2-dark-mode/quick-steps/step-4-fix-contrast.md':
+  'domain-2-dark-mode/quick-steps/quick-steps.json': JSON.stringify(QUICK_STEPS),
+  'domain-2-dark-mode/quick-steps/step-4-fix-contrast.md':
     '# Fix contrast\n\n## Acceptance Criteria\n(x) Muted text is readable\n( ) Checked in dark mode\n',
-  'specs/domain-1-i18n/quick-steps/quick-steps.json': JSON.stringify([
+  'domain-1-i18n/quick-steps/quick-steps.json': JSON.stringify([
     {
       slug: 'add-german',
       intent: 'Add German.',
       status: 'open',
-      'spec-file': 'specs/domain-1-i18n/quick-steps/step-5-add-german.md',
+      'spec-file': 'domain-1-i18n/quick-steps/step-5-add-german.md',
     },
   ]),
 });

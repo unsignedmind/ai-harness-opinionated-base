@@ -3,7 +3,7 @@ import { sortItems, titleOf, type Item } from '../filter';
 import { esc } from '../markdown';
 import { hrefOf } from '../route';
 import { PHASE_BOARD_STATUSES, STATUS_ORDER, STEP_BOARD_STATUSES, type StatusKey } from '../status';
-import { dots, hvnBadge, itemId, quickBadge, keyPill, labelChips, pill, progressText } from './parts';
+import { dots, hvnBadge, itemId, quickBadge, keyPill, labelChips, pill, progressText, runDot } from './parts';
 
 // `level` picks the always-shown columns; without it, phases get the phase lifecycle.
 export type KanbanOptions = {
@@ -19,6 +19,10 @@ const path = (it: Item) =>
       : `${it.idea.name} › Quick`
     : it.idea.name;
 
+// a quick step's run, or the plan's run on the plan steps still being worked on
+const FINISHED = ['done', 'merged', 'discarded'];
+const cardRun = (it: Item) => (it.kind === 'step' && (it.quick || !FINISHED.includes(it.status.key)) ? it.run : null);
+
 function card(it: Item, o: KanbanOptions) {
   const meta = [
     it.kind === 'step' ? quickBadge(it.quick) : '',
@@ -28,7 +32,7 @@ function card(it: Item, o: KanbanOptions) {
     o.labels ? labelChips(it.labels) : '',
   ].join('');
   return `<div class="card kcard" data-href="${esc(hrefOf(it))}">
-    <div class="kt"><span class="id mono">${esc(itemId(it))}</span>${esc(titleOf(it))}</div>
+    <div class="kt">${runDot(cardRun(it))}<span class="id mono">${esc(itemId(it))}</span>${esc(titleOf(it))}</div>
     ${o.where ? `<div class="path">${esc(path(it))}</div>` : ''}
     ${meta ? `<div class="row">${meta}</div>` : ''}
   </div>`;

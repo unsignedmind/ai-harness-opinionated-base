@@ -24,7 +24,7 @@ export type App = {
 export type AppOptions = {
   // standalone viewer: true when the browser can pick folders, false when it cannot
   canPick?: boolean;
-  // the host can write specs/ (dev server): Ideas offer "Manual promote"
+  // the host can write the specs (dev server): Ideas offer "Manual promote"
   canPromote?: boolean;
   // chat with the project's Claude Code session (dev server): detail pages offer "Ask Claude"
   canChat?: boolean;

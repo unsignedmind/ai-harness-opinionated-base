@@ -1,24 +1,26 @@
 // Dev server (`npm run dev`) and tests (`npm test`) of the specs viewer. Its own package, separate
-// from the project it sits in. `npm run dev-to-lan` (mode "lan") serves HTTPS with the certificate
-// in specs/.chat/tls (src/tls.ts), so phones on the network talk to it encrypted.
-import { dirname } from 'node:path';
+// from the project it sits in. The project comes from the resolver (cli/src/roots.js): the walk from
+// this folder up to the first nos.config.json lands on the project nos sits in; NOS_SPECS_ROOT
+// overrides it. Not set up: the server still starts and the page says "run nos init".
+// `npm run dev-to-lan` (mode "lan") serves HTTPS with the certificate in <specs>/.chat/tls
+// (src/tls.ts), so phones on the network talk to it encrypted. NOS_UI_OPEN=0 keeps the browser closed.
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
-import { stateDirOf } from './src/chat-proxy.ts';
-import { serveSpecs } from './src/serve-specs.ts';
+import { stateDirOf } from '../cli/src/chat/paths.js';
+import { openBrowser, serveSpecs, specsSetup } from './src/serve-specs.ts';
 import { loadTls } from './src/tls.ts';
 
-// specs/ sits at the repo root, outside the viewer's root
-const specs = fileURLToPath(new URL('../../../../specs', import.meta.url));
-
 export default defineConfig(async ({ mode }) => {
-  const tls = mode === 'lan' ? await loadTls(stateDirOf(dirname(specs))) : null;
+  const setup = specsSetup({ cwd: resolve(dirname(fileURLToPath(import.meta.url))), env: process.env });
+  const tls = mode === 'lan' && setup.roots ? await loadTls(stateDirOf(setup.roots)) : null;
   return {
-    plugins: [serveSpecs(specs, { fingerprint: tls?.fingerprint ?? null })],
+    plugins: [serveSpecs(setup, { fingerprint: tls?.fingerprint ?? null })],
     server: {
       port: 5180,
-      open: '/dev.html',
+      // NOS_UI_OPEN=0: never open a browser tab (src/serve-specs.ts openBrowser)
+      open: openBrowser(process.env) ? '/dev.html' : false,
       ...(tls && { https: { key: tls.key, cert: tls.cert } }),
     },
     test: {
