@@ -13,7 +13,8 @@
     "format-check": null,
     "typecheck": null,
     "e2e": null,
-    "additional": []
+    "additional": [],
+    "timeout": 30
   },
   "project-commands": {
     "install": null,

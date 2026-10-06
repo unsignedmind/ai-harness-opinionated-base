@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { writeFileAtomic } from './fs-atomic.js';
 import { randomToken, releaseLock, takeLock } from './lock.js';
 import { slash } from './roots.js';
 
@@ -31,8 +32,9 @@ export function readJsonFile(file) {
   }
 }
 
+// atomic: a concurrent reader (another CLI, spec-ui) never sees half a file
 export function writeJsonFile(file, data) {
-  writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+  writeFileAtomic(file, JSON.stringify(data, null, 2) + '\n');
 }
 
 function initialConfig(roots) {

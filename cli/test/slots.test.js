@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { NosError, SLOT_TIMEOUT } from '../src/exit-codes.js';
 import { lockStatus, releaseLock, takeLock } from '../src/lock.js';
 import { withSlot } from '../src/slots.js';
-import { makeProject } from './helpers.js';
+import { makeProject, runNode, srcUrl } from './helpers.js';
 
 const project = (t, worktrees) => makeProject(t, { config: { worktrees } }).roots;
 
@@ -77,4 +78,73 @@ test('withSlot: no free slot within slotWait (fractional seconds) -> SLOT_TIMEOU
   );
   assert.ok(Date.now() - start >= 190);
   assert.equal(ran, false);
+});
+
+// takes slot-<n> in a child process; alive: the child keeps running until killed
+async function foreignLease(t, roots, n, { alive = false } = {}) {
+  const script = `
+    import { takeLock } from '${srcUrl('lock.js')}';
+    takeLock(${JSON.stringify(roots)}, 'slot-${n}', { run: 'quick-9', token: 'f0f0f0f${n}', command: 'exec dev' });
+    console.log('taken');
+    ${alive ? 'setInterval(() => {}, 1000);' : ''}`;
+  if (!alive) {
+    const res = await runNode(script);
+    assert.equal(res.code, 0, res.stderr);
+    return null;
+  }
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { windowsHide: true });
+  t.after(() => child.kill());
+  await new Promise((resolve) => child.stdout.once('data', resolve));
+  return child;
+}
+
+test('a slot lease whose process is gone is reclaimed by the next taker (D-10)', async (t) => {
+  const roots = project(t, { slots: 1, slotWait: 1 });
+  await foreignLease(t, roots, 1);
+  assert.equal(lockStatus(roots, 'slot-1').pidAlive, false);
+
+  const lease = await withSlot(roots, (slot, info) => info, { label: 'gate e2e' });
+
+  assert.equal(lease.slot, 1);
+  assert.equal(lease.reclaimed.slot, 1);
+  assert.equal(lease.reclaimed.holder.token, 'f0f0f0f1');
+  assert.equal(lockStatus(roots, 'slot-1').held, false, 'released after fn');
+  assert.equal(lockStatus(roots, 'reclaim-slot-1').held, false, 'no guard left');
+});
+
+test('a slot lease whose process is alive is never reclaimed: the taker waits and times out', async (t) => {
+  const roots = project(t, { slots: 1, slotWait: 0.3 });
+  await foreignLease(t, roots, 1, { alive: true });
+
+  await assert.rejects(
+    withSlot(roots, () => 'ran', { pollMs: 50 }),
+    (err) => err.code === SLOT_TIMEOUT,
+  );
+  assert.equal(lockStatus(roots, 'slot-1').holder.token, 'f0f0f0f1');
+});
+
+test('merge and ids locks of a dead process are never reclaimed by takeLock', async (t) => {
+  const roots = project(t, { slots: 1, slotWait: 1 });
+  const res = await runNode(`
+    import { takeLock } from '${srcUrl('lock.js')}';
+    takeLock(${JSON.stringify(roots)}, 'merge', { token: 'dead0001' });`);
+  assert.equal(res.code, 0, res.stderr);
+  assert.throws(
+    () => takeLock(roots, 'merge', { token: 'mine' }),
+    (err) => err.code === 4,
+  );
+});
+
+test('withSlot: an abort signal stops the wait', async (t) => {
+  const roots = project(t, { slots: 1, slotWait: 10 });
+  takeLock(roots, 'slot-1', { token: 'other' });
+  const abort = new AbortController();
+  setTimeout(() => abort.abort('SIGINT'), 100);
+
+  const start = Date.now();
+  await assert.rejects(
+    withSlot(roots, () => 'ran', { abort: abort.signal }),
+    /interrupted while waiting/,
+  );
+  assert.ok(Date.now() - start < 2000);
 });

@@ -319,9 +319,11 @@ const SPECS_HELP = `Usage: nos specs commit (--run <kind>-<id> | --domain <domai
 specs commit
   Commits the specs repo (<specs>, its own git repo), scoped: git -C <specs> add -- config.json <domain>
   (adds, changes and deletions inside them, nothing else; never add -A), then commit --only those paths,
-  only when something is staged. An index.lock of another writer is retried 5 times, 200ms apart.
-  When specs.remote is set in nos.config.json: git push origin HEAD; a failed push is a warning (stderr
-  and "warning" in the result), the commit stays.
+  only when something is staged. A *.lock of another writer (index, HEAD, refs) is retried 5 times, 200ms
+  apart. No hooks, no signing, git never prompts (GIT_TERMINAL_PROMPT=0, GCM_INTERACTIVE=never).
+  When specs.remote is set in nos.config.json: git push -u origin HEAD after a commit, or when HEAD is
+  ahead of its upstream (a commit an earlier failed push left behind) or has none. A failed push or one
+  running over 60s is a warning (stderr and "warning" in the result), the commit stays.
     --run <kind>-<id>  the domain of that run file (<specs>/.runs/<kind>-<id>.json)
     --domain <domain>  a domain outside any run (idea, plan or quick step creation)
     --config           config.json only (e.g. setup changed the chat node); "domain" is null
@@ -340,6 +342,7 @@ specs commit
 
 specs find-step
   Scans <specs>/domain-*/plan.json and quick-steps/quick-steps.json for the step id. Exit 1 when not found.
+  An unreadable file is skipped with an entry in "warnings" (only present when there is one).
 
   nos specs find-step 7
   {
@@ -365,9 +368,12 @@ lease (smallest free slot-<n> of worktrees.slots) with NOS_SLOT=<n>; no free slo
 worktrees.slotWait seconds -> exit 7. Full output: <specs>/.runs/logs/<run>/<tool>.log (<run> = the
 run of this worktree, else main); the result carries the last 60 lines.
 "additional" entries: a command string (name additional-<n>) or { "name", "cmd" }.
+A tool running longer than quality-tools.timeout minutes (default 30) is killed with its process tree:
+status "fail", "timedOut": true. A slot lease whose process is gone is taken over: "reclaimed":
+{ slot, holder } in the result. Ctrl+C / SIGTERM kill the running tool's tree, release the lease, exit 1.
 
-Exit: 0 all configured tools pass, 1 a tool failed (the JSON is still printed) or quality tools not
-set up (none configured), 7 no slot for e2e.
+Exit: 0 all configured tools pass, 1 a tool failed (the JSON is still printed), quality tools not
+set up (none configured; e2e counts only with --e2e) or interrupted, 7 no slot for e2e.
 
 Options:
   --e2e          Also run e2e
@@ -379,9 +385,10 @@ Example:
     "action": "gate",
     "pass": false,
     "tools": [
-      { "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "tail": "<last 60 lines>",
-        "log": "D:/repo/.specs/.runs/logs/quick-7/test.log" },
-      { "name": "lint", "cmd": null, "status": "not-configured", "exit": null, "tail": "", "log": null }
+      { "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "signal": null, "timedOut": false,
+        "tail": "<last 60 lines>", "log": "D:/repo/.specs/.runs/logs/quick-7/test.log" },
+      { "name": "lint", "cmd": null, "status": "not-configured", "exit": null, "signal": null,
+        "timedOut": false, "tail": "", "log": null }
     ]
   }`;
 
@@ -391,9 +398,11 @@ Run a project command of work's nos.config.json ("project-commands") in a shell 
 stdio inherited (no JSON result), NOS_HOME set. The exit code is the command's.
 dev takes a slot lease (smallest free slot-<n> of worktrees.slots, NOS_SLOT=<n> in its env) and holds it
 until the server exits; Ctrl+C / SIGTERM stop the server's whole process tree, then the lease is released.
-No free slot within worktrees.slotWait seconds -> exit 7.
+No free slot within worktrees.slotWait seconds -> exit 7. A slot lease whose process is gone (killed
+hard) is taken over, reported on stderr. Locks and runs are never taken over automatically.
 
-Exit: the command's code, 1 the command is not configured (null), 2 unknown name, 7 no slot (dev).
+Exit: the command's code (130 after SIGINT, 143 after SIGTERM), 1 the command is not configured (null),
+2 unknown name, 7 no slot (dev).
 
 Example:
   nos exec install`;

@@ -1,17 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { FAILED, HELD, NosError, USAGE } from './exit-codes.js';
-import { sleepSync } from './proc.js';
+import { writeFileAtomic } from './fs-atomic.js';
 import { isInside, slash } from './roots.js';
 
 // Run registry: <specs>/.runs/<kind>-<id>.json, one file per running plan or quick step (one writer each).
@@ -83,18 +74,8 @@ export function writeRun(roots, run) {
   }
   const file = runPath(roots, runIdOf(run));
   mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(run, null, 2) + '\n');
-  for (let attempt = 0; ; attempt++) {
-    try {
-      renameSync(tmp, file);
-      return file;
-    } catch (err) {
-      // Windows: a reader (spec-ui) has the file open for a moment
-      if (attempt >= 20 || (err.code !== 'EPERM' && err.code !== 'EACCES')) throw err;
-      sleepSync(25);
-    }
-  }
+  writeFileAtomic(file, JSON.stringify(run, null, 2) + '\n');
+  return file;
 }
 
 export function deleteRun(roots, runId) {

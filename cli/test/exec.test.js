@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { FAILED, NosError, SLOT_TIMEOUT, USAGE } from '../src/exit-codes.js';
 import { execCommand } from '../src/exec.js';
 import { lockStatus, takeLock } from '../src/lock.js';
+import { slash } from '../src/roots.js';
 import { invokeCli, makeProject } from './helpers.js';
 
 const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'nos.js');
@@ -90,8 +91,20 @@ test('execCommand dev: SIGINT / SIGTERM stop the server tree, the lease is relea
     signals.emit(signal);
     const code = await running;
 
-    assert.notEqual(code, 0, signal);
+    assert.equal(code, signal === 'SIGINT' ? 130 : 143, signal);
     assert.equal(lockStatus(roots, 'slot-1').held, false, signal);
     assert.equal(signals.listenerCount(signal), 0, 'handlers removed');
   }
+});
+
+test("execCommand stdio 'log': output to <specs>/.runs/logs/<run>/<name>.log, resolves { code, log }", async (t) => {
+  const { roots } = project(t, { install: `node -e "console.log('installed'); process.exit(3)"` });
+
+  const result = await execCommand(roots, 'install', { stdio: 'log', run: 'quick-7' });
+
+  assert.deepEqual(result, {
+    code: 3,
+    log: slash(path.join(roots.specs, '.runs', 'logs', 'quick-7', 'install.log')),
+  });
+  assert.match(readFileSync(result.log, 'utf8'), /^installed/);
 });

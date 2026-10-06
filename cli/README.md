@@ -89,8 +89,8 @@ For codes 3–7 stdout also gets `{ "action", "error", "exit", "details" }` (det
 | --- | --- |
 | `specs commit` | 0, 1 (not its own repo, unknown run or domain, git failed), 2 (not exactly one of `--run`/`--domain`/`--config`, no `-m`) |
 | `specs find-step` | 0, 1 not found, 2 bad id |
-| `gate` | 0 pass, 1 a tool failed (JSON still printed) or not set up, 7 no slot for e2e |
-| `exec` | the command's code, 1 not configured, 2 unknown name, 7 no slot (dev) |
+| `gate` | 0 pass, 1 a tool failed or timed out (JSON still printed), not set up or interrupted, 7 no slot for e2e |
+| `exec` | the command's code (130 after SIGINT, 143 after SIGTERM), 1 not configured, 2 unknown name, 7 no slot (dev) |
 | `lock take` / `lock release` | 0, 4 held by another token, 2 no token / bad name |
 | any command reserving ids | 4 when lock `ids` stays held 10s (hint `nos lock release ids --break`) |
 
@@ -316,8 +316,9 @@ nos specs commit (--run <kind>-<id> | --domain <domain> | --config) -m <message>
 Commits the specs repo, scoped to `config.json` + one domain folder: `git -C <specs> add -- config.json <domain>` (adds, changes and deletions inside them; never `add -A`), then `commit --only` those paths, so files another writer staged stay out. Commits only when something is staged.
 
 - `--run <kind>-<id>`: the domain of that run file. `--domain <d>`: a domain outside any run (idea, plan or quick step creation). `--config`: `config.json` only (`domain: null`). Exactly one of the three.
-- `index.lock` of another writer: retried 5 times, 200 ms apart.
-- `specs.remote` set: `git push origin HEAD` after the commit. A failed push is a warning (stderr + `warning`), the commit stays.
+- A `*.lock` of another writer (`index.lock`, `HEAD.lock`, ref locks): retried 5 times, 200 ms apart.
+- No hooks and no signing in the specs repo (`-c core.hooksPath= -c commit.gpgsign=false`). git never prompts (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`).
+- `specs.remote` set: `git push -u origin HEAD` after a commit, and also without a new commit when `HEAD` is ahead of its upstream (an earlier push failed) or has none. A failed push or one running over 60 s is a warning (stderr + `warning`), the commit stays.
 - Refused when `<specs>` is not the top of its own git repo (a `git -C` would reach the project repo).
 
 ```sh
@@ -338,7 +339,7 @@ $ nos specs commit --run quick-7 -m "step-7: develop"
 nos specs find-step <id> [--root <dir>]
 ```
 
-Scans `<specs>/domain-*/plan.json` and `quick-steps/quick-steps.json`. Exit 1 when the id is in neither.
+Scans `<specs>/domain-*/plan.json` and `quick-steps/quick-steps.json`. Exit 1 when the id is in neither. An unreadable file is skipped with an entry in `warnings` (present only then; on exit 1 in `details.warnings`).
 
 ```sh
 $ nos specs find-step 7
@@ -364,7 +365,11 @@ $ nos specs find-step 7
 nos gate [--e2e] [--root <dir>]
 ```
 
-Runs the `quality-tools` of work's `nos.config.json` in the work root, in order: `test`, `lint`, `format-check`, `typecheck`, each `additional` entry (a command string, named `additional-<n>`, or `{ "name", "cmd" }`), then `e2e` (only with `--e2e`). Every tool runs, also after a failure. Each runs in a shell with `NOS_HOME`; only e2e runs under a slot lease with `NOS_SLOT=<n>`. Full output goes to `<specs>/.runs/logs/<run>/<tool>.log` (`<run>` = the run of this worktree, else `main`), the result carries the last 60 lines. No tool configured at all → exit 1 "quality tools are not set up".
+Runs the `quality-tools` of work's `nos.config.json` in the work root, in order: `test`, `lint`, `format-check`, `typecheck`, each `additional` entry (a command string, named `additional-<n>`, or `{ "name", "cmd" }`), then `e2e` (only with `--e2e`). Every tool runs, also after a failure. Each runs in a shell with `NOS_HOME`; only e2e runs under a slot lease with `NOS_SLOT=<n>`. Full output goes to `<specs>/.runs/logs/<run>/<tool>.log` (`<run>` = the run of this worktree, else `main`), the result carries the last 60 lines. No tool configured at all (e2e counts only with `--e2e`) → exit 1 "quality tools are not set up".
+
+- Timeout: a tool running longer than `quality-tools.timeout` minutes (default 30) is killed with its process tree: `status: "fail"`, `timedOut: true`. `signal` is the signal that ended a tool (else `null`).
+- Ctrl+C / SIGTERM: the running tool's tree is killed, the e2e lease released, exit 1 "gate interrupted".
+- A slot lease of a dead process taken over for e2e adds `"reclaimed": { "slot", "holder" }` to the result.
 
 ```sh
 $ nos gate
@@ -372,9 +377,10 @@ $ nos gate
   "action": "gate",
   "pass": false,
   "tools": [
-    { "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "tail": "<last 60 lines>",
-      "log": "D:/repo/.specs/.runs/logs/quick-7/test.log" },
-    { "name": "lint", "cmd": null, "status": "not-configured", "exit": null, "tail": "", "log": null }
+    { "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "signal": null, "timedOut": false,
+      "tail": "<last 60 lines>", "log": "D:/repo/.specs/.runs/logs/quick-7/test.log" },
+    { "name": "lint", "cmd": null, "status": "not-configured", "exit": null, "signal": null, "timedOut": false,
+      "tail": "", "log": null }
   ]
 }
 ```
@@ -385,7 +391,9 @@ $ nos gate
 nos exec <install|dev|deploy-test> [--root <dir>]
 ```
 
-Runs a `project-commands` entry of work's `nos.config.json` in a shell in the work root, stdio inherited (no JSON), `NOS_HOME` set. The exit code is the command's. `dev` takes a slot lease (`NOS_SLOT=<n>`) and holds it until the server exits; SIGINT/SIGTERM stop the server's process tree (`taskkill /T /F` on Windows, the process group elsewhere, `src/proc.js`), then the lease is released. A `null` command → exit 1, an unknown name → 2, no slot within `slotWait` → 7.
+Runs a `project-commands` entry of work's `nos.config.json` in a shell in the work root, stdio inherited (no JSON), `NOS_HOME` set. The exit code is the command's. `dev` takes a slot lease (`NOS_SLOT=<n>`) and holds it until the server exits; SIGINT/SIGTERM stop the server's process tree (`taskkill /T /F` on Windows, the process group elsewhere, `src/proc.js`), then the lease is released and the exit code is 130 (SIGINT) / 143 (SIGTERM). A `null` command → exit 1, an unknown name → 2, no slot within `slotWait` → 7. A dev lease taken over from a dead process is reported on stderr.
+
+`execCommand(roots, name, { stdio: 'log' })` (for `run start`'s install) writes the output to `<specs>/.runs/logs/<run>/<name>.log` and resolves with `{ code, log }`.
 
 ### `lock`
 
@@ -413,7 +421,7 @@ $ nos lock status merge
 ### Locks, slots and the run registry (internal)
 
 - Lock `ids`: every id reservation (`create-domain`, `create-plan`, `update-plan`, `create-quick-step`) runs its read-modify-write of `<specs>/config.json` under it, waiting up to 10 s.
-- Slots: leases on ports. `gate --e2e` and `exec dev` take the smallest free `slot-<n>` (n in 1..`worktrees.slots` of main's `nos.config.json`), polling every 2 s up to `worktrees.slotWait` seconds (fractions allowed), then exit 7 with the holders.
+- Slots: leases on ports. `gate --e2e` and `exec dev` take the smallest free `slot-<n>` (n in 1..`worktrees.slots` of main's `nos.config.json`), polling every 2 s up to `worktrees.slotWait` seconds (fractions allowed), then exit 7 with the holders. A lease whose process is gone (holder `pid` not alive, e.g. killed hard) is reclaimed by the next taker; locks (`merge`, `ids`) and runs are never auto-broken [D-10].
 - Run registry `<specs>/.runs/<kind>-<id>.json` (`src/runs.js`): `{ kind, id, domain, branch, worktree, base, mainBranch, token, started, seen, phase }`, `phase` one of `develop`, `integrate`, `gate`, `merge`, `merged`, `abandoned`. Written atomically (tmp + rename). Commands that take `--token` check it against the run file (`NOS_RUN_TOKEN` as fallback): missing → 1, another token → 4.
 
 ### `chat`

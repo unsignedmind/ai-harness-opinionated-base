@@ -1,13 +1,15 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { FAILED, HELD, NosError, USAGE } from './exit-codes.js';
+import { writeFileAtomic } from './fs-atomic.js';
 import { pidAlive, sleepSync } from './proc.js';
 import { slash } from './roots.js';
 
 // Locks: <specs>/.locks/<name>/holder.json. The directory is created by mkdir (atomic: exactly one taker
 // wins), holder.json = { run, token, pid, command, taken }. The same token re-takes its own lock (a
 // crashed command resumes). Never broken automatically: releaseLock with { break: true } is the user's call.
+// The one exception are slot leases (slots.js): reclaimDeadLock frees a slot whose leasing process is gone.
 export const LOCKS_DIR = '.locks';
 export const HOLDER_FILE = 'holder.json';
 // a taker between mkdir and writing holder.json: others wait this long for the file before reporting
@@ -32,29 +34,24 @@ const ageSecOf = (holder) => {
   return Number.isNaN(taken) ? null : Math.max(0, Math.round((Date.now() - taken) / 1000));
 };
 
+// holder.json: the holder, undefined when missing, null when unreadable (reported as an unknown holder)
 function readHolder(dir) {
   try {
     return JSON.parse(readFileSync(path.join(dir, HOLDER_FILE), 'utf8'));
   } catch (err) {
     if (err.code === 'ENOENT') return undefined;
-    return null; // unreadable: reported as an unknown holder
+    return null;
   }
 }
 
-// holder.json via tmp + rename: a reader never sees half a file
+// holder.json atomically. false when the lock folder vanished meanwhile (broken by the user).
 function writeHolder(dir, holder) {
-  const file = path.join(dir, HOLDER_FILE);
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(holder, null, 2) + '\n');
-  for (let attempt = 0; ; attempt++) {
-    try {
-      renameSync(tmp, file);
-      return;
-    } catch (err) {
-      // Windows: the target is open in a reader for a moment
-      if (attempt >= 20 || (err.code !== 'EPERM' && err.code !== 'EACCES')) throw err;
-      sleepSync(POLL_MS);
-    }
+  try {
+    writeFileAtomic(path.join(dir, HOLDER_FILE), JSON.stringify(holder, null, 2) + '\n');
+    return true;
+  } catch (err) {
+    if (err.code === 'ENOENT') return false;
+    throw new NosError(FAILED, `Cannot write ${slash(path.join(dir, HOLDER_FILE))}: ${err.message}`);
   }
 }
 
@@ -76,23 +73,26 @@ function heldError(name, dir, holder) {
   return new NosError(HELD, `lock ${name} is held by ${by}${age}`, details);
 }
 
-// One attempt: { ok: true, holder, reentrant } | { ok: false, holder } (holder undefined: being written)
+// One attempt: { ok: true, holder, reentrant } | { ok: false, holder } (holder undefined: being written or gone)
 function tryTake(dir, holder) {
   try {
     mkdirSync(dir);
   } catch (err) {
     // EPERM/EACCES: Windows while the directory is being deleted by a release
     if (err.code === 'EPERM' || err.code === 'EACCES') return { ok: false, holder: undefined };
-    if (err.code !== 'EEXIST') throw err;
+    if (err.code !== 'EEXIST') throw new NosError(FAILED, `Cannot create ${slash(dir)}: ${err.message}`);
     const current = readHolder(dir);
     if (current && current.token === holder.token) {
       const refreshed = { ...current, pid: holder.pid, taken: holder.taken };
-      writeHolder(dir, refreshed);
+      if (!writeHolder(dir, refreshed)) return { ok: false, holder: undefined };
+      // a --break and another taker may have come between read and write: the file must still be ours
+      const check = readHolder(dir);
+      if (check?.token !== holder.token) return { ok: false, holder: check };
       return { ok: true, holder: refreshed, reentrant: true };
     }
     return { ok: false, holder: current };
   }
-  writeHolder(dir, holder);
+  if (!writeHolder(dir, holder)) return { ok: false, holder: undefined };
   return { ok: true, holder, reentrant: false };
 }
 
@@ -116,6 +116,11 @@ export function takeLock(roots, name, { run = null, token, command = null } = {}
   }
 }
 
+function removeLockDir(dir) {
+  rmSync(path.join(dir, HOLDER_FILE), { force: true });
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+}
+
 // Releases lock name. Only the holder's token, or { break: true } (any holder).
 // Not held -> { released: false }. Returns { lock, path, released, broken, holder }.
 export function releaseLock(roots, name, token, { break: force = false } = {}) {
@@ -127,8 +132,7 @@ export function releaseLock(roots, name, token, { break: force = false } = {}) {
     if (!token) throw new NosError(FAILED, `lock ${name}: --token required (or --break)`);
     if (!holder || holder.token !== token) throw heldError(name, dir, holder);
   }
-  rmSync(path.join(dir, HOLDER_FILE), { force: true });
-  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  removeLockDir(dir);
   return {
     lock: name,
     path: slash(dir),
@@ -136,6 +140,33 @@ export function releaseLock(roots, name, token, { break: force = false } = {}) {
     broken: force && holder?.token !== token,
     holder: holder ?? null,
   };
+}
+
+// Frees lock name when its holder is still `dead` (same token) and that holder's process is gone.
+// Only for slot leases. A guard lock reclaim-<name> makes check-and-remove exclusive: two reclaimers never
+// remove a lease a third process took meanwhile. Returns true when the lock was removed.
+export function reclaimDeadLock(roots, name, dead) {
+  if (!dead?.token || pidAlive(dead.pid)) return false;
+  const dir = lockPath(roots, name);
+  const guard = `reclaim-${name}`;
+  const token = randomToken();
+  try {
+    takeLock(roots, guard, { token, command: `reclaim ${name}` });
+  } catch (err) {
+    if (!(err instanceof NosError)) throw err;
+    // a guard left by a reclaimer that died mid-reclaim: its process is gone, remove it for the next try
+    const stale = err.details?.holder;
+    if (stale && !pidAlive(stale.pid)) removeLockDir(lockPath(roots, guard));
+    return false;
+  }
+  try {
+    const current = readHolder(dir);
+    if (current?.token !== dead.token || pidAlive(current.pid)) return false;
+    removeLockDir(dir);
+    return true;
+  } finally {
+    releaseLock(roots, guard, token);
+  }
 }
 
 function dirExists(dir) {

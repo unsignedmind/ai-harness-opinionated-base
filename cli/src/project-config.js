@@ -16,6 +16,7 @@ export const DEFAULT_PROJECT_CONFIG = Object.freeze({
     typecheck: null,
     e2e: null,
     additional: Object.freeze([]),
+    timeout: 30,
   }),
   'project-commands': Object.freeze({ install: null, dev: null, 'deploy-test': null }),
   'spec-ui': Object.freeze({ 'docs-folder': 'docs' }),

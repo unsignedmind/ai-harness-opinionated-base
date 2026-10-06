@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { FAILED, NosError } from '../src/exit-codes.js';
+import { git } from '../src/git.js';
 import { slash } from '../src/roots.js';
 import { writeRun } from '../src/runs.js';
 import { commitSpecs, findStep } from '../src/specs-git.js';
@@ -244,4 +245,76 @@ test('nos specs find-step: not found -> exit 1, bad id -> 2', async (t) => {
   assert.equal((await invokeCli(['specs', 'find-step', '30'], { cwd: roots.work })).code, 1);
   assert.equal((await invokeCli(['specs', 'find-step', 'x'], { cwd: roots.work })).code, 2);
   assert.equal((await invokeCli(['specs', 'find-step'], { cwd: roots.work })).code, 2);
+});
+
+test('commitSpecs retries on a ref lock (HEAD.lock / refs lock) of another writer, not only index.lock', noGit, (t) => {
+  const { roots } = specsProject(t);
+  writeFile(roots.specs, 'domain-1-auth/plan.json', '{}');
+  const refLock = path.join(roots.specs, '.git', 'refs', 'heads', 'main.lock');
+  writeFileSync(refLock, '');
+  const remover = spawn(process.execPath, [
+    '-e',
+    `setTimeout(() => require('node:fs').rmSync(${JSON.stringify(refLock)}), 300)`,
+  ]);
+  t.after(() => remover.kill());
+
+  const result = commitSpecs(roots, { domain: 'domain-1-auth', message: 'x' });
+
+  assert.equal(result.committed, true);
+  assert.equal(gitOk(['rev-parse', 'HEAD'], roots.specs), result.sha);
+});
+
+test('commitSpecs runs no hooks and never signs in the specs repo', noGit, (t) => {
+  const { roots } = specsProject(t);
+  writeFile(roots.specs, '.git/hooks/pre-commit', '#!/bin/sh\nexit 1\n');
+  gitOk(['config', 'core.hooksPath', '.git/hooks'], roots.specs);
+  gitOk(['config', 'commit.gpgsign', 'true'], roots.specs);
+  writeFile(roots.specs, 'domain-1-auth/plan.json', '{}');
+
+  assert.equal(commitSpecs(roots, { domain: 'domain-1-auth', message: 'x' }).committed, true);
+});
+
+test('commitSpecs pushes a commit an earlier failed push left behind, also with nothing new to commit', noGit, (t) => {
+  const remote = path.join(makeTempRoot(t), 'specs.git');
+  gitOk(['init', '-q', '--bare', remote], path.dirname(remote));
+  const { roots } = specsProject(t, { specs: { dir: '.specs', remote } });
+  gitOk(['remote', 'add', 'origin', path.join(remote, 'missing')], roots.specs);
+  writeFile(roots.specs, 'domain-1-auth/plan.json', '{}');
+  const first = commitSpecs(roots, { domain: 'domain-1-auth', message: 'x' });
+  assert.equal(first.pushed, false);
+
+  gitOk(['remote', 'set-url', 'origin', remote], roots.specs);
+  const catchUp = commitSpecs(roots, { domain: 'domain-1-auth', message: 'y' });
+  assert.equal(catchUp.committed, false);
+  assert.equal(catchUp.pushed, true);
+  assert.equal(gitOk(['rev-parse', 'main'], remote), first.sha);
+
+  const upToDate = commitSpecs(roots, { domain: 'domain-1-auth', message: 'z' });
+  assert.equal(upToDate.pushed, false, 'nothing ahead of the upstream: no push');
+  assert.equal(upToDate.warning, undefined);
+});
+
+test('git() takes a timeout: the command is killed and reported timedOut', (t) => {
+  const start = Date.now();
+  const res = git(['-c', 'alias.nap=!node -e "setTimeout(() => {}, 5000)"', 'nap'], { timeout: 300 });
+  assert.ok(Date.now() - start < 4000);
+  assert.equal(res.code, -1);
+  assert.equal(res.timedOut, true);
+  assert.match(res.stderr, /timed out after 0.3s/);
+});
+
+test('findStep skips an unreadable plan.json / quick-steps.json with a warning', (t) => {
+  const roots = stepsProject(t);
+  writeFile(roots.specs, 'domain-10-broken/plan.json', '{ half');
+  writeFile(roots.specs, 'domain-11-bad/quick-steps/quick-steps.json', '{}');
+
+  const found = findStep(roots, 5);
+  assert.equal(found.domain, 'domain-2-ui');
+  assert.equal(found.warnings.length, 2);
+  assert.match(found.warnings.join('\n'), /domain-10-broken\/plan\.json/);
+  assert.throws(
+    () => findStep(roots, 99),
+    (err) => err.code === FAILED && err.details.warnings.length === 2,
+  );
+  assert.equal(findStep(stepsProject(t), 5).warnings, undefined, 'no warnings key when all files are readable');
 });

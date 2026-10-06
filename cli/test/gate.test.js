@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { FAILED, NosError, SLOT_TIMEOUT } from '../src/exit-codes.js';
 import { gateTools, runGate, TAIL_LINES } from '../src/gate.js';
 import { lockStatus, takeLock } from '../src/lock.js';
 import { slash } from '../src/roots.js';
-import { invokeCli, makeProject } from './helpers.js';
+import { invokeCli, makeProject, runNode, srcUrl } from './helpers.js';
 
 const pass = (text) => `node -e "console.log('${text}')"`;
 const fail = (text) => `node -e "console.log('${text}'); process.exit(3)"`;
@@ -53,7 +54,7 @@ test('runGate runs every tool, also after a failure; JSON shape, logs, tail of 6
     ],
   );
   for (const tool of result.tools)
-    assert.deepEqual(Object.keys(tool), ['name', 'cmd', 'status', 'exit', 'tail', 'log']);
+    assert.deepEqual(Object.keys(tool), ['name', 'cmd', 'status', 'exit', 'signal', 'timedOut', 'tail', 'log']);
   const [test1, lint, formatCheck] = result.tools;
   assert.equal(test1.cmd, fail('boom'));
   assert.equal(test1.tail, 'boom');
@@ -66,6 +67,8 @@ test('runGate runs every tool, also after a failure; JSON shape, logs, tail of 6
     cmd: null,
     status: 'not-configured',
     exit: null,
+    signal: null,
+    timedOut: false,
     tail: '',
     log: null,
   });
@@ -158,4 +161,76 @@ test('nos gate --e2e with every slot held: exit 7 with { action, error, exit, de
   assert.equal(res.json.details.slots, 1);
   assert.equal(res.json.details.holders[0].holder.command, 'exec dev');
   assert.match(res.err, /^nos: no free slot of 1 within 1s/);
+});
+
+test('runGate kills a tool running longer than the timeout (tree included): fail, timedOut', async (t) => {
+  const { roots } = project(t, { test: `node -e "setTimeout(() => {}, 20000)"`, lint: pass('ok') });
+
+  const start = Date.now();
+  const result = await runGate(roots, { timeoutMs: 300 });
+
+  assert.ok(Date.now() - start < 10_000, 'did not wait for the tool');
+  const [test1, lint] = result.tools;
+  assert.equal(test1.status, 'fail');
+  assert.equal(test1.timedOut, true);
+  assert.match(test1.tail, /killed after the timeout/);
+  assert.equal(lint.status, 'pass', 'the next tool still runs');
+  assert.equal(result.pass, false);
+});
+
+test('quality-tools.timeout is in minutes, default 30', async (t) => {
+  const { DEFAULT_PROJECT_CONFIG } = await import('../src/project-config.js');
+  assert.equal(DEFAULT_PROJECT_CONFIG['quality-tools'].timeout, 30);
+  const template = JSON.parse(readFileSync(new URL('../../templates/nos.config.json', import.meta.url), 'utf8'));
+  assert.equal(template['quality-tools'].timeout, 30);
+});
+
+test('runGate: e2e alone is not set up without --e2e', async (t) => {
+  const { roots } = project(t, { e2e: pass('e2e') });
+  await assert.rejects(runGate(roots), /not set up/);
+  assert.equal((await runGate(roots, { e2e: true })).pass, true);
+});
+
+test('runGate: SIGINT kills the running tool, releases the e2e lease and rejects "gate interrupted"', async (t) => {
+  const { roots } = project(t, { e2e: `node -e "setTimeout(() => {}, 20000)"` });
+  const signals = new EventEmitter();
+
+  const running = runGate(roots, { e2e: true, signals });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(lockStatus(roots, 'slot-1').held, true);
+  signals.emit('SIGINT');
+
+  await assert.rejects(running, (err) => {
+    assert.ok(err instanceof NosError);
+    assert.equal(err.code, FAILED);
+    assert.match(err.message, /gate interrupted by SIGINT/);
+    return true;
+  });
+  assert.equal(lockStatus(roots, 'slot-1').held, false, 'lease released');
+  assert.equal(signals.listenerCount('SIGINT'), 0);
+});
+
+test('runGate --e2e takes over a slot lease whose process is gone and reports reclaimed', async (t) => {
+  const { roots } = project(t, { e2e: env });
+  const dead = await runNode(`
+    import { takeLock } from '${srcUrl('lock.js')}';
+    takeLock(${JSON.stringify(roots)}, 'slot-1', { run: 'quick-9', token: 'deadbeef', command: 'exec dev' });`);
+  assert.equal(dead.code, 0, dead.stderr);
+
+  const result = await runGate(roots, { e2e: true });
+
+  assert.equal(result.pass, true);
+  assert.equal(result.tools.at(-1).tail, `home=${roots.home} slot=1`);
+  assert.equal(result.reclaimed.slot, 1);
+  assert.equal(result.reclaimed.holder.token, 'deadbeef');
+  assert.equal(lockStatus(roots, 'slot-1').held, false);
+});
+
+test('SLOT_TIMEOUT details carry pass of the tools run so far', async (t) => {
+  const { roots } = project(t, { test: fail('x'), e2e: pass('e2e') });
+  takeLock(roots, 'slot-1', { token: 'other' });
+  await assert.rejects(
+    runGate(roots, { e2e: true, slot: { waitMs: 50, pollMs: 10 } }),
+    (err) => err.code === SLOT_TIMEOUT && err.details.pass === false && err.details.tools.length === 4,
+  );
 });
