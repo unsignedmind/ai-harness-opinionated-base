@@ -154,63 +154,122 @@ test('the chat page escapes the boot JSON', async (t) => {
 
 // ---- runner mode: the server answers with its own Claude Code session per tab ----
 
+// a tab's Claude Code process the test drives through the callbacks it got
 function fakeRunner() {
-  const runs = [];
+  const procs = [];
   return {
-    runs,
-    run(opts) {
-      let resolve;
-      const done = new Promise((r) => (resolve = r));
-      const run = { opts, finish: (r) => resolve({ created: true, stopped: false, ...r }), stopped: false };
-      runs.push(run);
-      return {
-        done,
-        stop() {
-          run.stopped = true;
-          resolve({ created: true, stopped: true, text: null });
+    procs,
+    open(opts) {
+      const p = {
+        opts,
+        sent: [],
+        busy: false,
+        agentsRunning: false,
+        lastUse: Date.now(),
+        stopped: false,
+        closed: false,
+        turn(...texts) {
+          opts.onStarted();
+          for (const t of texts) opts.onText(t);
+          p.busy = false;
+          opts.onBusy(false);
+        },
+        exit(r = {}) {
+          p.busy = false;
+          opts.onExit({ stopped: p.stopped, error: null, ...r });
         },
       };
+      Object.assign(p, {
+        send(text) {
+          p.sent.push(text);
+          p.lastUse = Date.now();
+          if (!p.busy) {
+            p.busy = true;
+            opts.onBusy(true);
+          }
+          return true;
+        },
+        close() {
+          p.closed = true;
+        },
+        stop() {
+          p.stopped = true;
+          setImmediate(() => p.exit());
+        },
+      });
+      procs.push(p);
+      return p;
     },
   };
 }
 
-test('runner: a message starts a run, the result becomes the reply, the session is resumed next time', async (t) => {
+test('runner: one process per tab, messages go in at once (also mid-turn), replies show as they come', async (t) => {
   const runner = fakeRunner();
   const { call, key, chat, store } = await start(t, { runner });
   await call('POST', `/api/session/${key}/messages`, { text: '[context: specs/a.md]\nRun the tests' });
-  assert.equal(runner.runs.length, 1);
-  const first = runner.runs[0].opts;
-  assert.equal(first.resume, false);
-  assert.match(first.sessionId, /^[0-9a-f-]{36}$/);
-  assert.equal(first.prompt, '[context: specs/a.md]\nRun the tests');
+  assert.equal(runner.procs.length, 1);
+  const proc = runner.procs[0];
+  assert.equal(proc.opts.resume, false);
+  assert.match(proc.opts.sessionId, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(proc.sent, ['[context: specs/a.md]\nRun the tests']);
   assert.equal(store.get(key).title, 'Run the tests');
   assert.equal(chat.presenceFor(key), 'thinking');
 
-  // sent while running: queued for the next run
+  // a reply before the turn ends shows at once
+  proc.opts.onStarted();
+  assert.equal(store.get(key).claudeStarted, true);
+  proc.opts.onText('Running them.');
+  assert.equal(store.get(key).chat.at(-1).text, 'Running them.');
+  // sent mid-turn: straight into the same process
   await call('POST', `/api/session/${key}/messages`, { text: 'and lint' });
-  assert.equal(runner.runs.length, 1);
-  first.onActivity('Bash: npm test');
-  first.onAgents([{ id: 'toolu_1', type: 'Explore', status: 'running' }]);
+  assert.deepEqual(proc.sent.at(-1), 'and lint');
+  assert.equal(runner.procs.length, 1);
+  assert.equal(store.get(key).pending.length, 0);
+
+  proc.opts.onActivity('Bash: npm test');
+  proc.opts.onAgents([{ id: 'toolu_1', type: 'Explore', status: 'running' }]);
+  proc.agentsRunning = true;
   const tabs = async () => (await call('GET', '/api/sessions')).body.tabs;
   assert.deepEqual((await tabs())[0].agents, [{ id: 'toolu_1', type: 'Explore', status: 'running' }]);
-  runner.runs[0].finish({ text: 'All 42 pass.' });
-  await sleep(10);
-  // the next run starts with no subagents
-  assert.deepEqual((await tabs())[0].agents, []);
-  assert.equal(store.get(key).chat.find((m) => m.role === 'agent').text, 'All 42 pass.');
-  assert.equal(runner.runs.length, 2);
-  assert.equal(runner.runs[1].opts.resume, true);
-  assert.equal(runner.runs[1].opts.sessionId, first.sessionId);
-  assert.equal(runner.runs[1].opts.prompt, 'and lint');
+  proc.turn('All 42 pass.');
+  assert.equal(store.get(key).chat.at(-1).text, 'All 42 pass.');
+  // the turn is over, the subagent still works: ready to type, the tab still counts as running
+  assert.equal(chat.presenceFor(key), 'ready');
+  assert.equal((await tabs())[0].running, true);
 
-  // stop
+  // stop: the process ends, its subagents with it
   const stop = await call('POST', `/api/session/${key}/stop`);
   assert.equal(stop.body.status, 'stopping');
   await sleep(10);
+  assert.equal(proc.stopped, true);
   assert.equal(store.get(key).chat.at(-1).text, '_Stopped._');
   assert.equal(chat.presenceFor(key), 'ready');
+  // the next message opens a new process that resumes the session
+  await call('POST', `/api/session/${key}/messages`, { text: 'again' });
+  assert.equal(runner.procs.length, 2);
+  assert.equal(runner.procs[1].opts.resume, true);
+  assert.equal(runner.procs[1].opts.sessionId, proc.opts.sessionId);
   // a terminal await must not take the messages
   assert.equal((await call('POST', '/api/await', { key, timeoutMs: 0 })).body.status, 'runner');
+});
+
+test('runner: a process with nothing to do closes after procIdleMs, not while a subagent works', async (t) => {
+  const runner = fakeRunner();
+  const { call, key } = await start(t, { runner, procIdleMs: 30 });
+  await call('POST', `/api/session/${key}/messages`, { text: 'go' });
+  const proc = runner.procs[0];
+  proc.agentsRunning = true;
+  proc.turn('Started.');
+  proc.lastUse = 0;
+  await sleep(80);
+  assert.equal(proc.closed, false);
+  proc.agentsRunning = false;
+  await sleep(80);
+  assert.equal(proc.closed, true);
+  proc.exit();
+  await sleep(10);
+  await call('POST', `/api/session/${key}/messages`, { text: 'later' });
+  assert.equal(runner.procs.length, 2);
 });
 
 test('runner: tabs are their own sessions; errors show up as replies', async (t) => {
@@ -222,14 +281,16 @@ test('runner: tabs are their own sessions; errors show up as replies', async (t)
   assert.deepEqual(tabs.map((s) => s.title), ['New chat', 'Review']);
   await call('POST', `/api/session/${tab}/messages`, { text: 'go' });
   await call('POST', `/api/session/${key}/messages`, { text: 'go too' });
-  assert.equal(runner.runs.length, 2);
-  assert.notEqual(runner.runs[0].opts.sessionId, runner.runs[1].opts.sessionId);
-  runner.runs[0].finish({ text: null, error: 'Claude Code ("claude") was not found on the host.' });
+  assert.equal(runner.procs.length, 2);
+  assert.notEqual(runner.procs[0].opts.sessionId, runner.procs[1].opts.sessionId);
+  runner.procs[0].opts.onError('auto mode unavailable');
+  assert.equal(store.get(tab).chat.at(-1).text, '⚠ auto mode unavailable');
+  runner.procs[0].exit({ error: 'Claude Code ("claude") was not found on the host.' });
   await sleep(10);
   assert.match(store.get(tab).chat.at(-1).text, /^⚠ Claude Code/);
-  // ending a tab stops its run
+  // ending a tab stops its process
   await call('POST', `/api/session/${key}/end`);
-  assert.equal(runner.runs[1].stopped, true);
+  assert.equal(runner.procs[1].stopped, true);
 });
 
 test('project-wide stream: sessions, then a chat-sync per tab, events carry the key', async (t) => {
@@ -257,7 +318,7 @@ test('project-wide stream: sessions, then a chat-sync per tab, events carry the 
     req.on('error', () => {});
     setTimeout(async () => {
       await call('POST', `/api/session/${key}/messages`, { text: 'hi' });
-      runner.runs[0].opts.onActivity('Read: README.md');
+      runner.procs[0].opts.onActivity('Read: README.md');
     }, 50);
   });
   assert.deepEqual(got.slice(0, 2).map((e) => e.event), ['sessions', 'chat-sync']);

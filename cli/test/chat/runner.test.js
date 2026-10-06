@@ -5,10 +5,20 @@ import { PassThrough } from 'node:stream';
 import { agentTracker, argsFor, cleanEnv, createRunner, describeTool } from '../../src/chat/runner.js';
 
 const ID = '3664881e-fbdd-4b6d-942d-14b1ee5ac8be';
+const tick = () => new Promise((r) => setTimeout(r, 5));
 
-test('args: new session by id with a name, later resumed; auto mode and no prompts by default', () => {
+test('args: stream-json in and out, new session by id with a name, later resumed; auto mode, no prompts', () => {
   const a = argsFor({ sessionId: ID, resume: false, title: 'Run the tests' });
-  assert.deepEqual(a.slice(0, 6), ['-p', '--output-format', 'stream-json', '--verbose', '--permission-prompts', 'none']);
+  assert.deepEqual(a.slice(0, 8), [
+    '-p',
+    '--input-format',
+    'stream-json',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--permission-prompts',
+    'none',
+  ]);
   assert.ok(a.join(' ').includes(`--permission-mode auto --session-id ${ID} --name nos chat: Run the tests`));
   const b = argsFor({ sessionId: ID, resume: true, mode: 'acceptEdits', model: 'sonnet' });
   assert.ok(b.join(' ').includes(`--permission-mode acceptEdits --resume ${ID} --model sonnet`));
@@ -29,51 +39,137 @@ test('env: the variables of the calling Claude Code session are dropped', () => 
   assert.equal(describeTool('Bash', { command: 'npm test' }), 'Bash: npm test');
 });
 
-function fakeSpawn(lines, code = 0) {
+// a Claude Code process the test drives: emit(lines) writes stdout, exit(code) closes it
+function fakeProc() {
   const calls = [];
+  let child;
   const fn = (bin, args, opts) => {
-    const child = new EventEmitter();
+    child = new EventEmitter();
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
     child.stdin = new PassThrough();
     child.exitCode = null;
     child.pid = 4242;
     let input = '';
+    let ended = false;
     child.stdin.on('data', (c) => (input += c));
-    calls.push({ bin, args, opts, input: () => input });
-    setTimeout(() => {
-      for (const l of lines) child.stdout.write(JSON.stringify(l) + '\n');
-      child.stdout.end();
-      child.exitCode = code;
-      setTimeout(() => child.emit('close', code), 5);
-    }, 5);
+    child.stdin.on('finish', () => (ended = true));
+    calls.push({ bin, args, opts, input: () => input, ended: () => ended });
     return child;
   };
-  return { fn, calls };
+  const emit = async (...lines) => {
+    for (const l of lines) child.stdout.write(JSON.stringify(l) + '\n');
+    await tick();
+  };
+  const exit = async (code = 0, stderr = '') => {
+    if (stderr) child.stderr.write(stderr);
+    await tick();
+    child.exitCode = code;
+    child.emit('close', code);
+    await tick();
+  };
+  return { fn, calls, emit, exit };
 }
 
-test('run: prompt on stdin in the project root, tool calls as activity, result as text', async () => {
-  const { fn, calls } = fakeSpawn([
-    { type: 'system', subtype: 'init', session_id: ID },
-    { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'npm test' } }] } },
-    { type: 'assistant', message: { content: [{ type: 'text', text: 'All pass.' }] } },
-    { type: 'result', subtype: 'success', is_error: false, result: 'All pass.' },
-  ]);
-  const seen = [];
-  const r = createRunner({ root: '/proj', spawnFn: fn, env: { CLAUDECODE: '1', PATH: 'p' } }).run({
+const init = { type: 'system', subtype: 'init', session_id: ID };
+const text = (t, parent = null) => ({ type: 'assistant', parent_tool_use_id: parent, message: { content: [{ type: 'text', text: t }] } });
+const result = (r, is_error = false) => ({ type: 'result', subtype: is_error ? 'error_during_execution' : 'success', is_error, result: r });
+
+function recorder() {
+  const seen = { texts: [], errors: [], busy: [], activity: [], agents: [], exits: [], started: 0 };
+  return {
+    seen,
+    cb: {
+      onStarted: () => seen.started++,
+      onBusy: (b) => seen.busy.push(b),
+      onText: (t) => seen.texts.push(t),
+      onError: (t) => seen.errors.push(t),
+      onActivity: (t) => seen.activity.push(t),
+      onAgents: (l) => seen.agents.push(l.map((a) => a.status)),
+      onExit: (r) => seen.exits.push(r),
+    },
+  };
+}
+
+test('open: one process, messages as stream-json on stdin, each text block a reply at once, no repeat by the result', async () => {
+  const p = fakeProc();
+  const { seen, cb } = recorder();
+  const proc = createRunner({ root: '/proj', spawnFn: p.fn, env: { CLAUDECODE: '1', PATH: 'p' } }).open({
     sessionId: ID,
     resume: false,
-    prompt: 'run the tests',
-    onActivity: (t) => seen.push(t),
+    ...cb,
   });
-  const out = await r.done;
-  assert.deepEqual(out, { created: true, stopped: false, text: 'All pass.' });
-  assert.deepEqual(seen, ['Bash: npm test']);
-  assert.equal(calls[0].bin, 'claude');
-  assert.equal(calls[0].opts.cwd, '/proj');
-  assert.equal(calls[0].opts.env.CLAUDECODE, undefined);
-  assert.equal(calls[0].input(), 'run the tests');
+  assert.equal(proc.send('run the tests'), true);
+  assert.equal(proc.busy, true);
+  assert.deepEqual(JSON.parse(p.calls[0].input()), { type: 'user', message: { role: 'user', content: 'run the tests' } });
+  assert.equal(p.calls[0].bin, 'claude');
+  assert.equal(p.calls[0].opts.cwd, '/proj');
+  assert.equal(p.calls[0].opts.env.CLAUDECODE, undefined);
+
+  await p.emit(
+    init,
+    { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'npm test' } }] } },
+    text('Running them.'),
+  );
+  assert.deepEqual(seen.texts, ['Running them.']);
+  await p.emit(text('All pass.'), result('All pass.'));
+  assert.deepEqual(seen.texts, ['Running them.', 'All pass.']);
+  assert.deepEqual(seen.activity, ['Bash: npm test']);
+  assert.equal(seen.started, 1);
+  assert.equal(proc.busy, false);
+  assert.deepEqual(seen.busy, [true, false]);
+
+  // the next message goes into the same process
+  proc.send('and lint');
+  assert.equal(p.calls.length, 1);
+  assert.match(p.calls[0].input(), /and lint/);
+  // a turn without text block: the result is the reply; an empty result is none
+  await p.emit(init, result('Lint is clean.'), init, result(''));
+  assert.deepEqual(seen.texts.at(-1), 'Lint is clean.');
+  assert.equal(seen.texts.length, 3);
+
+  proc.close();
+  await tick();
+  assert.equal(p.calls[0].ended(), true);
+  assert.equal(proc.send('too late'), false);
+  await p.exit(0);
+  assert.deepEqual(seen.exits, [{ stopped: false, error: null }]);
 });
+
+test('open: an error result, a crash in a turn and a missing claude are errors; a stop is no error', async () => {
+  const a = fakeProc();
+  const r1 = recorder();
+  const p1 = createRunner({ root: '/p', spawnFn: a.fn }).open({ sessionId: ID, resume: true, ...r1.cb });
+  p1.send('x');
+  await a.emit(init, result('auto mode unavailable', true));
+  assert.deepEqual(r1.seen.errors, ['auto mode unavailable']);
+  p1.send('y');
+  await a.exit(2, 'boom');
+  assert.deepEqual(r1.seen.exits, [{ stopped: false, error: 'boom' }]);
+
+  const b = fakeProc();
+  const r2 = recorder();
+  const p2 = createRunner({ root: '/p', spawnFn: b.fn }).open({ sessionId: ID, ...r2.cb });
+  p2.send('x');
+  p2.stop();
+  await b.exit(1);
+  assert.deepEqual(r2.seen.exits, [{ stopped: true, error: null }]);
+
+  const missing = () => {
+    const c = new EventEmitter();
+    c.stdout = new PassThrough();
+    c.stderr = new PassThrough();
+    c.stdin = new PassThrough();
+    setTimeout(() => c.emit('error', Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' })), 1);
+    return c;
+  };
+  const r3 = recorder();
+  createRunner({ root: '/p', spawnFn: missing }).open({ sessionId: ID, ...r3.cb }).send('x');
+  await tick();
+  assert.match(r3.seen.exits[0].error, /was not found on the host/);
+});
+
+// ---- subagents ----
 
 const spawnAgent = (id, input) => ({
   type: 'assistant',
@@ -85,12 +181,15 @@ const childTool = (parent, name, input) => ({
   parent_tool_use_id: parent,
   message: { content: [{ type: 'tool_use', id: `${parent}-${name}`, name, input }] },
 });
-const toolResult = (id, is_error = false) => ({
+const toolResult = (id, content = 'x', is_error = false) => ({
   type: 'user',
-  message: { content: [{ type: 'tool_result', tool_use_id: id, is_error, content: 'x' }] },
+  message: { content: [{ type: 'tool_result', tool_use_id: id, is_error, content }] },
 });
+const launched = (id, agentId) =>
+  toolResult(id, [{ type: 'text', text: `Async agent launched successfully.\nagentId: ${agentId} (internal ID)` }]);
+const task = (subtype, extra) => ({ type: 'system', subtype, ...extra });
 
-test('agents: an Agent call starts one, its own tool calls are its activity, its result ends it', () => {
+test('agents: a foreground Agent call starts one, its own tool calls are its activity, its result ends it', () => {
   let t = 1000;
   const tr = agentTracker(() => t);
   assert.equal(tr.line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'b', name: 'Bash', input: {} }] } }), false);
@@ -112,7 +211,7 @@ test('agents: an Agent call starts one, its own tool calls are its activity, its
   assert.equal(a2.type, 'general-purpose');
   t = 5000;
   tr.line(toolResult('a1'));
-  tr.line(toolResult('a2', true));
+  tr.line(toolResult('a2', 'nope', true));
   [a1, a2] = tr.list();
   assert.equal(a1.status, 'done');
   assert.equal(a1.activity, null);
@@ -121,6 +220,7 @@ test('agents: an Agent call starts one, its own tool calls are its activity, its
   // late lines do not revive an ended agent
   assert.equal(tr.line(childTool('a1', 'Bash', { command: 'ls' })), false);
   assert.equal(tr.list()[0].tools, 2);
+  assert.equal(tr.running(), false);
 });
 
 test('agents: paths in the project root show relative to it', () => {
@@ -132,47 +232,62 @@ test('agents: paths in the project root show relative to it', () => {
   assert.equal(tr.list()[0].activity, 'Bash: ls test D:/other');
 });
 
-test('agents: a background agent runs past its launch result until its task ends or the run does', () => {
+// the lines of a real run (claude 2.1.291): a background agent, its Bash calls backgrounded as
+// shell tasks of their own, its end as task_notification
+test('agents: a background agent runs past its launch until its task_notification; shell tasks are no agents', () => {
   const tr = agentTracker(() => 0);
-  tr.line(spawnAgent('bg', { description: 'Watch', run_in_background: true }));
-  tr.line(spawnAgent('bg2', { description: 'Other', run_in_background: true }));
-  tr.line(toolResult('bg'));
+  tr.line(spawnAgent('tu_a', { subagent_type: 'general-purpose', description: 'sleeper' }));
+  tr.line(task('task_started', { task_id: 'a1d6', tool_use_id: 'tu_a', task_type: 'local_agent', description: 'sleeper' }));
+  tr.line(launched('tu_a', 'a1d6'));
   assert.equal(tr.list()[0].status, 'running');
-  tr.line({ type: 'system', subtype: 'task_started', task_id: 'task1', tool_use_id: 'bg' });
-  tr.line({ type: 'system', subtype: 'task_progress', task_id: 'task1', last_tool_name: 'Bash', usage: { tool_uses: 7 } });
-  assert.equal(tr.list()[0].activity, 'Bash');
-  assert.equal(tr.list()[0].tools, 7);
-  tr.line({ type: 'system', subtype: 'task_notification', task_id: 'task1', status: 'failed' });
-  assert.equal(tr.list()[0].status, 'failed');
-  assert.equal(tr.finish(true), true);
-  assert.deepEqual(tr.list().map((a) => a.status), ['failed', 'stopped']);
-  assert.equal(tr.finish(false), false);
-});
-
-test('run: subagents reach onAgents, their text is not the reply, the run end closes them', async () => {
-  const { fn } = fakeSpawn([
-    spawnAgent('a1', { subagent_type: 'Explore', description: 'Look' }),
-    { type: 'assistant', parent_tool_use_id: 'a1', message: { content: [{ type: 'text', text: 'sub says' }] } },
-    { type: 'result', subtype: 'success', is_error: false, result: '' },
-  ]);
-  const seen = [];
-  const out = await createRunner({ root: '/p', spawnFn: fn }).run({
-    sessionId: ID,
-    prompt: 'x',
-    onAgents: (l) => seen.push(l.map((a) => a.status)),
-  }).done;
-  assert.equal(out.text, '(no answer)');
-  assert.deepEqual(seen, [['running'], ['done']]);
-});
-
-test('run: an error result or a crash becomes an error', async () => {
-  const bad = fakeSpawn(
-    [{ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'auto mode unavailable' }],
-    1,
+  tr.line(childTool('tu_a', 'Bash', { command: 'node wait.js' }));
+  tr.line(task('task_progress', { task_id: 'a1d6', tool_use_id: 'tu_a', description: 'Running Wait', usage: { tool_uses: 3 } }));
+  tr.line(task('task_started', { task_id: 'bx', tool_use_id: 'tu_bash', task_type: 'local_bash', description: 'Wait' }));
+  tr.line(task('task_notification', { task_id: 'bx', tool_use_id: 'tu_bash', status: 'completed' }));
+  assert.equal(tr.list().length, 1);
+  assert.deepEqual(
+    [tr.list()[0].status, tr.list()[0].activity, tr.list()[0].tools],
+    ['running', 'Bash: node wait.js', 3],
   );
-  const out = await createRunner({ root: '/p', spawnFn: bad.fn }).run({ sessionId: ID, resume: true, prompt: 'x' }).done;
-  assert.equal(out.error, 'auto mode unavailable');
-  const none = fakeSpawn([], 2);
-  const crash = await createRunner({ root: '/p', spawnFn: none.fn }).run({ sessionId: ID, prompt: 'x' }).done;
-  assert.match(crash.error, /code 2/);
+  assert.equal(tr.running(), true);
+  tr.line(task('task_notification', { task_id: 'a1d6', tool_use_id: 'tu_a', status: 'completed' }));
+  assert.equal(tr.list()[0].status, 'done');
+  assert.equal(tr.running(), false);
+});
+
+test('agents: SendMessage resumes an ended agent; an agent of an earlier process shows up by task_started', () => {
+  const tr = agentTracker(() => 0);
+  tr.line(spawnAgent('tu_a', { description: 'Develop' }));
+  tr.line(launched('tu_a', 'a796'));
+  tr.line(task('task_notification', { task_id: 'a796', status: 'stopped' }));
+  assert.equal(tr.list()[0].status, 'stopped');
+  tr.line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 's1', name: 'SendMessage', input: { to: 'a796' } }] } });
+  assert.equal(tr.list()[0].status, 'running');
+  // unknown so far: added from the task event
+  tr.line(task('task_started', { task_id: 'b222', tool_use_id: 'tu_old', task_type: 'local_agent', subagent_type: 'Explore', description: 'Older' }));
+  assert.deepEqual(
+    tr.list().map((a) => [a.id, a.type, a.status]),
+    [
+      ['tu_a', 'general-purpose', 'running'],
+      ['tu_old', 'Explore', 'running'],
+    ],
+  );
+  // the process ends: what still runs went down with it
+  assert.equal(tr.finish(), true);
+  assert.deepEqual(tr.list().map((a) => a.status), ['stopped', 'stopped']);
+  assert.equal(tr.finish(), false);
+});
+
+test('open: subagents reach onAgents, their text is no reply, the process end stops them', async () => {
+  const p = fakeProc();
+  const { seen, cb } = recorder();
+  const proc = createRunner({ root: '/p', spawnFn: p.fn }).open({ sessionId: ID, ...cb });
+  proc.send('x');
+  await p.emit(init, spawnAgent('tu_a', { subagent_type: 'Explore', description: 'Look' }), launched('tu_a', 'ag1'));
+  await p.emit(text('Started it.'), result('Started it.'), text('sub says', 'tu_a'));
+  assert.deepEqual(seen.texts, ['Started it.']);
+  assert.equal(proc.busy, false);
+  assert.equal(proc.agentsRunning, true);
+  await p.exit(0);
+  assert.deepEqual(seen.agents, [['running'], ['stopped']]);
 });

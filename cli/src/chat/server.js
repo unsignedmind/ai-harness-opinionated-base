@@ -1,5 +1,5 @@
 // Chat server of one project. Plain HTTP on 127.0.0.1, built-in modules only. Holds the event
-// streams, the presence state and the running Claude Code runs; the transcripts and the queues live
+// streams, the presence state and the Claude Code processes of the tabs; the transcripts and the queues live
 // in the store. Two ways to answer a chat tab:
 //   runner (default): the server runs its own headless Claude Code session per tab (runner.js)
 //   relay: a Claude Code session in a terminal takes messages with `nos chat await` and answers
@@ -66,6 +66,8 @@ export function createChatServer({
   heartbeatMs = 15000,
   pingMs = 25000,
   idleMs = 1800000,
+  // a tab's Claude Code process with nothing to do (no turn, no subagent) ends after this
+  procIdleMs = 600000,
   runner = null,
   onStop = () => {},
 }) {
@@ -77,7 +79,7 @@ export function createChatServer({
   const typingAt = new Map();
   const awaitCount = new Map();
   const lastPresence = new Map();
-  const running = new Map(); // key -> run handle (runner mode)
+  const procs = new Map(); // key -> Claude Code process of the tab (runner mode, runner.js open)
   const activity = new Map(); // key -> last tool call of the run
   const agents = new Map(); // key -> subagents of the last run (runner.js agentTracker)
   const allStreams = new Set(); // project-wide streams (spec-ui tabs)
@@ -87,7 +89,7 @@ export function createChatServer({
   function presenceFor(key, now = Date.now()) {
     const s = store.get(key);
     if (!s || s.status === 'ended') return 'ended';
-    if (running.has(key)) return 'thinking';
+    if (procs.get(key)?.busy) return 'thinking';
     if (runner) return s.pending.length > 0 ? 'queued' : 'ready';
     if (typingAt.has(key) && now - typingAt.get(key) < typingMs) return 'typing';
     if (workingAt.has(key) && now - workingAt.get(key) < thinkingMs) return 'thinking';
@@ -111,7 +113,7 @@ export function createChatServer({
         key: s.key,
         title: s.title || 'New chat',
         presence: presenceFor(s.key),
-        running: running.has(s.key),
+        running: working(procs.get(s.key)),
         activity: activity.get(s.key) ?? null,
         agents: agents.get(s.key) ?? [],
         messages: s.messages,
@@ -140,10 +142,54 @@ export function createChatServer({
     broadcastSessions();
   }
 
-  // runner mode: answer the queued messages of a tab with its own Claude Code session, one run at
-  // a time per tab; messages sent meanwhile go into the next run
+  const reply = (key, text) => {
+    if (stopping || !store.get(key)) return;
+    store.addAgentReply(key, text);
+    broadcastChat(key);
+  };
+  // runner mode: the tab's own long-lived Claude Code process (runner.js), started on its first
+  // message; it ends when the user stops it or after procIdleMs with nothing to do
+  function openProc(key) {
+    const cur = store.get(key);
+    if (agents.delete(key)) each(key, 'agents', { agents: [] });
+    const proc = runner.open({
+      sessionId: cur.claudeSession,
+      resume: cur.claudeStarted,
+      title: cur.title,
+      onStarted: () => {
+        if (store.get(key) && !store.get(key).claudeStarted) store.update(key, { claudeStarted: true });
+      },
+      onBusy: (busy) => {
+        if (!busy) activity.delete(key);
+        broadcastPresence(key);
+      },
+      onText: (text) => reply(key, text),
+      onError: (text) => reply(key, `⚠ ${text}`),
+      onActivity: (text) => {
+        activity.set(key, text);
+        each(key, 'activity', { text });
+        broadcastSessions();
+      },
+      onAgents: (list) => {
+        agents.set(key, list);
+        each(key, 'agents', { agents: list });
+        broadcastSessions();
+      },
+      onExit: (r) => {
+        if (procs.get(key) === proc) procs.delete(key);
+        activity.delete(key);
+        if (r.stopped) reply(key, '_Stopped._');
+        else if (r.error) reply(key, `⚠ ${r.error}`);
+        broadcastPresence(key);
+        pump(key);
+      },
+    });
+    procs.set(key, proc);
+    return proc;
+  }
+  // hand the queued messages of a tab to its process at once, also while Claude works
   function pump(key) {
-    if (!runner || stopping || running.has(key)) return;
+    if (!runner || stopping) return;
     const s = store.get(key);
     if (!s || s.status === 'ended' || !s.pending.length) return;
     const batch = store.takeMessages(key);
@@ -154,45 +200,15 @@ export function createChatServer({
       store.update(key, { title: first.length > 40 ? first.slice(0, 39) + '…' : first });
     }
     if (!s.claudeSession) store.update(key, { claudeSession: randomUUID(), claudeStarted: false });
-    const cur = store.get(key);
-    if (agents.delete(key)) each(key, 'agents', { agents: [] });
-    let handle;
     try {
-      handle = runner.run({
-        sessionId: cur.claudeSession,
-        resume: cur.claudeStarted,
-        prompt,
-        title: cur.title,
-        onActivity: (text) => {
-          activity.set(key, text);
-          each(key, 'activity', { text });
-          broadcastSessions();
-        },
-        onAgents: (list) => {
-          agents.set(key, list);
-          each(key, 'agents', { agents: list });
-        },
-      });
+      (procs.get(key) ?? openProc(key)).send(prompt);
     } catch (err) {
-      store.addAgentReply(key, `⚠ ${err.message}`);
-      broadcastChat(key);
-      return broadcastPresence(key);
+      reply(key, `⚠ ${err.message}`);
     }
-    running.set(key, handle);
     broadcastPresence(key);
-    handle.done.then((r) => {
-      running.delete(key);
-      activity.delete(key);
-      if (!stopping && store.get(key)) {
-        if (r.created) store.update(key, { claudeStarted: true });
-        store.addAgentReply(key, r.stopped ? '_Stopped._' : (r.text ?? `⚠ ${r.error}`));
-        broadcastChat(key);
-      }
-      broadcastPresence(key);
-      pump(key);
-    });
   }
-  const stopRun = (key) => running.get(key)?.stop();
+  const stopRun = (key) => procs.get(key)?.stop();
+  const working = (p) => !!p && (p.busy || p.agentsRunning);
   const clear = (key) => {
     workingAt.delete(key);
     typingAt.delete(key);
@@ -212,7 +228,8 @@ export function createChatServer({
       if (state !== lastPresence.get(key)) broadcastPresence(key);
     }
     const busy =
-      [...streams.values()].some((s) => s.size) || allStreams.size > 0 || parked.size > 0 || running.size > 0;
+      [...streams.values()].some((s) => s.size) || allStreams.size > 0 || parked.size > 0 || procs.size > 0;
+    for (const p of procs.values()) if (!working(p) && now - p.lastUse > procIdleMs) p.close();
     if (busy) lastActive = now;
     else if (idleMs > 0 && now - lastActive > idleMs) void stop();
   }, sweepMs);
@@ -339,7 +356,7 @@ export function createChatServer({
     if (m === 'GET' && (k = /^\/api\/session\/([^/]+)$/.exec(p))) {
       const s = session(k[1]);
       const { key, dir, name, status, endedBy, chat } = s;
-      return json(res, 200, { key, dir, name, status, endedBy, chat, presence: presenceFor(key), running: running.has(key) });
+      return json(res, 200, { key, dir, name, status, endedBy, chat, presence: presenceFor(key), running: working(procs.get(key)) });
     }
     if (m !== 'POST') throw new HttpError(404, 'not found');
 
@@ -407,7 +424,7 @@ export function createChatServer({
         return json(res, 200, { status: 'ended', endedBy: by });
       }
       case 'stop': {
-        const was = running.has(key);
+        const was = working(procs.get(key));
         stopRun(key);
         return json(res, 200, { status: was ? 'stopping' : 'idle' });
       }
@@ -453,7 +470,7 @@ export function createChatServer({
     clearInterval(sweep);
     clearInterval(ping);
     for (const entry of [...parked]) entry.finish({ status: 'waiting', note: 'server stopping, run await again' });
-    for (const h of running.values()) h.stop();
+    for (const p of procs.values()) p.stop();
     for (const set of streams.values()) for (const res of set) res.end();
     for (const res of allStreams) res.end();
     streams.clear();
