@@ -57,6 +57,8 @@ export type SubAgent = {
   tools: number;
   startedAt: number;
   endedAt: number | null;
+  // to open its transcript and to message it (null: a one-shot agent that cannot be resumed)
+  agentId?: string | null;
 };
 
 const AGENT_STATUS = ['running', 'done', 'failed', 'stopped'];
@@ -69,7 +71,7 @@ const took = (ms: number) => {
 export const runningAgents = (tab: ChatTab | null) => (tab?.agents ?? []).filter((a) => a.status === 'running').length;
 
 // The subagents of the active tab behind the chevron of the tab bar: one row each with status,
-// type, task, current tool call, tool calls so far and time taken.
+// type, task, current tool call, tool calls so far and time taken. A row opens the subagent.
 export function renderAgents(tab: ChatTab | null, now = Date.now()): string {
   const agents = tab?.agents ?? [];
   if (!agents.length) return '<p class="muted chat-agents-empty">No subagents in the last run of this chat.</p>';
@@ -78,10 +80,37 @@ export function renderAgents(tab: ChatTab | null, now = Date.now()): string {
       const status = AGENT_STATUS.includes(a.status) ? a.status : 'done';
       const what = a.status === 'running' ? (a.activity ?? 'starting…') : status;
       const n = `${a.tools} tool${a.tools === 1 ? '' : 's'} · ${took((a.endedAt ?? now) - a.startedAt)}`;
-      return `<li class="agent" data-status="${esc(status)}"><span class="dot" aria-hidden="true"></span><div class="agent-main"><div class="agent-head"><strong>${esc(a.type)}</strong><span class="agent-desc">${esc(a.description)}</span></div><div class="agent-now mono" title="${esc(what)}">${esc(what)}</div></div><span class="agent-n muted">${esc(n)}</span></li>`;
+      return `<li class="agent" data-status="${esc(status)}"><button type="button" class="agent-open" data-chat="inspect" data-tool="${esc(a.id)}" data-agent="${esc(a.agentId ?? '')}" title="Show what it does"><span class="dot" aria-hidden="true"></span><span class="agent-main"><span class="agent-head"><strong>${esc(a.type)}</strong><span class="agent-desc">${esc(a.description)}</span></span><span class="agent-now mono">${esc(what)}</span></span><span class="agent-n muted">${esc(n)}</span><span class="agent-go" aria-hidden="true">&#8250;</span></button></li>`;
     })
     .join('')}</ul>`;
 }
+
+// a step of a session or subagent (cli/src/chat/transcript.js createCondenser)
+export type TranscriptItem = {
+  id: string;
+  kind: 'user' | 'text' | 'thinking' | 'tool' | 'agent' | 'notice';
+  at: string | null;
+  text?: string;
+  cut?: boolean;
+  label?: string;
+  name?: string;
+  summary?: string;
+  input?: string;
+  inputCut?: boolean;
+  output?: string | null;
+  outputCut?: boolean;
+  state?: 'running' | 'ok' | 'error';
+  type?: string;
+  description?: string;
+  agentId?: string | null;
+};
+
+// what is being inspected: a subagent of a tab (tool = the call that started it)
+export type InspectTarget = { key: string; tool: string; agentId: string | null; type: string; description: string };
+
+// a message to a subagent goes to the main session, which forwards it (rule in cli/src/chat/runner.js SYSTEM_NOTE)
+export const toSubagent = (t: Pick<InspectTarget, 'agentId' | 'description'>, text: string) =>
+  `[to subagent ${t.agentId}${t.description ? ` (${t.description})` : ''}] ${text}`;
 
 // One tab: select button with presence dot and unread badge, and its own close button.
 export function renderTabs(tabs: ChatTab[], active: string | null, unread: Record<string, number>): string {
@@ -253,14 +282,22 @@ export const CHAT_SHELL = `<div class="chat-bar">
   <strong>Claude</strong>
   <span class="chat-presence" data-presence="off"><span class="dot"></span><span class="lbl"></span></span>
   <span class="grow"></span>
-  <button type="button" data-chat="devices" hidden title="Phones and tablets paired with this PC">&#128241; Devices</button>
-  <button type="button" data-chat="rename" hidden title="Rename this chat">&#9998; Rename</button>
-  <button type="button" data-chat="stop" hidden title="Stop what Claude is doing">&#9632; Stop</button>
+  <span class="chat-view" role="group" aria-label="View">
+    <button type="button" data-chat="view" data-view="chat" aria-pressed="true" title="Your messages and Claude's answers">Chat</button>
+    <button type="button" data-chat="view" data-view="details" aria-pressed="false" title="Everything the session does: tool calls, outputs, subagents">Details</button>
+  </span>
+  <button type="button" data-chat="devices" hidden title="Phones and tablets paired with this PC" aria-label="Devices">&#128241;<span class="t"> Devices</span></button>
+  <button type="button" data-chat="rename" hidden title="Rename this chat" aria-label="Rename">&#9998;<span class="t"> Rename</span></button>
+  <button type="button" data-chat="stop" hidden title="Stop what Claude is doing" aria-label="Stop">&#9632;<span class="t"> Stop</span></button>
   <button type="button" class="chat-x" data-chat="close" aria-label="Close chat">&#10005;</button>
 </div>
 <div class="chat-tabs-row">
   <div class="chat-tabs" role="tablist" aria-label="Chats"></div>
   <button type="button" class="chat-agents-toggle" data-chat="agents" aria-expanded="false" aria-controls="chat-agents" title="Subagents"><span class="badge" hidden></span><span class="chev" aria-hidden="true">&#8964;</span></button>
+</div>
+<div class="chat-inspect" hidden>
+  <button type="button" class="chat-inspect-back" data-chat="back"><span aria-hidden="true">&#8249;</span> <span class="lbl"></span></button>
+  <span class="chat-inspect-what"><span class="dot" aria-hidden="true"></span><strong class="type"></strong><span class="desc"></span></span>
 </div>
 <section class="chat-agents" id="chat-agents" hidden aria-label="Subagents"></section>
 <section class="chat-devices" hidden aria-label="Devices"></section>
@@ -318,6 +355,77 @@ export function renderLog(log: HTMLElement, chat: ChatEntry[], presence: Presenc
     const n = el('p', 'chat-note muted', 'Your message is in the queue. Claude Code is not listening right now.');
     n.setAttribute('role', 'status');
     log.append(n);
+  }
+  if (stick) log.scrollTop = log.scrollHeight;
+}
+
+const STATE_MARK = { running: '…', ok: '✓', error: '✗' } as const;
+
+// The details view: every step, text only through textContent. Tool calls and thinking fold;
+// the folds the reader opened stay open across redraws. `who` names the speaker of text steps.
+export function renderTranscript(
+  log: HTMLElement,
+  items: TranscriptItem[],
+  { truncated = false, who = 'Claude', empty = 'No steps yet.' } = {},
+) {
+  const stick = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  const open = new Set([...log.querySelectorAll<HTMLElement>('details[open]')].map((d) => d.dataset.id));
+  log.textContent = '';
+  if (truncated) log.append(el('p', 'chat-note muted', 'Earlier steps are not shown.'));
+  if (!items.length) log.append(el('p', 'chat-empty muted', empty));
+  const pre = (label: string, text: string, cut = false) => {
+    const box = el('div', 'tr-io');
+    box.append(el('div', 'tr-io-label muted', label), el('pre', '', text + (cut ? '\n…' : '')));
+    return box;
+  };
+  for (const it of items) {
+    if (it.kind === 'user' || it.kind === 'text') {
+      const user = it.kind === 'user';
+      const msg = el('div', `msg ${user ? 'user' : 'agent'}`);
+      const { context, body } = user ? splitContext(it.text ?? '') : { context: null, body: it.text ?? '' };
+      msg.append(el('div', 'meta', `${it.label ?? (user ? 'You' : who)}${it.at ? ' · ' + time(it.at) : ''}`));
+      if (context) msg.append(el('div', 'ctx mono', context));
+      for (const part of splitFences(body)) msg.append(el(part.code ? 'pre' : 'div', part.code ? '' : 't', part.text));
+      if (it.cut) msg.append(el('div', 't muted', '…'));
+      log.append(msg);
+    } else if (it.kind === 'thinking' || it.kind === 'tool') {
+      const d = el('details', it.kind === 'tool' ? 'tr-tool' : 'tr-think') as HTMLDetailsElement;
+      d.dataset.id = it.id;
+      if (open.has(it.id)) d.open = true;
+      const sum = el('summary', '');
+      if (it.kind === 'tool') {
+        const state = it.state ?? 'running';
+        d.dataset.state = state;
+        sum.append(
+          el('span', 'tr-mark', STATE_MARK[state] ?? '…'),
+          el('span', 'tr-sum mono', it.summary ?? it.name ?? ''),
+        );
+        d.append(sum, pre('Input', it.input ?? '', it.inputCut));
+        d.append(it.output == null ? el('p', 'muted tr-wait', 'Running…') : pre('Output', it.output, it.outputCut));
+      } else {
+        sum.append(el('span', 'tr-sum muted', 'Thinking'));
+        d.append(sum, el('div', 't', it.text ?? ''));
+      }
+      log.append(d);
+    } else if (it.kind === 'agent') {
+      const row = el('div', 'tr-agent');
+      row.dataset.state = it.state ?? 'running';
+      const b = el('button', 'tr-agent-open') as HTMLButtonElement;
+      b.type = 'button';
+      b.dataset.chat = 'inspect';
+      b.dataset.tool = it.id;
+      b.dataset.agent = it.agentId ?? '';
+      b.append(
+        el('span', 'tr-mark', '⇢'),
+        el('strong', '', it.type ?? 'agent'),
+        el('span', 'tr-sum', it.description ?? ''),
+        el('span', 'tr-go', 'Open ›'),
+      );
+      row.append(b);
+      log.append(row);
+    } else if (it.kind === 'notice') {
+      log.append(el('p', 'tr-notice muted', it.text ?? ''));
+    }
   }
   if (stick) log.scrollTop = log.scrollHeight;
 }

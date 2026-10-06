@@ -1540,16 +1540,38 @@ dialog.chat::backdrop {
   padding: 0;
   list-style: none;
 }
-.chat-agents .agent {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 5px 0;
-}
 .chat-agents .agent + .agent {
   border-top: 1px dashed var(--line);
 }
-.chat-agents .agent .dot {
+/* the whole row opens the subagent */
+.chat-agents .agent-open {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-agents .agent-open:hover,
+.chat-agents .agent-open:focus-visible {
+  background: var(--hover);
+}
+.chat-agents .agent-go {
+  flex: none;
+  align-self: center;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+.chat-agents .agent .dot,
+.chat-inspect-what .dot {
   width: 7px;
   height: 7px;
   margin-top: 6px;
@@ -1557,17 +1579,21 @@ dialog.chat::backdrop {
   background: var(--done);
   flex: none;
 }
-.chat-agents .agent[data-status='running'] .dot {
+.chat-agents .agent[data-status='running'] .dot,
+.chat-inspect-what[data-status='running'] .dot {
   background: var(--accent);
   animation: chat-pulse 1.2s ease-in-out infinite;
 }
-.chat-agents .agent[data-status='failed'] .dot {
+.chat-agents .agent[data-status='failed'] .dot,
+.chat-inspect-what[data-status='failed'] .dot {
   background: var(--other);
 }
-.chat-agents .agent[data-status='stopped'] .dot {
+.chat-agents .agent[data-status='stopped'] .dot,
+.chat-inspect-what[data-status='stopped'] .dot {
   background: var(--muted);
 }
 .agent-main {
+  display: block;
   flex: 1;
   min-width: 0;
 }
@@ -1575,6 +1601,9 @@ dialog.chat::backdrop {
   display: flex;
   gap: 6px;
   min-width: 0;
+}
+.agent-now {
+  display: block;
 }
 .agent-head strong {
   flex: none;
@@ -1597,6 +1626,204 @@ dialog.chat::backdrop {
   flex: none;
   font-size: 11.5px;
   white-space: nowrap;
+}
+
+/* Chat | Details switch in the bar */
+.chat-view {
+  display: inline-flex;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.chat-view[hidden] {
+  display: none;
+}
+.chat-bar .chat-view button {
+  border: 0;
+  border-radius: 0;
+  padding: 4px 10px;
+  background: var(--panel);
+  color: var(--muted);
+}
+.chat-bar .chat-view button[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* a subagent in view: back to the session in place of the tab bar */
+.chat-inspect {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.chat-inspect[hidden] {
+  display: none;
+}
+.chat-inspect-back {
+  flex: none;
+  max-width: 45%;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chat-inspect-what {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+}
+.chat-inspect-what .type {
+  flex: none;
+}
+.chat-inspect-what .desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+/* the details view: every step of a session or subagent */
+.chat-log .tr-tool,
+.chat-log .tr-think {
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 12.5px;
+}
+.chat-log .tr-tool summary,
+.chat-log .tr-think summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.chat-log .tr-tool summary::-webkit-details-marker,
+.chat-log .tr-think summary::-webkit-details-marker {
+  display: none;
+}
+.chat-log .tr-mark {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  color: var(--muted);
+}
+.chat-log .tr-tool[data-state='ok'] .tr-mark {
+  color: var(--done);
+}
+.chat-log .tr-tool[data-state='error'] .tr-mark,
+.chat-log .tr-tool[data-state='error'] .tr-sum {
+  color: var(--other);
+}
+.chat-log .tr-tool[data-state='running'] .tr-mark {
+  color: var(--accent);
+  animation: chat-pulse 1.2s ease-in-out infinite;
+}
+.chat-log .tr-sum {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-log .tr-tool[open] .tr-sum {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.chat-log .tr-io {
+  padding: 0 10px 8px;
+}
+.chat-log .tr-io-label {
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.chat-log .tr-io pre,
+.chat-log .tr-think .t {
+  margin: 0;
+  padding: 8px;
+  max-height: 40vh;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--bg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, Consolas, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+}
+.chat-log .tr-think .t {
+  margin: 0 10px 8px;
+  font-family: inherit;
+}
+.chat-log .tr-wait {
+  margin: 0;
+  padding: 0 10px 8px;
+}
+.chat-log .tr-agent-open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--panel);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-log .tr-agent-open strong {
+  flex: none;
+}
+.chat-log .tr-agent-open .tr-sum {
+  flex: 1;
+  color: var(--muted);
+}
+.chat-log .tr-go {
+  flex: none;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.chat-log .tr-notice {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 12px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .chat-bar {
+    gap: 6px;
+  }
+  .chat-bar .chat-presence .lbl,
+  .chat-bar button .t {
+    display: none;
+  }
+  .chat-bar .chat-view button {
+    min-height: 36px;
+    padding: 4px 9px;
+  }
+  .chat-inspect-what .desc {
+    display: none;
+  }
 }
 
 /* paired devices (this machine only): list, pairing link with QR code, approval toast */

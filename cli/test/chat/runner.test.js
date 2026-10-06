@@ -207,6 +207,7 @@ test('agents: a foreground Agent call starts one, its own tool calls are its act
     tools: 2,
     startedAt: 1000,
     endedAt: null,
+    agentId: null,
   });
   assert.equal(a2.type, 'general-purpose');
   t = 5000;

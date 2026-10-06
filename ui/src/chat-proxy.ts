@@ -6,6 +6,7 @@
 //   POST /__chat/open          runs `nos chat open --no-open` (?reopen=1 after the user ended it)
 //   POST /__chat/new           { title? } a new tab, its own Claude Code session
 //   GET  /__chat/events        project-wide event stream (sessions, chat-sync, presence, activity, ended)
+//   GET  /__chat/transcript-events  the steps of a tab (?key=) or its subagent (&agent= or &tool=), pushed
 //   POST /__chat/messages      { text }  ?key=
 //   POST /__chat/end           close a tab  ?key=
 //   POST /__chat/stop          stop the running Claude Code run of a tab  ?key=
@@ -210,6 +211,18 @@ export function chatHandler(root: string, opts: ChatHandlerOptions = {}) {
       if (!port) return json(res, 503, { error: 'chat server not running' });
       access.track(who, res);
       return forward(res, port, 'GET', '/events-all');
+    }
+    // details view: the steps of a tab's session or of one of its subagents, pushed
+    if (method === 'GET' && route === '/transcript-events') {
+      const tab = url.searchParams.get('key') ?? key;
+      const agent = url.searchParams.get('agent');
+      const tool = url.searchParams.get('tool');
+      if (!/^[a-f0-9]{12}$/.test(tab) || (agent && !/^\w+$/.test(agent)) || (tool && !/^[\w-]+$/.test(tool)))
+        return json(res, 400, { error: 'invalid key, agent or tool' });
+      if (!port) return json(res, 503, { error: 'chat server not running' });
+      const q = new URLSearchParams({ key: tab, ...(agent && { agent }), ...(tool && { tool }) });
+      access.track(who, res);
+      return forward(res, port, 'GET', `/transcript-events?${q}`);
     }
     if (method !== 'POST' || !['/messages', '/end', '/stop', '/title', '/new'].includes(route))
       return json(res, 404, { error: 'not found' });

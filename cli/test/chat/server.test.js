@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { request } from '../../src/chat/client.js';
 import { allowed, hostOf } from '../../src/chat/guard.js';
@@ -325,4 +326,62 @@ test('project-wide stream: sessions, then a chat-sync per tab, events carry the 
   assert.equal(got[0].data.runner, true);
   const act = got.find((e) => e.event === 'activity');
   assert.deepEqual(act.data, { key, text: 'Read: README.md' });
+});
+
+// ---- details view: the transcript of a tab, pushed ----
+
+function sse(port, p, until) {
+  return new Promise((resolve) => {
+    const got = [];
+    const req = http.get({ host: '127.0.0.1', port, path: p }, (res) => {
+      if (res.statusCode !== 200) return resolve({ status: res.statusCode, got });
+      let buf = '';
+      res.on('data', (c) => {
+        buf += c;
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          const ev = /^event: (.+)$/m.exec(block);
+          if (ev) got.push({ event: ev[1], data: JSON.parse(/^data: (.+)$/m.exec(block)[1]) });
+          if (until(got)) {
+            req.destroy();
+            resolve({ status: 200, got });
+          }
+        }
+      });
+    });
+    req.on('error', () => {});
+  });
+}
+
+test('transcript-events: the tab session steps, then appended ones; a subagent by id; bad params 400', async (t) => {
+  const home = makeTempRoot(t);
+  const { port, key, store, dir } = await start(t, { claudeEnv: { CLAUDE_CONFIG_DIR: home } });
+  const sid = '76275042-a4c6-49b2-847a-44d65cf907b9';
+  const folder = path.join(home, 'projects', dir.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(path.join(folder, sid, 'subagents'), { recursive: true });
+  const line = (j) => JSON.stringify(j) + '\n';
+  writeFileSync(path.join(folder, `${sid}.jsonl`), line({ type: 'user', uuid: 'u1', message: { content: 'hi' } }));
+  writeFileSync(
+    path.join(folder, sid, 'subagents', 'agent-a796.jsonl'),
+    line({ type: 'user', uuid: 's1', isSidechain: true, message: { content: 'Do the step' } }),
+  );
+
+  // no Claude Code session yet: an empty list
+  const empty = await sse(port, `/transcript-events?key=${key}`, (g) => g.length >= 1);
+  assert.deepEqual(empty.got[0].data, { items: [], initial: true, truncated: false });
+
+  store.update(key, { claudeSession: sid });
+  const main = sse(port, `/transcript-events?key=${key}`, (g) => g.length >= 2);
+  setTimeout(() => appendFileSync(path.join(folder, `${sid}.jsonl`), line({ type: 'assistant', uuid: 'a1', message: { content: [{ type: 'text', text: 'hello' }] } })), 100);
+  const { got } = await main;
+  assert.deepEqual(got[0].data.items.map((i) => i.text), ['hi']);
+  assert.equal(got[0].data.initial, true);
+  assert.deepEqual(got[1].data.items.map((i) => [i.kind, i.text]), [['text', 'hello']]);
+
+  const sub = await sse(port, `/transcript-events?key=${key}&agent=a796`, (g) => g.length >= 1);
+  assert.deepEqual(sub.got[0].data.items.map((i) => [i.label, i.text]), [['Task', 'Do the step']]);
+  assert.equal((await sse(port, `/transcript-events?key=${key}&agent=../x`, () => true)).status, 400);
+  assert.equal((await sse(port, `/transcript-events?key=nope`, () => true)).status, 400);
 });

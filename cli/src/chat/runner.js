@@ -11,7 +11,9 @@ export const SYSTEM_NOTE =
   'You are driven from the nos chat (spec-ui in a browser, often a phone). The user reads your ' +
   'messages as plain text with code fences, so keep them short and readable on a small screen. Nobody ' +
   'can answer permission prompts: a refused tool means it is not allowed here, say so instead of ' +
-  'retrying. Questions with choices: one choice per line, "<letter> - <choice text> [<key>]".';
+  'retrying. Questions with choices: one choice per line, "<letter> - <choice text> [<key>]". A ' +
+  'message starting with "[to subagent <id>" is the user writing to that subagent: forward the text ' +
+  'after the bracket verbatim with SendMessage to that id, then confirm in one short line.';
 
 // environment of the Claude Code session that may have started the server: never inherited
 const SESSION_VARS = /^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_(SESSION_ID|CHILD_SESSION|MESSAGING_.*|ENTRYPOINT|SESSION_ATTENDED|EXECPATH))$/;
@@ -30,6 +32,12 @@ export function describeTool(name, input = {}) {
   const arg =
     input.command ?? input.file_path ?? input.path ?? input.pattern ?? input.url ?? input.description ?? input.prompt ?? '';
   return arg ? `${name}: ${short(arg)}` : name;
+}
+
+// paths in the project root, relative to it (both slash forms)
+export function relTo(root = '') {
+  const dirs = root ? [...new Set([root, root.replace(/\\/g, '/'), root.replace(/\//g, '\\')])] : [];
+  return (t) => dirs.reduce((s, d) => s.split(d + '/').join('').split(d + '\\').join(''), t);
 }
 
 const AGENT_TOOLS = new Set(['Agent', 'Task']);
@@ -51,8 +59,7 @@ const textOf = (content) =>
 // shows up through task_started. line(j) says whether the list changed. Paths in the project root
 // are shown relative to it.
 export function agentTracker(now = Date.now, root = '') {
-  const dirs = root ? [...new Set([root, root.replace(/\\/g, '/'), root.replace(/\//g, '\\')])] : [];
-  const rel = (t) => dirs.reduce((s, d) => s.split(d + '/').join('').split(d + '\\').join(''), t);
+  const rel = relTo(root);
   const agents = new Map(); // Agent tool_use id -> agent
   const ids = new Map(); // every tool_use id an agent runs under (Agent call, resuming SendMessage) -> agent
   const calls = new Set(); // ids of Agent/Task calls: only their tool_result can end an agent
@@ -82,7 +89,7 @@ export function agentTracker(now = Date.now, root = '') {
     return true;
   };
   return {
-    list: () => [...agents.values()].map(({ agentId, ...a }) => ({ ...a })),
+    list: () => [...agents.values()].map((a) => ({ ...a })),
     running: () => [...agents.values()].some((a) => a.status === 'running'),
     rel,
     line(j) {

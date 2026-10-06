@@ -9,6 +9,8 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { allowed } from './guard.js';
 import { KEY } from './paths.js';
+import { relTo } from './runner.js';
+import { agentFile, tailTranscript, transcriptFile } from './transcript.js';
 import { CLIENT_JS, CSS, chatPage, listPage } from './ui.js';
 
 export const MAX_BODY = 1024 * 1024;
@@ -69,6 +71,8 @@ export function createChatServer({
   // a tab's Claude Code process with nothing to do (no turn, no subagent) ends after this
   procIdleMs = 600000,
   runner = null,
+  // where the transcripts of Claude Code are (CLAUDE_CONFIG_DIR), see transcript.js
+  claudeEnv = process.env,
   onStop = () => {},
 }) {
   const wake = new EventEmitter();
@@ -83,6 +87,7 @@ export function createChatServer({
   const activity = new Map(); // key -> last tool call of the run
   const agents = new Map(); // key -> subagents of the last run (runner.js agentTracker)
   const allStreams = new Set(); // project-wide streams (spec-ui tabs)
+  const tailStreams = new Set(); // details views: a followed transcript each
   let lastActive = Date.now();
   let stopping = false;
 
@@ -228,13 +233,13 @@ export function createChatServer({
       if (state !== lastPresence.get(key)) broadcastPresence(key);
     }
     const busy =
-      [...streams.values()].some((s) => s.size) || allStreams.size > 0 || parked.size > 0 || procs.size > 0;
+      [...streams.values()].some((s) => s.size) || allStreams.size > 0 || parked.size > 0 || procs.size > 0 || tailStreams.size > 0;
     for (const p of procs.values()) if (!working(p) && now - p.lastUse > procIdleMs) p.close();
     if (busy) lastActive = now;
     else if (idleMs > 0 && now - lastActive > idleMs) void stop();
   }, sweepMs);
   const ping = setInterval(() => {
-    for (const set of [...streams.values(), allStreams]) for (const res of set) res.write(': ping\n\n');
+    for (const set of [...streams.values(), allStreams, tailStreams]) for (const res of set) res.write(': ping\n\n');
   }, pingMs);
 
   function json(res, code, body) {
@@ -275,6 +280,40 @@ export function createChatServer({
     lastPresence.set(key, state);
     send(res, 'presence', { state });
     res.on('close', () => streams.get(key)?.delete(res));
+  }
+
+  // Details view: the transcript of a tab's Claude Code session, or of one of its subagents
+  // (?agent=<agentId> or ?tool=<tool_use id>), as `items` events: first the last steps, then each
+  // new or changed step. Waits for the session to get its Claude Code id (first message).
+  function transcriptEvents(res, q) {
+    const key = q.get('key') ?? '';
+    const agentId = q.get('agent') || null;
+    const toolUseId = q.get('tool') || null;
+    if (!KEY.test(key) || (agentId && !/^\w+$/.test(agentId)) || (toolUseId && !/^[\w-]+$/.test(toolUseId)))
+      throw new HttpError(400, 'invalid key, agent or tool');
+    session(key);
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
+    tailStreams.add(res);
+    let tail = null;
+    let waiter = null;
+    const follow = () => {
+      const s = store.get(key);
+      if (!s?.claudeSession) return false;
+      const main = transcriptFile(root, s.claudeSession, claudeEnv);
+      const file = agentId || toolUseId ? agentFile(main, { agentId, toolUseId }) : main;
+      if (!file) return false;
+      tail = tailTranscript(file, (items, info) => send(res, 'items', { items, ...info }), { rel: relTo(root) });
+      return true;
+    };
+    if (!follow()) {
+      send(res, 'items', { items: [], initial: true, truncated: false });
+      waiter = setInterval(() => follow() && clearInterval(waiter), 1000);
+    }
+    res.on('close', () => {
+      tailStreams.delete(res);
+      clearInterval(waiter);
+      tail?.close();
+    });
   }
 
   function awaitCall(res, key, timeoutMs) {
@@ -351,6 +390,7 @@ export function createChatServer({
       return;
     }
     if (m === 'GET' && (k = /^\/events\/([^/]+)$/.exec(p))) return events(req, res, k[1]);
+    if (m === 'GET' && p === '/transcript-events') return transcriptEvents(res, url.searchParams);
     if (m === 'GET' && p === '/api/sessions')
       return json(res, 200, { sessions: store.list(), tabs: sessionsView(), runner: !!runner });
     if (m === 'GET' && (k = /^\/api\/session\/([^/]+)$/.exec(p))) {
@@ -473,6 +513,7 @@ export function createChatServer({
     for (const p of procs.values()) p.stop();
     for (const set of streams.values()) for (const res of set) res.end();
     for (const res of allStreams) res.end();
+    for (const res of tailStreams) res.end();
     streams.clear();
     allStreams.clear();
     await new Promise((resolve) => {

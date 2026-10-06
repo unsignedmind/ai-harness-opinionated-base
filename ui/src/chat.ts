@@ -12,12 +12,16 @@ import {
   renderAgents,
   renderLog,
   renderTabs,
+  renderTranscript,
   runningAgents,
+  toSubagent,
   withContext,
   type ChatContext,
   type ChatEntry,
   type ChatTab,
+  type InspectTarget,
   type Presence,
+  type TranscriptItem,
   renderDevices,
   renderPending,
   type PairedDevice,
@@ -31,6 +35,7 @@ const KEY_OPEN = 'nos-chat-open';
 const KEY_WIDTH = 'nos-chat-width';
 const KEY_TAB = 'nos-chat-tab';
 const KEY_AGENTS = 'nos-chat-agents';
+const KEY_VIEW = 'nos-chat-view';
 
 export type ChatDeps = {
   fetch?: typeof fetch;
@@ -117,6 +122,8 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
   const renameRow = $<HTMLFormElement>('.chat-rename-row');
   const renameInput = $<HTMLInputElement>('.chat-rename');
   const form = $<HTMLFormElement>('.chat-composer');
+  const viewSwitch = $('.chat-view');
+  const inspectBar = $('.chat-inspect');
 
   let tabs: ChatTab[] = [];
   const chats: Record<string, ChatEntry[]> = {};
@@ -141,6 +148,12 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
   let link: PairLink | null = null;
   // when the link was made: a device asking after that has used it
   let linkAt = 0;
+  // Chat: messages and answers; Details: every step of the session (its transcript)
+  let view: 'chat' | 'details' = ls.get(KEY_VIEW) === 'details' ? 'details' : 'chat';
+  // the subagents opened, innermost last; while one is open the tab bar gives way to a back button
+  let inspecting: InspectTarget[] = [];
+  // the followed transcript: pushed by the server, steps merged by id
+  let steps: { src: string; es: EventSource; items: TranscriptItem[]; truncated: boolean } | null = null;
 
   const width = Number(ls.get(KEY_WIDTH));
   if (width >= 320) root.style.setProperty('--chat-w', `${width}px`);
@@ -157,12 +170,94 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
     if (active) ls.set(KEY_TAB, active);
   }
 
+  const target = () => inspecting.at(-1) ?? null;
+  const showSteps = () => view === 'details' || inspecting.length > 0;
+  const agentOf = (t: InspectTarget) =>
+    tabOf(t.key)?.agents?.find((a) => a.id === t.tool || (!!t.agentId && a.agentId === t.agentId)) ?? null;
+
+  // follow the transcript the log shows (the tab's session or the open subagent), or none
+  function syncSteps() {
+    const t = target();
+    const src =
+      !isOpen || !showSteps() || !active
+        ? null
+        : t
+          ? `/__chat/transcript-events?key=${encodeURIComponent(t.key)}&${t.agentId ? `agent=${encodeURIComponent(t.agentId)}` : `tool=${encodeURIComponent(t.tool)}`}`
+          : `/__chat/transcript-events?key=${encodeURIComponent(active)}`;
+    if (steps?.src === src) return;
+    steps?.es.close();
+    steps = null;
+    if (!src) return;
+    const s = { src, es: new ES(src), items: [] as TranscriptItem[], truncated: false };
+    steps = s;
+    s.es.addEventListener('items', (e) => {
+      const d = JSON.parse((e as MessageEvent).data) as {
+        items: TranscriptItem[];
+        initial: boolean;
+        truncated: boolean;
+      };
+      if (d.initial) {
+        s.items = d.items;
+        s.truncated = d.truncated;
+      } else
+        for (const it of d.items) {
+          const i = s.items.findIndex((x) => x.id === it.id);
+          if (i < 0) s.items.push(it);
+          else s.items[i] = it;
+        }
+      if (steps === s) draw();
+    });
+  }
+
+  function drawInspect() {
+    const t = target();
+    inspectBar.hidden = !t;
+    viewSwitch.hidden = !!t;
+    for (const b of viewSwitch.querySelectorAll<HTMLElement>('[data-view]'))
+      b.setAttribute('aria-pressed', String(b.dataset.view === view));
+    form.hidden = !!t && !t.agentId;
+    text.placeholder = t ? `Message ${t.type} (via Claude)…` : 'Message Claude…';
+    if (!t) return;
+    const prev = inspecting.at(-2);
+    inspectBar.querySelector('.lbl')!.textContent = prev ? prev.type : (tabOf(t.key)?.title ?? 'Chat');
+    inspectBar.querySelector('.type')!.textContent = t.type;
+    inspectBar.querySelector('.desc')!.textContent = t.description;
+    inspectBar.querySelector<HTMLElement>('.chat-inspect-what')!.dataset.status = agentOf(t)?.status ?? 'done';
+  }
+
+  function inspect(tool: string, agentId: string | null) {
+    if (!active) return;
+    const known = current()?.agents?.find((a) => a.id === tool || (!!agentId && a.agentId === agentId));
+    const step = steps?.items.find((i) => i.id === tool && i.kind === 'agent');
+    inspecting.push({
+      key: active,
+      tool,
+      agentId: agentId || known?.agentId || step?.agentId || null,
+      type: known?.type ?? step?.type ?? 'agent',
+      description: known?.description ?? step?.description ?? '',
+    });
+    agentsBox.hidden = true;
+    ls.set(KEY_AGENTS, '0');
+    renderTranscript(log, []);
+    draw();
+  }
+
   function draw() {
     const p = presenceNow();
     const tab = current();
-    renderLog(log, (active && chats[active]) || [], p);
+    if (inspecting.length && !tabOf(inspecting[0].key)) inspecting = [];
+    syncSteps();
+    const t = target();
+    if (showSteps())
+      renderTranscript(log, steps?.items ?? [], {
+        truncated: steps?.truncated,
+        who: t ? t.type : 'Claude',
+        empty: t ? 'No steps of this subagent yet.' : 'No steps yet. They show here as Claude works.',
+      });
+    else renderLog(log, (active && chats[active]) || [], p);
     tabBar.innerHTML = renderTabs(tabs, active, unread);
-    tabRow.hidden = status === 'unpaired' || (!tabs.length && status !== null);
+    tabRow.hidden = !!t || status === 'unpaired' || (!tabs.length && status !== null);
+    drawInspect();
     drawAgents();
     const pill = $('.chat-presence');
     pill.dataset.presence = p;
@@ -176,7 +271,7 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
     toast.innerHTML = asks;
     toast.hidden = !asks;
     if (!tab && !renameRow.hidden) renameRow.hidden = true;
-    activityLine.hidden = !tab?.running || !tab.activity;
+    activityLine.hidden = !tab?.running || !tab.activity || showSteps();
     activityLine.textContent = tab?.activity ? `⚙ ${tab.activity}` : '';
     text.disabled = status === 'unpaired';
     if (toggle) {
@@ -377,8 +472,10 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
     sending = true;
     try {
       if ((!live() || !active) && !(await start())) return;
-      const body = { text: withContext(t, useContext ? ctx : null) };
-      let r = await post('messages', body);
+      // in a subagent: through the main session, which passes it on (SendMessage)
+      const sub = target();
+      const body = { text: sub?.agentId ? toSubagent(sub, t) : withContext(t, useContext ? ctx : null) };
+      let r = await post('messages', body, sub?.key ?? active);
       if ((r.status === 503 || r.status === 409 || r.status === 404) && (await start()))
         r = await post('messages', body);
       if (!r.ok) throw new Error();
@@ -386,8 +483,9 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
       text.value = '';
       const tab = current();
       if (tab) tab.presence = j.presence;
-      line.textContent =
-        j.presence === 'thinking' || j.presence === 'typing'
+      line.textContent = sub?.agentId
+        ? `Sent. Claude passes it on to ${sub.type}.`
+        : j.presence === 'thinking' || j.presence === 'typing'
           ? 'Delivered. Claude is on it.'
           : 'Queued. Claude picks this up when it next listens.';
       draw();
@@ -596,7 +694,17 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
     else if (a === 'close-tab' && el?.dataset.key) closeTab(el.dataset.key);
     else if (a === 'rename') startRename();
     else if (a === 'rename-cancel') endRename(false);
-    else if (a === 'agents') {
+    else if (a === 'view' && el?.dataset.view) {
+      view = el.dataset.view === 'details' ? 'details' : 'chat';
+      ls.set(KEY_VIEW, view);
+      draw();
+      log.scrollTop = log.scrollHeight;
+    } else if (a === 'inspect' && el?.dataset.tool) inspect(el.dataset.tool, el.dataset.agent || null);
+    else if (a === 'back') {
+      inspecting.pop();
+      draw();
+      log.scrollTop = log.scrollHeight;
+    } else if (a === 'agents') {
       agentsBox.hidden = !agentsBox.hidden;
       ls.set(KEY_AGENTS, agentsBox.hidden ? '0' : '1');
       drawAgents();
@@ -707,6 +815,7 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
       clearInterval(recheck);
       clearInterval(tick);
       es?.close();
+      steps?.es.close();
       toggle?.removeEventListener('click', onToggle);
       window.removeEventListener('popstate', onPop);
       mq.removeEventListener?.('change', onBreakpoint);

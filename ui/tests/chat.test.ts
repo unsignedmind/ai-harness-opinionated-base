@@ -10,12 +10,14 @@ import {
   renderAgents,
   renderLog,
   renderTabs,
+  renderTranscript,
   splitContext,
   splitFences,
   withContext,
   type ChatEntry,
   type ChatTab,
   type SubAgent,
+  type TranscriptItem,
 } from '../src/views/chat';
 import { fixtureFiles } from './fixtures';
 
@@ -110,13 +112,16 @@ test('renderTabs escapes titles, marks the active tab, shows unread of the other
 
 class FakeES {
   static last: FakeES | null = null;
+  // the details view's transcript stream
+  static steps: FakeES | null = null;
   url: string;
   closed = false;
   onerror: (() => void) | null = null;
   private listeners: Record<string, ((e: MessageEvent) => void)[]> = {};
   constructor(url: string) {
     this.url = url;
-    FakeES.last = this;
+    if (url.startsWith('/__chat/transcript-events')) FakeES.steps = this;
+    else FakeES.last = this;
   }
   addEventListener(type: string, fn: (e: MessageEvent) => void) {
     (this.listeners[type] ??= []).push(fn);
@@ -194,6 +199,7 @@ const submit = (dialog: HTMLElement, value: string) => {
 };
 beforeEach(() => {
   FakeES.last = null;
+  FakeES.steps = null;
   history.replaceState(null, '', location.pathname);
 });
 afterEach(() => {
@@ -493,4 +499,154 @@ test('a paired device sees no device admin', async () => {
   toggle.click();
   expect(dialog.querySelector<HTMLElement>('[data-chat="devices"]')!.hidden).toBe(true);
   expect(document.querySelector<HTMLElement>('.pair-toast')!.hidden).toBe(true);
+});
+
+// ---- details view and subagents in view ----
+
+const step = (id: string, kind: TranscriptItem['kind'], extra: Partial<TranscriptItem> = {}): TranscriptItem => ({
+  id,
+  kind,
+  at: null,
+  ...extra,
+});
+
+test('renderTranscript: bubbles, folded tool calls with state, agent rows that open, notices; text only', () => {
+  const log = document.createElement('div');
+  renderTranscript(log, [], { empty: 'Nothing yet.' });
+  expect(log.textContent).toContain('Nothing yet.');
+  const items = [
+    step('u', 'user', { text: '[context: specs/a.md]\nDevelop <b>it</b>' }),
+    step('t1', 'tool', {
+      summary: 'Bash: npm test',
+      input: '{"command":"npm test"}',
+      output: '<img src=x>',
+      state: 'ok',
+    }),
+    step('t2', 'tool', { summary: 'Read: x.ts', input: '{}', output: null, state: 'running' }),
+    step('ag', 'agent', { type: 'general-purpose', description: 'Develop', agentId: 'a796' }),
+    step('n', 'notice', { text: 'Agent "Develop" finished (completed)' }),
+    step('x', 'text', { text: 'Done.' }),
+  ];
+  renderTranscript(log, items, { truncated: true, who: 'general-purpose' });
+  expect(log.querySelector('b')).toBeNull();
+  expect(log.querySelector('img')).toBeNull();
+  expect(log.querySelector('.chat-note')!.textContent).toContain('Earlier steps');
+  expect(log.querySelector('.msg.user .ctx')!.textContent).toBe('specs/a.md');
+  const [ok, running] = log.querySelectorAll<HTMLElement>('details.tr-tool');
+  expect(ok.dataset.state).toBe('ok');
+  expect(ok.querySelector('.tr-sum')!.textContent).toBe('Bash: npm test');
+  expect(ok.querySelectorAll('pre')[1].textContent).toBe('<img src=x>');
+  expect(running.querySelector('.tr-wait')!.textContent).toBe('Running…');
+  const open = log.querySelector<HTMLElement>('[data-chat="inspect"]')!;
+  expect([open.dataset.tool, open.dataset.agent]).toEqual(['ag', 'a796']);
+  expect(log.querySelector('.tr-notice')!.textContent).toContain('finished');
+  expect(log.querySelector('.msg.agent .meta')!.textContent).toBe('general-purpose');
+  // a fold the reader opened stays open on redraw
+  (ok as HTMLDetailsElement).open = true;
+  renderTranscript(log, items);
+  expect(log.querySelector<HTMLDetailsElement>('details[data-id="t1"]')!.open).toBe(true);
+});
+
+test('details view: the switch shows the pushed steps of the tab, merged by id; Chat closes the stream', async () => {
+  const { toggle, dialog } = setup({ state: { key: A, server: true, runner: true, tabs: [tabOf(A)] } });
+  await tick();
+  FakeES.last!.emit('sessions', { sessions: [tabOf(A)], runner: true });
+  toggle.click();
+  expect(FakeES.steps).toBeNull();
+  dialog.querySelector<HTMLElement>('[data-chat="view"][data-view="details"]')!.click();
+  const steps = FakeES.steps!;
+  expect(steps.url).toBe(`/__chat/transcript-events?key=${A}`);
+  expect(dialog.querySelector('[data-view="details"]')!.getAttribute('aria-pressed')).toBe('true');
+  steps.emit('items', {
+    items: [step('t1', 'tool', { summary: 'Bash: ls', state: 'running', output: null })],
+    initial: true,
+    truncated: false,
+  });
+  steps.emit('items', {
+    items: [
+      step('t1', 'tool', { summary: 'Bash: ls', state: 'ok', output: 'a' }),
+      step('x', 'text', { text: 'Done.' }),
+    ],
+    initial: false,
+    truncated: false,
+  });
+  const log = dialog.querySelector('.chat-log')!;
+  expect(log.querySelectorAll('details.tr-tool').length).toBe(1);
+  expect(log.querySelector<HTMLElement>('details.tr-tool')!.dataset.state).toBe('ok');
+  expect(log.querySelector('.msg.agent .t')!.textContent).toBe('Done.');
+  dialog.querySelector<HTMLElement>('[data-chat="view"][data-view="chat"]')!.click();
+  expect(steps.closed).toBe(true);
+  expect(log.querySelector('details')).toBeNull();
+});
+
+test('a subagent in view: back button instead of the tabs, its own steps, messages go through Claude, back restores', async () => {
+  const { calls, toggle, dialog } = setup({ state: { key: A, server: true, runner: true, tabs: [tabOf(A)] } });
+  await tick();
+  const dev = agent('toolu_1', { agentId: 'a796', type: 'general-purpose', description: 'Develop step' });
+  FakeES.last!.emit('sessions', { sessions: [tabOf(A, { running: true, agents: [dev] })], runner: true });
+  toggle.click();
+  dialog.querySelector<HTMLElement>('[data-chat="agents"]')!.click();
+  dialog.querySelector<HTMLElement>('.chat-agents [data-chat="inspect"]')!.click();
+
+  const bar = dialog.querySelector<HTMLElement>('.chat-inspect')!;
+  expect(bar.hidden).toBe(false);
+  expect(dialog.querySelector<HTMLElement>('.chat-tabs-row')!.hidden).toBe(true);
+  expect(dialog.querySelector<HTMLElement>('.chat-agents')!.hidden).toBe(true);
+  expect(dialog.querySelector<HTMLElement>('.chat-view')!.hidden).toBe(true);
+  expect(bar.querySelector('.lbl')!.textContent).toBe('Chat');
+  expect(bar.querySelector('.type')!.textContent).toBe('general-purpose');
+  expect(bar.querySelector<HTMLElement>('.chat-inspect-what')!.dataset.status).toBe('running');
+  expect(FakeES.steps!.url).toBe(`/__chat/transcript-events?key=${A}&agent=a796`);
+  FakeES.steps!.emit('items', {
+    items: [step('s', 'user', { label: 'Task', text: 'Do it' })],
+    initial: true,
+    truncated: false,
+  });
+  expect(dialog.querySelector('.chat-log .msg.user .meta')!.textContent).toBe('Task');
+
+  const textarea = dialog.querySelector('textarea')!;
+  expect(textarea.placeholder).toBe('Message general-purpose (via Claude)…');
+  submit(dialog, 'also run lint');
+  await ticks();
+  const sent = calls.find((c) => c.url.startsWith('/__chat/messages'))!;
+  expect(sent.url).toBe(`/__chat/messages?key=${A}`);
+  expect(JSON.parse(String(sent.init!.body)).text).toBe('[to subagent a796 (Develop step)] also run lint');
+
+  const sub = FakeES.steps!;
+  dialog.querySelector<HTMLElement>('[data-chat="back"]')!.click();
+  expect(bar.hidden).toBe(true);
+  expect(dialog.querySelector<HTMLElement>('.chat-tabs-row')!.hidden).toBe(false);
+  expect(sub.closed).toBe(true);
+  expect(textarea.placeholder).toBe('Message Claude…');
+});
+
+test('a subagent opened from its step; one that cannot be resumed has no composer; nested ones go back one level', async () => {
+  const { toggle, dialog } = setup({ state: { key: A, server: true, runner: true, tabs: [tabOf(A)] } });
+  await tick();
+  FakeES.last!.emit('sessions', { sessions: [tabOf(A)], runner: true });
+  toggle.click();
+  dialog.querySelector<HTMLElement>('[data-view="details"]')!.click();
+  FakeES.steps!.emit('items', {
+    items: [step('tu_x', 'agent', { type: 'Explore', description: 'Look', agentId: null })],
+    initial: true,
+    truncated: false,
+  });
+  dialog.querySelector<HTMLElement>('.chat-log [data-chat="inspect"]')!.click();
+  expect(FakeES.steps!.url).toBe(`/__chat/transcript-events?key=${A}&tool=tu_x`);
+  expect(dialog.querySelector('.chat-inspect .type')!.textContent).toBe('Explore');
+  expect(dialog.querySelector<HTMLElement>('.chat-composer')!.hidden).toBe(true);
+  FakeES.steps!.emit('items', {
+    items: [step('tu_y', 'agent', { type: 'general-purpose', description: 'Inner', agentId: 'b1' })],
+    initial: true,
+    truncated: false,
+  });
+  dialog.querySelector<HTMLElement>('.chat-log [data-chat="inspect"]')!.click();
+  expect(dialog.querySelector('.chat-inspect .lbl')!.textContent).toBe('Explore');
+  expect(dialog.querySelector<HTMLElement>('.chat-composer')!.hidden).toBe(false);
+  dialog.querySelector<HTMLElement>('[data-chat="back"]')!.click();
+  expect(dialog.querySelector('.chat-inspect .type')!.textContent).toBe('Explore');
+  dialog.querySelector<HTMLElement>('[data-chat="back"]')!.click();
+  expect(dialog.querySelector<HTMLElement>('.chat-inspect')!.hidden).toBe(true);
+  // back in the details view of the tab
+  expect(FakeES.steps!.url).toBe(`/__chat/transcript-events?key=${A}`);
 });
