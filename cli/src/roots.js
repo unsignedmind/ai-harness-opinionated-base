@@ -11,6 +11,9 @@ import { git, gitAvailable } from './git.js';
 //   specs       main + specs.dir of main's nos.config.json (default .specs), its own git repo
 //   inWorktree  work is a linked git worktree of main
 //   git         work is inside a git repo
+//   offset      the project folder inside its git checkout, '' unless the project is a subfolder of the repo
+//   configured  a nos.config.json exists in work or main (nos init ran)
+//   via         how work was found: 'root' (--root), 'env' (NOS_SPECS_ROOT), 'walk', 'cwd' (nothing found)
 export const SPECS_DIR = '.specs';
 export const PROJECT_CONFIG_FILE = 'nos.config.json';
 const LEGACY_SPEC_PREFIX = 'specs/';
@@ -26,6 +29,12 @@ function canonical(p) {
   } catch {
     return abs;
   }
+}
+
+// child lies strictly below parent
+export function isInside(child, parent) {
+  const rel = path.relative(parent, child);
+  return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
 export const NOS_HOME = canonical(fileURLToPath(new URL('../../', import.meta.url)));
@@ -56,35 +65,78 @@ function specsDirOf(main) {
   return typeof dir === 'string' && dir.trim() ? dir.trim() : SPECS_DIR;
 }
 
+// The top of the main worktree. Normally the parent of the common dir (<top>/.git). A submodule's common
+// dir lies under <super>/.git/modules/: then git's own list names the main worktree first.
+function mainTopOf(commonDir, cwd) {
+  if (path.basename(commonDir) === '.git') return canonical(path.dirname(commonDir));
+  const list = git(['worktree', 'list', '--porcelain'], { cwd });
+  const line = list.stdout.split(/\r?\n/).find((l) => l.startsWith('worktree '));
+  return canonical(line ? line.slice('worktree '.length) : path.dirname(commonDir));
+}
+
+// { common, top, mainTop } of the checkout dir lies in, null outside git
+function gitInfo(dir) {
+  if (!existsSync(dir) || !gitAvailable()) return null;
+  const res = git(['rev-parse', '--path-format=absolute', '--git-common-dir', '--show-toplevel'], { cwd: dir });
+  const [commonDir, top] = res.code === 0 ? res.stdout.trim().split(/\r?\n/) : [];
+  if (!commonDir || !top) return null;
+  const common = canonical(commonDir);
+  return { common, top: canonical(top), mainTop: mainTopOf(common, dir) };
+}
+
 // work: --root (as given), else NOS_SPECS_ROOT, else the walk to nos.config.json, else cwd.
-// main: the top of git's common worktree (plus work's offset inside its own checkout, so a project in a
-// subfolder of a repo stays itself). Not a git repo: main = work.
+//   A walk that climbed out of a linked worktree (its branch has no nos.config.json yet) is brought back:
+//   work = that worktree's top + the project offset.
+// main: the top of the main worktree + the project offset (a project in a subfolder of a repo stays itself).
+//   Not a git repo: main = work.
 export function resolveRoots({ root, cwd = process.cwd(), env = process.env, home = NOS_HOME } = {}) {
   const given = root || env.NOS_SPECS_ROOT;
-  const work = canonical(given ? path.resolve(cwd, given) : (findWorkRoot(cwd) ?? cwd));
-
-  let main = work;
-  let inWorktree = false;
-  let isGit = false;
-  if (existsSync(work) && gitAvailable()) {
-    const res = git(['rev-parse', '--path-format=absolute', '--git-common-dir', '--show-toplevel'], { cwd: work });
-    const [commonDir, topLevel] = res.code === 0 ? res.stdout.trim().split(/\r?\n/) : [];
-    if (commonDir && topLevel) {
-      const mainTop = canonical(path.dirname(commonDir));
-      const workTop = canonical(topLevel);
-      main = canonical(path.join(mainTop, path.relative(workTop, work)));
-      inWorktree = mainTop !== workTop;
-      isGit = true;
+  const via = root ? 'root' : given ? 'env' : 'walk';
+  let work;
+  let info;
+  let found = null;
+  if (given) {
+    work = canonical(path.resolve(cwd, given));
+    info = gitInfo(work);
+  } else {
+    found = findWorkRoot(cwd);
+    work = canonical(found ?? cwd);
+    info = gitInfo(work);
+    const here = found && info ? gitInfo(cwd) : null;
+    if (here && here.common === info.common && here.top !== info.top && isInside(here.top, work)) {
+      work = canonical(path.join(here.top, path.relative(info.top, work)));
+      info = here;
     }
   }
+
+  let main = work;
+  let offset = '';
+  let inWorktree = false;
+  if (info) {
+    const rel = path.relative(info.top, work);
+    offset = slash(rel);
+    main = canonical(path.join(info.mainTop, rel));
+    inWorktree = info.mainTop !== info.top;
+  }
+  const configured =
+    existsSync(path.join(work, PROJECT_CONFIG_FILE)) || existsSync(path.join(main, PROJECT_CONFIG_FILE));
   return {
     home: canonical(home),
     work,
     main,
     specs: path.resolve(main, specsDirOf(main)),
     inWorktree,
-    git: isGit,
+    git: Boolean(info),
+    offset,
+    configured,
+    via: found || given ? via : 'cwd',
   };
+}
+
+// The project folder inside a worktree of the project: <worktreeTop>/<offset> (= worktreeTop unless the
+// project is a subfolder of its repo). nos run start enters this folder.
+export function worktreeProjectDir(roots, worktreeTop) {
+  return path.join(worktreeTop, ...roots.offset.split('/').filter(Boolean));
 }
 
 // The CLI should run from the project's own nos (<main>/.claude/skills/nos), never from a copy in a worktree.
@@ -98,7 +150,7 @@ export function homeGuard(roots, stderr = process.stderr) {
         `Call node ${slash(projectHome)}/cli/bin/nos.js`,
     );
   }
-  if (slash(roots.home).includes('/.claude/worktrees/')) {
+  if (isInside(roots.home, path.join(roots.main, '.claude', 'worktrees'))) {
     warnings.push(`nos: warning: running a nos copy inside a worktree (${slash(roots.home)}). Call the nos of main`);
   }
   for (const warning of warnings) stderr.write(warning + '\n');
@@ -106,15 +158,24 @@ export function homeGuard(roots, stderr = process.stderr) {
 }
 
 // The spec-file of a plan step or quick step: relative to the specs root, forward slashes, '' when empty.
-// The old form with the specs/ prefix is refused, the migration rewrites it.
+// Older forms (specs/ or .specs/ prefix, absolute paths) are refused; the migration rewrites them.
 export function specFileOf(entry) {
   const specFile = String(entry?.['spec-file'] ?? '')
     .trim()
     .replaceAll('\\', '/');
-  if (specFile.startsWith(LEGACY_SPEC_PREFIX)) {
-    throw new NosError(FAILED, `legacy spec-file "${specFile}" (with the old specs/ prefix): run the migration`, {
-      specFile,
-    });
+  const legacy =
+    specFile.startsWith(LEGACY_SPEC_PREFIX) ||
+    specFile.startsWith(`${SPECS_DIR}/`) ||
+    specFile.startsWith('/') ||
+    /^[A-Za-z]:/.test(specFile) ||
+    path.isAbsolute(specFile);
+  if (legacy) {
+    throw new NosError(
+      FAILED,
+      `legacy spec-file "${specFile}": a spec-file is relative to the specs root (no specs/ or .specs/ prefix, ` +
+        'not absolute): run the migration',
+      { specFile },
+    );
   }
   return specFile;
 }

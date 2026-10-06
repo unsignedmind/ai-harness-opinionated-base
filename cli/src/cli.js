@@ -17,7 +17,7 @@ Usage: nos <command> [options]
 
 Commands:
   init               Set up the nos layout: nos.config.json, .specs/ (own git repo), .gitignore entries
-  roots              Print the resolved roots: home, work, main, specs, inWorktree
+  roots              Print the resolved roots: home, work, main, specs, inWorktree, configured
   create-domain      Reserve a domain id and create <specs>/domain-<id>-<slug>/idea.md
   create-plan        Save a plan.json in a domain and create its phase folders and step files
                      (--hollow: an empty plan.json, promotes the domain unplanned)
@@ -34,6 +34,8 @@ Options:
 
 Roots: work = the checkout you sit in (main or a git worktree), main = the main checkout,
 specs = main + "specs.dir" of nos.config.json (default .specs). See "nos help roots".
+Every command except init and roots needs a project set up by nos init: without nos.config.json
+it fails with "nos is not set up here".
 Slugs are never generated: they must be lowercase kebab-case (e.g. user-auth).
 Pass "-" to read an input from stdin. Results are printed as JSON, paths absolute with forward slashes.
 "spec-file" values are relative to the specs root, e.g. domain-1-auth/phases/phase-1-a/step-2-b.md.
@@ -45,13 +47,17 @@ const INIT_HELP = `Usage: nos init [--root <dir>]
 
 Set up the nos layout of a project. Idempotent: only missing parts are created.
 Refused inside a git worktree (the layout belongs to the main checkout).
+Without nos.config.json and without --root / NOS_SPECS_ROOT, run it from the project root: refused
+in a subfolder of a git repo and inside the nos folder (e.g. <project>/.claude/skills/nos).
 
   1. Creates nos.config.json from templates/nos.config.json of this nos if missing
   2. Creates .specs/ (specs.dir) with config.json (id-counters, from templates/config.json)
      and .gitignore (.chat/, .locks/, .runs/)
-  3. Git project: appends ".specs/" and ".claude/worktrees/" to the project .gitignore if missing
+  3. Git project: appends ".specs/" and ".claude/worktrees/" to the project .gitignore unless a
+     .gitignore of the repo already ignores them (e.g. ".claude/*"), in the file's line ending
   4. Git available: "git init -b main" in .specs, first commit "nos: init",
      and "git remote add origin <specs.remote>" when specs.remote is set and origin is missing
+     (an origin with another URL is reported as "mismatch", never changed)
   Commits nothing in the project. Existing files are never changed (except appended .gitignore entries).
 
 Options:
@@ -76,14 +82,18 @@ Print the roots every other command uses. The CLI is the only resolver of nos pa
 
   home        the nos folder of this CLI (templates are read from <home>/templates)
   work        --root, else NOS_SPECS_ROOT, else the nearest folder with nos.config.json
-              from the current directory, else the current directory. Main or a worktree
-  main        the main checkout: git common dir of work -> its parent. Not a git repo: work
+              from the current directory, else the current directory. Main or a worktree.
+              A walk that climbed out of a worktree (its branch has no nos.config.json yet)
+              is brought back into it
+  main        the main checkout: top of git's main worktree (+ the project's subfolder in
+              the repo, if any). Not a git repo: work
   specs       main + "specs.dir" of main's nos.config.json (default .specs)
   inWorktree  work is a linked git worktree of main
+  configured  a nos.config.json exists in work or main (false: run nos init)
 
 Walking up to nos.config.json first makes nested repos harmless: from <main>/.claude/skills/nos
 or <main>/.specs the result is the project, not the nested repo.
-Warns on stderr when this nos is not <main>/.claude/skills/nos or lies inside a worktree.
+Warns on stderr when this nos is not <main>/.claude/skills/nos or lies under <main>/.claude/worktrees/.
 
 Options:
   --root <dir>     Work root (default: see above)
@@ -96,18 +106,18 @@ Example:
     "work": "D:/repo/.claude/worktrees/quick-7",
     "main": "D:/repo",
     "specs": "D:/repo/.specs",
-    "inWorktree": true
+    "inWorktree": true,
+    "configured": true
   }`;
 
 const CREATE_DOMAIN_HELP = `Usage: nos create-domain --idea <file|-> --slug <slug> [--name <name>] [--labels <a,b>] [--root <dir>]
 
 Create a new domain for an idea.
 
-  1. Creates <specs>/ and <specs>/config.json if missing (config.json is copied from
-     templates/config.json of this nos). Run nos init first to get the full layout
-  2. Takes the next domain id from <specs>/config.json and increases the counter
-  3. Creates <specs>/domain-<id>-<slug>/ and saves the idea as idea.md in it
-  4. Saves domain.json in it: { "name", "labels", "cross-cutting": false }
+  Needs a project set up by nos init (<specs>/config.json).
+  1. Takes the next domain id from <specs>/config.json and increases the counter
+  2. Creates <specs>/domain-<id>-<slug>/ and saves the idea as idea.md in it
+  3. Saves domain.json in it: { "name", "labels", "cross-cutting": false }
 
 Options:
   --idea <file|->  Idea markdown file, or "-" to read it from stdin   (required)
@@ -299,6 +309,7 @@ const COMMANDS = {
     help: INIT_HELP,
     options: { root: { type: 'string' } },
     required: [],
+    setsUp: true,
     execute(values, io, roots) {
       const result = initProject(roots);
       return {
@@ -317,6 +328,7 @@ const COMMANDS = {
     help: ROOTS_HELP,
     options: { root: { type: 'string' } },
     required: [],
+    setsUp: true,
     execute(values, io, roots) {
       return {
         action: 'roots',
@@ -325,6 +337,7 @@ const COMMANDS = {
         main: slash(roots.main),
         specs: slash(roots.specs),
         inWorktree: roots.inWorktree,
+        configured: roots.configured,
       };
     },
   },
@@ -533,12 +546,22 @@ export function run(argv, io = {}) {
     const values = parseCommand(name, command, args);
     const roots = resolveRoots({ root: values.root, cwd, env, home });
     homeGuard(roots, stderr);
+    if (!command.setsUp && !roots.configured) throw notSetUp(roots, cwd);
     const result = command.execute(values, { cwd, readStdin }, roots);
     stdout.write(JSON.stringify(result, null, 2) + '\n');
     return EXIT.OK;
   } catch (err) {
     return reportError(name, err, { stdout, stderr });
   }
+}
+
+// Every command except init and roots needs the layout of nos init (nos.config.json, <specs>/config.json).
+function notSetUp(roots, cwd) {
+  const where =
+    roots.via === 'root' || roots.via === 'env'
+      ? `no nos.config.json in ${slash(roots.work)}`
+      : `no nos.config.json found from ${slash(path.resolve(cwd))} up`;
+  return new NosError(EXIT.FAILED, `nos is not set up here: ${where}. Run nos init from the project root`);
 }
 
 // Error -> exit code. Every error gets one stderr line. NosError 3-7 are states the orchestrator reacts to:

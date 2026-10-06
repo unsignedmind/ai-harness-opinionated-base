@@ -54,7 +54,7 @@ export function ensureSpecs(roots) {
 function readCounter(roots, counter) {
   const file = configPath(roots);
   if (!existsSync(file)) {
-    throw new Error(`Missing ${slash(file)}. Run nos init (or create-domain) first to create it`);
+    throw new Error(`Missing ${slash(file)}. Run nos init first`);
   }
   const config = readJsonFile(file);
   const counters = config['id-counters'] ?? {};

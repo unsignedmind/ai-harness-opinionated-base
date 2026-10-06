@@ -74,9 +74,17 @@ test('rejects missing or invalid input without writing anything', (t) => {
   assert.equal(readJson(roots.specs, 'config.json')['id-counters'].step, 1);
 });
 
-test('quickStepId reads the id from a spec-file relative to the specs root, refuses the legacy prefix', () => {
+test('quickStepId reads the id from a spec-file relative to the specs root, refuses prefixed and absolute forms', () => {
   assert.equal(quickStepId({ 'spec-file': 'domain-1-auth/quick-steps/step-12-fix-typo.md' }), 12);
   assert.equal(quickStepId({ 'spec-file': 'domain-1-auth/phases/phase-1-a/step-3-b.md' }), undefined);
   assert.equal(quickStepId({}), undefined);
   assert.throws(() => quickStepId({ 'spec-file': 'specs/domain-1-auth/quick-steps/step-12-fix-typo.md' }), /legacy spec-file.*migration/);
+  for (const old of [
+    '.specs/domain-1-auth/quick-steps/step-12-fix-typo.md',
+    'D:/repo/.specs/domain-1-auth/quick-steps/step-12-fix-typo.md',
+    String.raw`D:\repo\.specs\domain-1-auth\quick-steps\step-12-fix-typo.md`,
+    '/repo/.specs/domain-1-auth/quick-steps/step-12-fix-typo.md',
+  ]) {
+    assert.throws(() => quickStepId({ 'spec-file': old }), /legacy spec-file.*relative to the specs root.*run the migration/, old);
+  }
 });

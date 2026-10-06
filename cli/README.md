@@ -24,7 +24,7 @@ nos <command> --help
 | Command             | Description                                                                 |
 | ------------------- | --------------------------------------------------------------------------- |
 | `init`              | Set up the nos layout: `nos.config.json`, `.specs/` (own git repo), `.gitignore` entries |
-| `roots`             | Print the resolved roots: `home`, `work`, `main`, `specs`, `inWorktree`    |
+| `roots`             | Print the resolved roots: `home`, `work`, `main`, `specs`, `inWorktree`, `configured` |
 | `create-domain`     | Reserve a domain id and create `<specs>/domain-<id>-<slug>/idea.md`         |
 | `create-plan`       | Save a `plan.json` in a domain and create its phase folders and step files (`--hollow`: empty plan, promotes unplanned) |
 | `update-plan`       | Save an updated `plan.json` and create, move or delete phases and steps     |
@@ -36,6 +36,7 @@ General rules:
 - `nos` never generates slugs. They must be lowercase kebab-case, e.g. `user-auth`.
 - Pass `-` as a file argument to read that input from stdin.
 - Every command accepts `--root <dir>`, the work root (see [Roots](#roots)).
+- Every command except `init` and `roots` needs a project set up by `nos init`. Without `nos.config.json` it fails (exit 1) with "nos is not set up here: no nos.config.json found from <cwd> up. Run nos init from the project root". `create-domain` no longer creates `<specs>/config.json` itself.
 - Results are printed to stdout as JSON. Every path in a result is absolute with forward slashes (`D:/repo/.specs/...`). Errors go to stderr.
 - `spec-file` fields in `plan.json` / `quick-steps.json` are relative to the specs root, e.g. `domain-1-user-auth/phases/phase-1-data-model/step-1-user-table.md`. A value with the old `specs/` prefix fails with "legacy spec-file … run the migration" (exit 1).
 - Templates (`config.json`, `nos.config.json`, `status.xml`) are read from `<home>/templates/` of the running nos, never from a copy in the project.
@@ -47,13 +48,13 @@ The CLI resolves four folders once per invocation (`src/roots.js`, shared with c
 | Root    | Resolution |
 | ------- | ---------- |
 | `home`  | The nos folder of the running CLI (`NOS_HOME`) |
-| `work`  | `--root` (as given), else `NOS_SPECS_ROOT`, else the nearest folder with `nos.config.json` walking up from the current directory, else the current directory. The checkout you sit in: main or a git worktree |
-| `main`  | `git -C <work> rev-parse --git-common-dir` → its parent. Not a git repo: `work` |
+| `work`  | `--root` (as given), else `NOS_SPECS_ROOT`, else the nearest folder with `nos.config.json` walking up from the current directory, else the current directory. The checkout you sit in: main or a git worktree. A walk that climbed out of a linked worktree (its branch has no `nos.config.json` yet) is brought back: work = that worktree's top + the project offset |
+| `main`  | Top of git's main worktree (parent of `--git-common-dir`; for a submodule the first entry of `git worktree list`) + the project offset. Not a git repo: `work` |
 | `specs` | `main` + `specs.dir` of main's `nos.config.json` (default `.specs`) |
 
-`inWorktree` is true when `work` is a linked worktree of `main`. Walking up to `nos.config.json` first makes nested repos harmless: from `<main>/.claude/skills/nos` or `<main>/.specs` the roots are the project's.
+`inWorktree` is true when `work` is a linked worktree of `main`. `offset` is the project folder inside its repo (`''` unless the project is a subfolder of a monorepo); `worktreeProjectDir(roots, wtTop)` gives `<wtTop>/<offset>`. `configured` is true when `work` or `main` has `nos.config.json`. Git children never inherit `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR` (hooks set them). Walking up to `nos.config.json` first makes nested repos harmless: from `<main>/.claude/skills/nos` or `<main>/.specs` the roots are the project's.
 
-Home guard: when `<main>/.claude/skills/nos` exists and is not this nos, or this nos lies under `.claude/worktrees/`, every command prints one warning line on stderr (the result is unchanged).
+Home guard: when `<main>/.claude/skills/nos` exists and is not this nos, or this nos lies under `<main>/.claude/worktrees/`, every command prints one warning line on stderr (the result is unchanged).
 
 ### Config split
 
@@ -89,10 +90,10 @@ Sets up the nos layout of a project. Idempotent: only missing parts are created.
 
 1. Creates `nos.config.json` from `<home>/templates/nos.config.json` if missing.
 2. Creates `.specs/` with `config.json` (id-counters, from `<home>/templates/config.json`) and `.gitignore` (`.chat/`, `.locks/`, `.runs/`).
-3. Git project: appends `.specs/` and `.claude/worktrees/` to the project `.gitignore`, only the missing ones.
-4. Git available: `git init -b main` in `.specs`, first commit `nos: init` (`.gitignore`, `config.json`), and `git remote add origin <specs.remote>` when `specs.remote` is set and `.specs` has no `origin`.
+3. Git project: appends `.specs/` and `.claude/worktrees/` to the project `.gitignore`, unless a `.gitignore` of the repo already ignores them (`git check-ignore`, so `.claude/*` counts; global excludes and `.git/info/exclude` do not). Appended in the file's line ending (CRLF stays CRLF).
+4. Git available: `git init -b main` in `.specs`, first commit `nos: init` (`.gitignore`, `config.json`), and `git remote add origin <specs.remote>` when `specs.remote` is set and `.specs` has no `origin`. An `origin` with another URL is left and reported as `{url, existing, added: false, mismatch: true}`. A commit failing for a missing git identity says to set `user.name` / `user.email`.
 
-It commits nothing in the project (the setup ability does that). Existing files are never changed, except appended `.gitignore` entries.
+Without `nos.config.json` and without `--root` / `NOS_SPECS_ROOT` it runs only from the project root: refused in a subfolder of a git repo and inside the nos folder (e.g. `<project>/.claude/skills/nos`). It commits nothing in the project (the setup ability does that). Existing files are never changed, except appended `.gitignore` entries.
 
 ```sh
 $ nos init
@@ -122,7 +123,8 @@ $ nos roots
   "work": "D:/repo/.claude/worktrees/quick-7",
   "main": "D:/repo",
   "specs": "D:/repo/.specs",
-  "inWorktree": true
+  "inWorktree": true,
+  "configured": true
 }
 ```
 
@@ -132,10 +134,11 @@ $ nos roots
 nos create-domain --idea <file|-> --slug <slug> [--name <name>] [--labels <a,b>] [--root <dir>]
 ```
 
-1. Creates `<specs>/` and `<specs>/config.json` if they are missing (copied from `<home>/templates/config.json`). `nos init` sets up the full layout.
-2. Takes the next domain id from `<specs>/config.json` and increments the counter.
-3. Creates `<specs>/domain-<id>-<slug>/` and saves the idea in it as `idea.md`.
-4. Saves `domain.json` in it: `name` (`--name`, default: first `# ` heading of the idea without `Idea:`), `labels` (`--labels`, comma separated, lowercase kebab-case, default none) and `cross-cutting` (always `false` for now).
+Needs `<specs>/config.json` from `nos init`.
+
+1. Takes the next domain id from `<specs>/config.json` and increments the counter.
+2. Creates `<specs>/domain-<id>-<slug>/` and saves the idea in it as `idea.md`.
+3. Saves `domain.json` in it: `name` (`--name`, default: first `# ` heading of the idea without `Idea:`), `labels` (`--labels`, comma separated, lowercase kebab-case, default none) and `cross-cutting` (always `false` for now).
 
 ```sh
 $ nos create-domain --idea idea.md --slug user-auth --labels auth,ui

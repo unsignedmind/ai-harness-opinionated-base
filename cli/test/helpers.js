@@ -11,18 +11,27 @@ export function makeTempRoot(t) {
   return root;
 }
 
-// Roots of a plain temp project for module tests. home is a fake nos folder inside it (no templates
-// unless a test writes them), so templates of the real nos never leak into a test.
-export function makeRoots(t) {
+// Roots of a plain temp project for module tests, set up like nos init leaves it (nos.config.json and
+// <specs>/config.json); { setUp: false } leaves the folder empty. home is a fake nos folder inside it (no
+// templates unless a test writes them), so templates of the real nos never leak into a test.
+export function makeRoots(t, { setUp = true } = {}) {
   const root = makeTempRoot(t);
-  return {
+  const roots = {
     home: path.join(root, 'nos-home'),
     work: root,
     main: root,
     specs: path.join(root, SPECS_DIR),
     inWorktree: false,
     git: false,
+    offset: '',
+    configured: setUp,
+    via: 'root',
   };
+  if (setUp) {
+    writeFile(root, 'nos.config.json', { specs: { dir: SPECS_DIR, remote: null } });
+    writeFile(roots.specs, 'config.json', { 'id-counters': { domain: 1, phase: 1, step: 1 } });
+  }
+  return roots;
 }
 
 export function writeFile(root, relPath, content) {

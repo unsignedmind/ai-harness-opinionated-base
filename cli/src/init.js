@@ -1,10 +1,10 @@
-import { appendFileSync, copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ensureSpecs, templatePath, writeJsonFile } from './config.js';
 import { FAILED, NosError } from './exit-codes.js';
 import { git, gitAvailable, gitOut } from './git.js';
 import { DEFAULT_PROJECT_CONFIG, hasProjectConfig, projectConfigPath, specsConfig } from './project-config.js';
-import { PROJECT_CONFIG_FILE, slash } from './roots.js';
+import { isInside, PROJECT_CONFIG_FILE, slash } from './roots.js';
 
 // .specs keeps history in git; the dot entries are local state
 export const SPECS_GITIGNORE = Object.freeze(['.chat/', '.locks/', '.runs/']);
@@ -15,19 +15,74 @@ function projectIgnores(roots) {
   return [...(inside ? [`${specs}/`] : []), '.claude/worktrees/'];
 }
 
-// An entry counts as present in any of the forms "x", "x/", "/x", "/x/".
-const bare = (entry) => entry.trim().replace(/^\//, '').replace(/\/$/, '');
+// An entry counts as present in any of the forms "x", "x/", "/x", "/x/", "x/*", "**/x", "**/x/".
+const bare = (entry) =>
+  entry
+    .trim()
+    .replace(/^\*\*\//, '')
+    .replace(/^\//, '')
+    .replace(/\/\*$/, '')
+    .replace(/\/$/, '');
 
-// Appends the entries missing from a .gitignore (created when missing). Returns the added ones.
-function ensureIgnored(file, entries) {
+// The entry is ignored by a .gitignore of the repo (not by global excludes or .git/info/exclude, which other
+// clones do not have). Asks git with a path inside the folder, so ".claude/*" also counts for .claude/worktrees/.
+function ignoredByGit(repo, entry) {
+  const probe = `${entry.replace(/\/$/, '')}/x`;
+  const res = git(['check-ignore', '-v', '--', probe], { cwd: repo });
+  if (res.code !== 0) return false;
+  const source = /^(.+?):\d+:/.exec(res.stdout)?.[1] ?? '';
+  return !path.isAbsolute(source) && path.basename(source) === '.gitignore';
+}
+
+// Appends the entries missing from a .gitignore (created when missing), in the file's line ending.
+// With repo given, git decides what is already ignored. Returns the added entries.
+function ensureIgnored(file, entries, repo) {
   const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
   const present = new Set(text.split(/\r?\n/).map(bare));
-  const missing = entries.filter((entry) => !present.has(bare(entry)));
+  const missing = entries.filter((entry) => !present.has(bare(entry)) && !(repo && ignoredByGit(repo, entry)));
   if (missing.length === 0) return [];
-  const separator = text && !text.endsWith('\n') ? '\n' : '';
-  if (text) appendFileSync(file, separator + missing.join('\n') + '\n');
-  else writeFileSync(file, missing.join('\n') + '\n');
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const separator = text && !text.endsWith('\n') ? eol : '';
+  if (text) appendFileSync(file, separator + missing.join(eol) + eol);
+  else writeFileSync(file, missing.join(eol) + eol);
   return missing;
+}
+
+const real = (p) => {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return path.resolve(p);
+  }
+};
+
+// Without nos.config.json and without --root / NOS_SPECS_ROOT the work root is only the cwd: init must then
+// run from the project root itself, never from a subfolder or from inside the nos folder.
+function assertInitPlace(roots) {
+  if (roots.configured || roots.via === 'root' || roots.via === 'env') return;
+  const hint = 'Run nos init from the project root or pass --root <project>';
+  if (roots.work === roots.home || isInside(roots.work, roots.home)) {
+    throw new NosError(FAILED, `${slash(roots.work)} lies inside the nos folder ${slash(roots.home)}. ${hint}`);
+  }
+  if (roots.git) {
+    const top = real(gitOut(['rev-parse', '--show-toplevel'], { cwd: roots.work }));
+    if (top !== roots.work) {
+      throw new NosError(FAILED, `${slash(roots.work)} is not the top of its git repo (${slash(top)}). ${hint}`);
+    }
+  }
+}
+
+// git commit in .specs; a missing identity gets the fix in the message
+function commitSpecs(cwd, message) {
+  const res = git(['commit', '-m', message], { cwd });
+  if (res.code === 0) return;
+  const out = (res.stderr || res.stdout).trim();
+  const identity = /tell me who you are|user\.email|user\.name|empty ident|unable to auto-detect/i.test(out);
+  throw new NosError(
+    FAILED,
+    `git commit in ${slash(cwd)} failed: ${out}` +
+      (identity ? '. Set an identity: git config --global user.name "<name>" and user.email "<email>"' : ''),
+  );
 }
 
 // Sets up the nos layout of a project; every part is created only when missing, so it can run again.
@@ -42,6 +97,7 @@ export function initProject(roots) {
       work: roots.work,
     });
   }
+  assertInitPlace(roots);
   const created = [];
   const existing = [];
   const note = (made, file) => (made ? created : existing).push(file);
@@ -66,7 +122,9 @@ export function initProject(roots) {
   note(madeSpecsIgnore, specsIgnore);
 
   let gitignoreAdded = [];
-  if (roots.git) gitignoreAdded = ensureIgnored(path.join(roots.main, '.gitignore'), projectIgnores(roots));
+  if (roots.git) {
+    gitignoreAdded = ensureIgnored(path.join(roots.main, '.gitignore'), projectIgnores(roots), roots.main);
+  }
 
   let commit = null;
   let remote = null;
@@ -78,15 +136,21 @@ export function initProject(roots) {
 
     if (git(['rev-parse', '--verify', '-q', 'HEAD'], { cwd: roots.specs }).code !== 0) {
       gitOut(['add', '--', '.gitignore', 'config.json'], { cwd: roots.specs });
-      gitOut(['commit', '-m', 'nos: init'], { cwd: roots.specs });
+      commitSpecs(roots.specs, 'nos: init');
       commit = gitOut(['rev-parse', 'HEAD'], { cwd: roots.specs });
     }
 
     const url = specsConfig(roots).remote;
     if (url) {
-      const hasOrigin = git(['remote', 'get-url', 'origin'], { cwd: roots.specs }).code === 0;
-      if (!hasOrigin) gitOut(['remote', 'add', 'origin', url], { cwd: roots.specs });
-      remote = { url, added: !hasOrigin };
+      const origin = git(['remote', 'get-url', 'origin'], { cwd: roots.specs });
+      if (origin.code !== 0) {
+        gitOut(['remote', 'add', 'origin', url], { cwd: roots.specs });
+        remote = { url, added: true };
+      } else {
+        const current = origin.stdout.trim();
+        // a different origin is reported, never changed
+        remote = current === url ? { url, added: false } : { url, existing: current, added: false, mismatch: true };
+      }
     }
   }
 

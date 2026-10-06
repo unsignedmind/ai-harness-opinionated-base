@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { ensureSpecs, reserveIds } from './config.js';
+import { reserveIds, specsDir } from './config.js';
 import { assertSlug } from './slug.js';
 
 export const IDEA_FILE = 'idea.md';
@@ -39,10 +39,10 @@ export function createDomain(roots, { idea, slug, name, labels } = {}) {
     'cross-cutting': false,
   };
 
-  const { specsDir } = ensureSpecs(roots);
+  // the specs root and its config.json come from nos init; reserveIds fails without them
   const [id] = reserveIds(roots, 'domain');
   const folder = `domain-${id}-${slug}`;
-  const domainPath = path.join(specsDir, folder);
+  const domainPath = path.join(specsDir(roots), folder);
 
   if (existsSync(domainPath)) {
     throw new Error(`Domain folder ${domainPath} already exists`);

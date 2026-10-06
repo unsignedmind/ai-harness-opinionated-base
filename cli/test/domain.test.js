@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { createDomain } from '../src/domain.js';
 import { makeRoots, readJson } from './helpers.js';
 
 const IDEA = '# User Authentication\n\nUsers log in with email and password.\n';
 
-test('creates specs, config and the first domain folder with idea.md', (t) => {
+test('creates the first domain folder with idea.md and advances the domain counter', (t) => {
   const roots = makeRoots(t);
 
   const result = createDomain(roots, { idea: IDEA, slug: 'user-auth' });
@@ -49,7 +49,8 @@ test('domain.json takes a given name and labels, the slug when the idea has no h
 test('rejects an invalid label without consuming an id', (t) => {
   const roots = makeRoots(t);
   assert.throws(() => createDomain(roots, { idea: IDEA, slug: 'x', labels: 'Bad Label' }), /invalid slug for label/i);
-  assert.equal(existsSync(roots.specs), false);
+  assert.deepEqual(readdirSync(roots.specs), ['config.json'], 'no domain folder');
+  assert.equal(readJson(roots.specs, 'config.json')['id-counters'].domain, 1, 'no id consumed');
 });
 
 test('assigns increasing ids to subsequent domains', (t) => {
@@ -64,24 +65,33 @@ test('assigns increasing ids to subsequent domains', (t) => {
 test('requires a slug and never derives one from the idea', (t) => {
   const roots = makeRoots(t);
   assert.throws(() => createDomain(roots, { idea: IDEA }), /missing input: domain slug/i);
-  assert.equal(existsSync(roots.specs), false);
+  assert.deepEqual(readdirSync(roots.specs), ['config.json'], 'no domain folder');
+  assert.equal(readJson(roots.specs, 'config.json')['id-counters'].domain, 1, 'no id consumed');
 });
 
 test('rejects an invalid slug without consuming an id', (t) => {
   const roots = makeRoots(t);
   assert.throws(() => createDomain(roots, { idea: IDEA, slug: 'User Auth!' }), /invalid slug/i);
-  assert.equal(existsSync(roots.specs), false);
+  assert.deepEqual(readdirSync(roots.specs), ['config.json'], 'no domain folder');
+  assert.equal(readJson(roots.specs, 'config.json')['id-counters'].domain, 1, 'no id consumed');
 });
 
 test('rejects a missing or blank idea without touching the filesystem', (t) => {
   const roots = makeRoots(t);
   assert.throws(() => createDomain(roots, { idea: '   ', slug: 'x' }), /missing input: idea/i);
   assert.throws(() => createDomain(roots, { slug: 'x' }), /missing input: idea/i);
-  assert.equal(existsSync(roots.specs), false);
+  assert.deepEqual(readdirSync(roots.specs), ['config.json'], 'no domain folder');
+  assert.equal(readJson(roots.specs, 'config.json')['id-counters'].domain, 1, 'no id consumed');
 });
 
 test('refuses to overwrite an existing domain folder', (t) => {
   const roots = makeRoots(t);
   mkdirSync(path.join(roots.specs, 'domain-1-user-auth'), { recursive: true });
   assert.throws(() => createDomain(roots, { idea: IDEA, slug: 'user-auth' }), /already exists/);
+});
+
+test('needs the specs config of nos init and creates nothing without it', (t) => {
+  const roots = makeRoots(t, { setUp: false });
+  assert.throws(() => createDomain(roots, { idea: IDEA, slug: 'user-auth' }), /config\.json\. Run nos init first/);
+  assert.equal(existsSync(roots.specs), false);
 });

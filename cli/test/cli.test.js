@@ -83,6 +83,7 @@ test('roots prints home, work, main, specs and inWorktree with forward slashes',
     main: slash(root),
     specs: slash(path.join(root, SPECS_DIR)),
     inWorktree: false,
+    configured: true,
   });
   assert.ok(!json.specs.includes('\\'));
 });
@@ -110,7 +111,7 @@ test('the home guard warns on stderr when this nos is not the project nos, the r
 });
 
 test('create-domain reads the idea from a file and prints JSON', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   writeFile(root, 'my-idea.md', '# Search Feature\n');
 
   const { code, json, err } = invoke(['create-domain', '--idea', 'my-idea.md', '--slug', 'search'], { cwd: root });
@@ -134,7 +135,7 @@ test('create-domain reads the idea from a file and prints JSON', (t) => {
 });
 
 test('create-domain takes --name and comma separated --labels', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const { code } = invoke(
     ['create-domain', '--idea', '-', '--slug', 'search', '--name', 'Search', '--labels', 'ui, api'],
     { cwd: root, stdin: '# Idea: Search everything\n' },
@@ -148,14 +149,14 @@ test('create-domain takes --name and comma separated --labels', (t) => {
 });
 
 test('create-domain reads the idea from stdin with --idea -', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const { code, json } = invoke(['create-domain', '--idea', '-', '--slug', 'from-stdin'], { cwd: root, stdin: '# Whatever\n' });
   assert.equal(code, 0);
   assert.equal(json.folder, 'domain-1-from-stdin');
 });
 
 test('--root overrides the working directory', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const elsewhere = makeTempRoot(t);
   const { code } = invoke(['create-domain', '--idea', '-', '--slug', 'x', '--root', root], { cwd: elsewhere, stdin: '# X' });
   assert.equal(code, 0);
@@ -164,7 +165,7 @@ test('--root overrides the working directory', (t) => {
 });
 
 test('create-plan reads plan.json from a file and prints created structure', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   invoke(['create-domain', '--idea', '-', '--slug', 'auth'], { cwd: root, stdin: '# Auth' });
   writeFile(root, 'plan.json', PLAN);
 
@@ -189,14 +190,14 @@ test('create-plan reads plan.json from a file and prints created structure', (t)
 });
 
 test('create-plan reads plan.json from stdin', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   invoke(['create-domain', '--idea', '-', '--slug', 'auth'], { cwd: root, stdin: '# Auth' });
   const { code } = invoke(['create-plan', '--domain', 'domain-1-auth', '--plan', '-'], { cwd: root, stdin: JSON.stringify(PLAN) });
   assert.equal(code, 0);
 });
 
 test('missing required options exit with code 2 and a request for the input', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const a = invoke(['create-domain', '--slug', 'x'], { cwd: root });
   assert.equal(a.code, 2);
   assert.match(a.err, /missing input: --idea/i);
@@ -204,7 +205,7 @@ test('missing required options exit with code 2 and a request for the input', (t
   const s = invoke(['create-domain', '--idea', '-'], { cwd: root, stdin: '# Idea' });
   assert.equal(s.code, 2);
   assert.match(s.err, /missing input: --slug/i);
-  assert.equal(existsSync(path.join(root, '.specs')), false);
+  assert.equal(existsSync(path.join(root, '.specs/domain-1-x')), false);
 
   const b = invoke(['create-plan', '--domain', 'domain-1-x'], { cwd: root });
   assert.equal(b.code, 2);
@@ -212,7 +213,7 @@ test('missing required options exit with code 2 and a request for the input', (t
 });
 
 test('create-plan --hollow saves an empty plan and needs no --plan', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   invoke(['create-domain', '--idea', '-', '--slug', 'auth', '--name', 'User auth'], { cwd: root, stdin: '# Auth' });
 
   const { code, json, err } = invoke(['create-plan', '--domain', 'domain-1-auth', '--hollow'], { cwd: root });
@@ -238,28 +239,28 @@ test('create-plan --hollow saves an empty plan and needs no --plan', (t) => {
 });
 
 test('create-plan --hollow with --plan is a usage error', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const { code, err } = invoke(['create-plan', '--domain', 'domain-1-x', '--hollow', '--plan', '-'], { cwd: root });
   assert.equal(code, 2);
   assert.match(err, /--hollow takes no --plan/);
 });
 
 test('an unreadable input file is reported as an error', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const { code, err } = invoke(['create-domain', '--idea', 'nope.md', '--slug', 'x'], { cwd: root });
   assert.equal(code, 1);
   assert.match(err, /nope\.md/);
 });
 
 test('an invalid slug is rejected, not rewritten', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const { code, err } = invoke(['create-domain', '--idea', '-', '--slug', 'My Idea'], { cwd: root, stdin: '# Idea' });
   assert.equal(code, 1);
   assert.match(err, /invalid slug/i);
 });
 
 test('domain errors exit with code 1 and print to stderr', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const { code, out, err } = invoke(['create-plan', '--domain', 'domain-5-ghost', '--plan', '-'], { cwd: root, stdin: JSON.stringify(PLAN) });
   assert.equal(code, 1);
   assert.equal(out, '');
@@ -267,7 +268,7 @@ test('domain errors exit with code 1 and print to stderr', (t) => {
 });
 
 test('unknown commands and options exit with code 2', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   assert.equal(invoke(['explode'], { cwd: root }).code, 2);
   assert.equal(invoke(['create-domain', '--bogus'], { cwd: root }).code, 2);
 });
@@ -288,7 +289,7 @@ test('general help lists every command and points to command help', () => {
 });
 
 test('help <command> and <command> --help print the detailed command help', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   for (const name of ['init', 'roots', 'create-domain', 'create-plan', 'create-quick-step', 'set-status']) {
     const viaHelp = invoke(['help', name], { cwd: root });
     assert.equal(viaHelp.code, 0);
@@ -318,10 +319,10 @@ test('create-plan help documents the expected plan.json shape', () => {
 });
 
 test('--help wins over other arguments and never touches the filesystem', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const { code } = invoke(['create-domain', '--idea', '-', '--slug', 'x', '--help'], { cwd: root, stdin: '# Idea' });
   assert.equal(code, 0);
-  assert.equal(existsSync(path.join(root, '.specs')), false);
+  assert.equal(existsSync(path.join(root, '.specs/domain-1-x')), false);
 });
 
 test('help for an unknown command is a usage error', () => {
@@ -331,20 +332,20 @@ test('help for an unknown command is a usage error', () => {
 });
 
 test('usage errors point to the help of the failing command', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const { err } = invoke(['create-plan', '--domain', 'domain-1-x'], { cwd: root });
   assert.match(err, /nos help create-plan/);
 });
 
 test('bin/nos.js runs as an executable', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const res = spawnSync(process.execPath, [BIN, 'create-domain', '--idea', '-', '--slug', 'via-binary'], { cwd: root, input: '# Via Binary', encoding: 'utf8' });
   assert.equal(res.status, 0, res.stderr);
   assert.equal(JSON.parse(res.stdout).folder, 'domain-1-via-binary');
 });
 
 test('set-status changes a step status and prints the change', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   writeFile(root, '.claude/skills/nos/templates/status.xml', STATUS_XML);
   invoke(['create-domain', '--idea', '-', '--slug', 'auth'], { cwd: root, stdin: '# Auth' });
   invoke(['create-plan', '--domain', 'domain-1-auth', '--plan', '-'], { cwd: root, stdin: JSON.stringify(PLAN) });
@@ -367,7 +368,7 @@ test('set-status changes a step status and prints the change', (t) => {
 });
 
 test('set-status reports an invalid status as a failed operation', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   writeFile(root, '.claude/skills/nos/templates/status.xml', STATUS_XML);
   invoke(['create-domain', '--idea', '-', '--slug', 'auth'], { cwd: root, stdin: '# Auth' });
   invoke(['create-plan', '--domain', 'domain-1-auth', '--plan', '-'], { cwd: root, stdin: JSON.stringify(PLAN) });
@@ -379,7 +380,7 @@ test('set-status reports an invalid status as a failed operation', (t) => {
 });
 
 test('set-status without --status is a usage error', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const { code, err } = invoke(['set-status', '--domain', 'domain-1-auth'], { cwd: root });
   assert.equal(code, 2);
   assert.match(err, /missing input: --status/i);
@@ -387,7 +388,7 @@ test('set-status without --status is a usage error', (t) => {
 });
 
 test('update-plan reads the updated plan and supports --dry-run', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   invoke(['create-domain', '--idea', '-', '--slug', 'auth'], { cwd: root, stdin: '# Auth' });
   invoke(['create-plan', '--domain', 'domain-1-auth', '--plan', '-'], { cwd: root, stdin: JSON.stringify(PLAN) });
   const plan = readJson(root, '.specs/domain-1-auth/plan.json');
@@ -415,7 +416,7 @@ test('update-plan reads the updated plan and supports --dry-run', (t) => {
 });
 
 test('create-quick-step reads the step from stdin and set-status finds it', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   writeFile(root, '.claude/skills/nos/templates/status.xml', STATUS_XML);
   invoke(['create-domain', '--idea', '-', '--slug', 'auth'], { cwd: root, stdin: '# Auth' });
 
@@ -450,7 +451,7 @@ test('create-quick-step reads the step from stdin and set-status finds it', (t) 
 });
 
 test('create-quick-step without --step is a usage error', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   const { code, err } = invoke(['create-quick-step', '--domain', 'domain-1-auth'], { cwd: root });
   assert.equal(code, 2);
   assert.match(err, /missing input: --step/i);
@@ -477,7 +478,7 @@ test('a NosError with code 3-7 exits with its code and prints { action, error, e
 });
 
 test('a legacy spec-file makes the command fail with exit 1 and the migration hint', (t) => {
-  const root = makeTempRoot(t);
+  const { root } = makeProject(t);
   writeFile(root, '.claude/skills/nos/templates/status.xml', STATUS_XML);
   invoke(['create-domain', '--idea', '-', '--slug', 'auth'], { cwd: root, stdin: '# Auth' });
   invoke(['create-quick-step', '--domain', 'domain-1-auth', '--step', '-'], { cwd: root, stdin: JSON.stringify({ slug: 'a', intent: 'A' }) });
@@ -492,4 +493,35 @@ test('a legacy spec-file makes the command fail with exit 1 and the migration hi
   assert.equal(code, 1);
   assert.equal(out, '');
   assert.match(err, /legacy spec-file.*run the migration/);
+});
+
+test('without nos.config.json every command but init and roots refuses: nos is not set up here', (t) => {
+  const bare = makeTempRoot(t);
+  const { root } = makeProject(t);
+
+  const walked = invoke(['create-domain', '--idea', '-', '--slug', 'x'], { cwd: bare, stdin: '# X' });
+  assert.equal(walked.code, 1);
+  assert.equal(walked.out, '');
+  assert.match(walked.err, /nos is not set up here: no nos\.config\.json found from .* up\. Run nos init from the project root/);
+  assert.equal(existsSync(path.join(bare, '.specs')), false);
+
+  const given = invoke(['set-status', '--domain', 'domain-1-x', '--status', 'open', '--root', bare], { cwd: root });
+  assert.equal(given.code, 1);
+  assert.match(given.err, /no nos\.config\.json in .*Run nos init/);
+
+  const roots = invoke(['roots'], { cwd: bare });
+  assert.equal(roots.code, 0);
+  assert.equal(roots.json.configured, false);
+  assert.equal(roots.json.work, slash(bare));
+});
+
+test('create-domain in a set-up project without <specs>/config.json asks for nos init', (t) => {
+  const root = makeTempRoot(t);
+  writeFile(root, 'nos.config.json', {});
+
+  const { code, err } = invoke(['create-domain', '--idea', '-', '--slug', 'x'], { cwd: root, stdin: '# X' });
+
+  assert.equal(code, 1);
+  assert.match(err, /config\.json\. Run nos init first/);
+  assert.equal(existsSync(path.join(root, '.specs')), false);
 });

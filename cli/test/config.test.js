@@ -6,7 +6,7 @@ import { ensureSpecs, reserveIds, DEFAULT_CONFIG } from '../src/config.js';
 import { makeRoots, writeFile, readJson } from './helpers.js';
 
 test('creates specs folder and config.json from built-in default', (t) => {
-  const roots = makeRoots(t);
+  const roots = makeRoots(t, { setUp: false });
   const result = ensureSpecs(roots);
 
   assert.equal(result.specsDir, roots.specs);
@@ -16,7 +16,7 @@ test('creates specs folder and config.json from built-in default', (t) => {
 });
 
 test('prefers the config template of the nos home when present', (t) => {
-  const roots = makeRoots(t);
+  const roots = makeRoots(t, { setUp: false });
   const template = { 'id-counters': { domain: 7, phase: 3, step: 11 } };
   writeFile(roots.home, 'templates/config.json', template);
 
@@ -75,6 +75,6 @@ test('reserveIds rejects a corrupt counter value', (t) => {
 });
 
 test('reserveIds fails when config.json is missing', (t) => {
-  const roots = makeRoots(t);
+  const roots = makeRoots(t, { setUp: false });
   assert.throws(() => reserveIds(roots, 'domain'), /config\.json/);
 });

@@ -131,3 +131,104 @@ test('init without a git project writes no project .gitignore', (t) => {
   assert.ok(existsSync(path.join(root, 'nos.config.json')));
   assert.ok(existsSync(path.join(root, SPECS_DIR, 'config.json')));
 });
+
+test('init keeps CRLF line endings when it appends to .gitignore', noGit, (t) => {
+  const root = gitProject(t);
+  writeFileSync(path.join(root, '.gitignore'), 'node_modules\r\ndist');
+
+  initProject(rootsOf(root));
+
+  assert.equal(read(path.join(root, '.gitignore')), 'node_modules\r\ndist\r\n.specs/\r\n.claude/worktrees/\r\n');
+});
+
+test('init recognises existing forms of the entries and patterns that already ignore them', noGit, (t) => {
+  for (const [gitignore, added] of [
+    ['.specs/*\n.claude/worktrees\n', []],
+    ['**/.specs/\n/.claude/worktrees/\n', []],
+    ['.specs\n.claude/*\n', []],
+    ['.claude/\n', ['.specs/']],
+    ['.claude/*\n!.claude/worktrees/\n', ['.specs/', '.claude/worktrees/']],
+  ]) {
+    const root = gitProject(t);
+    writeFileSync(path.join(root, '.gitignore'), gitignore);
+    const result = initProject(rootsOf(root));
+    assert.deepEqual(result.gitignoreAdded, added, gitignore);
+    assert.ok(read(path.join(root, '.gitignore')).startsWith(gitignore));
+  }
+});
+
+test('an ignore rule outside the repo .gitignore files (.git/info/exclude) does not count', noGit, (t) => {
+  const root = gitProject(t);
+  writeFileSync(path.join(root, '.git', 'info', 'exclude'), '.specs/\n.claude/\n');
+
+  assert.deepEqual(initProject(rootsOf(root)).gitignoreAdded, ['.specs/', '.claude/worktrees/']);
+});
+
+test('init reports an origin with another URL as a mismatch and leaves it', noGit, (t) => {
+  const root = gitProject(t);
+  const remote = path.join(makeTempRoot(t), 'wanted.git');
+  writeFile(root, 'nos.config.json', { specs: { dir: '.specs', remote } });
+  initProject(rootsOf(root));
+  const specs = path.join(root, SPECS_DIR);
+  gitOk(['remote', 'set-url', 'origin', 'https://example.invalid/other.git'], specs);
+
+  const result = initProject(rootsOf(root));
+
+  assert.deepEqual(result.remote, {
+    url: remote,
+    existing: 'https://example.invalid/other.git',
+    added: false,
+    mismatch: true,
+  });
+  assert.equal(gitOk(['remote', 'get-url', 'origin'], specs), 'https://example.invalid/other.git');
+});
+
+test('init without a git identity fails with the hint to set user.name and user.email', noGit, (t) => {
+  const root = gitProject(t);
+  gitOk(['config', '--unset', 'user.name'], root);
+  gitOk(['config', '--unset', 'user.email'], root);
+  const empty = writeFile(makeTempRoot(t), 'gitconfig', '');
+  const names = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'EMAIL'];
+  const extra = {
+    GIT_CONFIG_GLOBAL: empty,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'user.useConfigOnly',
+    GIT_CONFIG_VALUE_0: 'true',
+  };
+  const saved = Object.fromEntries([...names, ...Object.keys(extra)].map((k) => [k, process.env[k]]));
+  t.after(() => {
+    for (const [k, v] of Object.entries(saved))
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+  });
+  for (const k of names) delete process.env[k];
+  Object.assign(process.env, extra);
+
+  assert.throws(() => initProject(rootsOf(root)), /git config --global user\.name .* user\.email/);
+});
+
+test(
+  'without nos.config.json init runs only from the project root: refused in a subfolder and inside nos',
+  noGit,
+  (t) => {
+    const root = gitProject(t);
+    const sub = path.join(root, 'src');
+    const nos = path.join(root, '.claude', 'skills', 'nos');
+    writeFile(sub, 'a.js', '');
+    writeFile(nos, 'cli/bin/nos.js', '');
+
+    assert.throws(() => initProject(rootsOf(sub)), /not the top of its git repo.*project root or pass --root/);
+    assert.throws(
+      () => initProject(resolveRoots({ cwd: nos, env: {}, home: nos })),
+      /inside the nos folder.*project root or pass --root/,
+    );
+    assert.equal(existsSync(path.join(sub, 'nos.config.json')), false);
+
+    const viaRoot = resolveRoots({ root, cwd: nos, env: {}, home: nos });
+    initProject(viaRoot);
+    assert.ok(existsSync(path.join(root, 'nos.config.json')));
+    // set up: from inside nos the walk now lands on the project
+    assert.equal(initProject(resolveRoots({ cwd: nos, env: {}, home: nos })).created.length, 0);
+  },
+);

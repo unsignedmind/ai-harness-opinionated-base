@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/cli.js';
-import { findWorkRoot, homeGuard, resolveRoots, slash, SPECS_DIR } from '../src/roots.js';
+import { git, gitEnv } from '../src/git.js';
+import { initProject } from '../src/init.js';
+import { findWorkRoot, homeGuard, resolveRoots, slash, SPECS_DIR, worktreeProjectDir } from '../src/roots.js';
 import { gitOk, hasGit, initRepo, makeProject, makeTempRoot, writeFile } from './helpers.js';
 
 const noGit = { skip: !hasGit && 'git is not available' };
@@ -196,4 +198,131 @@ test('home guard: quiet for the project nos, warns for another nos and for a cop
   const warnings = homeGuard({ ...roots, home: copy }, inWorktree);
   assert.equal(warnings.length, 2);
   assert.match(inWorktree.lines[1], /inside a worktree/);
+});
+
+test("home guard: a nos under another project's .claude/worktrees/ is not a worktree copy of this one", (t) => {
+  const { root } = makeProject(t);
+  const roots = resolveRoots({ cwd: root, env: {} });
+  const lines = [];
+  const foreign = path.join(makeTempRoot(t), '.claude', 'worktrees', 'quick-1', '.claude', 'skills', 'nos');
+  assert.deepEqual(homeGuard({ ...roots, home: foreign }, { write: (s) => lines.push(s) }), []);
+  assert.deepEqual(lines, []);
+});
+
+// git project: README committed, worktree quick-1 cut from that commit, nos.config.json committed on main afterwards
+function worktreeBeforeConfig(t) {
+  const root = initRepo(makeTempRoot(t));
+  writeFile(root, 'README.md', '# app\n');
+  writeFile(root, '.gitignore', '.specs/\n.claude/worktrees/\n');
+  gitOk(['add', '-A'], root);
+  gitOk(['commit', '-m', 'app'], root);
+  const wt = path.join(root, '.claude', 'worktrees', 'quick-1');
+  gitOk(['worktree', 'add', '-b', 'quick-1', wt], root);
+  writeFile(root, 'nos.config.json', { specs: { dir: SPECS_DIR, remote: null } });
+  writeFile(root, `${SPECS_DIR}/config.json`, { 'id-counters': { domain: 1, phase: 1, step: 1 } });
+  gitOk(['add', 'nos.config.json'], root);
+  gitOk(['commit', '-m', 'nos'], root);
+  return { root, wt };
+}
+
+test(
+  'a worktree whose branch has no nos.config.json yet stays the work root (the walk climbed out of it)',
+  noGit,
+  (t) => {
+    const { root, wt } = worktreeBeforeConfig(t);
+    mkdirSync(path.join(wt, 'src'), { recursive: true });
+
+    for (const cwd of [wt, path.join(wt, 'src')]) {
+      const roots = resolveRoots({ cwd, env: {} });
+      assert.equal(roots.work, wt, cwd);
+      assert.equal(roots.main, root);
+      assert.equal(roots.specs, path.join(root, SPECS_DIR));
+      assert.equal(roots.inWorktree, true);
+      assert.equal(roots.configured, true, 'main has nos.config.json');
+    }
+    assert.throws(() => initProject(resolveRoots({ cwd: wt, env: {} })), /not in a worktree/);
+  },
+);
+
+// monorepo: repo R, project R/app (nos.config.json committed there), worktree <R/app>/.claude/worktrees/quick-1
+function monorepo(t) {
+  const repo = initRepo(makeTempRoot(t));
+  const app = path.join(repo, 'app');
+  writeFile(app, 'nos.config.json', { specs: { dir: SPECS_DIR, remote: null } });
+  writeFile(app, '.gitignore', '.specs/\n.claude/worktrees/\n');
+  writeFile(app, 'src/index.js', '');
+  writeFile(app, `${SPECS_DIR}/config.json`, { 'id-counters': { domain: 1, phase: 1, step: 1 } });
+  gitOk(['add', '-A'], repo);
+  gitOk(['commit', '-m', 'app'], repo);
+  const wt = path.join(app, '.claude', 'worktrees', 'quick-1');
+  gitOk(['worktree', 'add', '-b', 'quick-1', wt], app);
+  return { repo, app, wt };
+}
+
+test('monorepo subfolder project: main is the project folder, a worktree maps to <wt>/<offset>', noGit, (t) => {
+  const { app, wt } = monorepo(t);
+
+  const fromMain = resolveRoots({ cwd: path.join(app, 'src'), env: {} });
+  assert.deepEqual(
+    [fromMain.work, fromMain.main, fromMain.specs, fromMain.inWorktree, fromMain.offset],
+    [app, app, path.join(app, SPECS_DIR), false, 'app'],
+  );
+
+  for (const cwd of [path.join(wt, 'app'), path.join(wt, 'app', 'src'), wt]) {
+    const roots = resolveRoots({ cwd, env: {} });
+    assert.equal(roots.work, path.join(wt, 'app'), cwd);
+    assert.equal(roots.main, app, cwd);
+    assert.equal(roots.specs, path.join(app, SPECS_DIR), cwd);
+    assert.equal(roots.inWorktree, true, cwd);
+  }
+});
+
+test('worktreeProjectDir: the project folder inside a worktree exists at <wt>/<offset>', noGit, (t) => {
+  const { app, wt } = monorepo(t);
+  const roots = resolveRoots({ cwd: app, env: {} });
+  assert.equal(worktreeProjectDir(roots, wt), path.join(wt, 'app'));
+  assert.equal(resolveRoots({ cwd: worktreeProjectDir(roots, wt), env: {} }).work, path.join(wt, 'app'));
+
+  const { root } = makeProject(t, { git: true });
+  const plain = resolveRoots({ cwd: root, env: {} });
+  assert.equal(plain.offset, '');
+  assert.equal(
+    worktreeProjectDir(plain, path.join(root, '.claude', 'worktrees', 'x')),
+    path.join(root, '.claude', 'worktrees', 'x'),
+  );
+});
+
+test('configured and via tell how the roots were found', (t) => {
+  const { root } = makeProject(t);
+  const bare = makeTempRoot(t);
+  assert.deepEqual(pick(resolveRoots({ cwd: root, env: {} })), { configured: true, via: 'walk' });
+  assert.deepEqual(pick(resolveRoots({ cwd: bare, env: {} })), { configured: false, via: 'cwd' });
+  assert.deepEqual(pick(resolveRoots({ cwd: bare, env: { NOS_SPECS_ROOT: root } })), { configured: true, via: 'env' });
+  assert.deepEqual(pick(resolveRoots({ root: bare, cwd: root, env: {} })), { configured: false, via: 'root' });
+  assert.equal(nosRoots(bare).configured, false);
+});
+const pick = ({ configured, via }) => ({ configured, via });
+
+test('git calls ignore GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE / GIT_COMMON_DIR of a calling hook', noGit, (t) => {
+  const { root } = makeProject(t, { git: true });
+  const other = initRepo(makeTempRoot(t));
+  const saved = Object.fromEntries(
+    ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR'].map((k) => [k, process.env[k]]),
+  );
+  t.after(() => {
+    for (const [k, v] of Object.entries(saved))
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+  });
+  Object.assign(process.env, {
+    GIT_DIR: path.join(other, '.git'),
+    GIT_WORK_TREE: other,
+    GIT_INDEX_FILE: path.join(other, '.git', 'index'),
+    GIT_COMMON_DIR: path.join(other, '.git'),
+  });
+
+  assert.equal(gitEnv().GIT_DIR, undefined);
+  const top = git(['rev-parse', '--show-toplevel'], { cwd: root }).stdout.trim();
+  assert.equal(path.resolve(top), root);
+  assert.equal(resolveRoots({ cwd: root, env: {} }).main, root);
 });
