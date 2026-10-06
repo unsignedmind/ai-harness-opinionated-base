@@ -278,6 +278,25 @@ test('agents: SendMessage resumes an ended agent; an agent of an earlier process
   assert.equal(tr.finish(), false);
 });
 
+// as it happened live: a new process resumes the develop agent of an earlier one by SendMessage;
+// the agent's events and tool calls come under the SendMessage id, its "Resuming agent" ack is no end
+test('agents: an agent resumed by SendMessage in a new process runs until its notification', () => {
+  const tr = agentTracker(() => 0);
+  tr.line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_send', name: 'SendMessage', input: { to: 'a796' } }] } });
+  tr.line(task('task_started', { task_id: 'a796', tool_use_id: 'tu_send', task_type: 'local_agent', description: 'Develop quick step 67' }));
+  tr.line(toolResult('tu_send', [{ type: 'text', text: '{"success":true,"message":"Resuming agent a796","resumedAgentId":"a796"}' }]));
+  assert.equal(tr.list()[0].status, 'running');
+  tr.line(childTool('tu_send', 'Bash', { command: 'npm test' }));
+  assert.deepEqual([tr.list()[0].activity, tr.list()[0].tools], ['Bash: npm test', 1]);
+  // resumed once more within the same process: same entry, now also under the new id
+  tr.line(task('task_notification', { task_id: 'a796', tool_use_id: 'tu_send', status: 'completed' }));
+  tr.line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_send2', name: 'SendMessage', input: { to: 'a796' } }] } });
+  tr.line(toolResult('tu_send2', 'Resuming agent a796'));
+  tr.line(childTool('tu_send2', 'Edit', { file_path: 'src/x.ts' }));
+  assert.equal(tr.list().length, 1);
+  assert.deepEqual([tr.list()[0].status, tr.list()[0].activity], ['running', 'Edit: src/x.ts']);
+});
+
 test('open: subagents reach onAgents, their text is no reply, the process end stops them', async () => {
   const p = fakeProc();
   const { seen, cb } = recorder();

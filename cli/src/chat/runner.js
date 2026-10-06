@@ -46,17 +46,20 @@ const textOf = (content) =>
 // starts one. Its tool_result either ends it (a foreground agent) or only says "Async agent
 // launched" (a background agent, the default): then the system task_* events carry its progress
 // and its end, keyed by the Agent tool_use id (task_id = its agentId). Its own tool calls come with
-// its id as parent_tool_use_id. SendMessage to an ended agent resumes it; an agent of an earlier
-// process shows up through task_started. line(j) says whether the list changed. Paths in the
-// project root are shown relative to it.
+// its id as parent_tool_use_id. SendMessage to an agent resumes it: then its events and tool calls
+// come under the SendMessage id, whose own tool_result is no end. An agent of an earlier process
+// shows up through task_started. line(j) says whether the list changed. Paths in the project root
+// are shown relative to it.
 export function agentTracker(now = Date.now, root = '') {
   const dirs = root ? [...new Set([root, root.replace(/\\/g, '/'), root.replace(/\//g, '\\')])] : [];
   const rel = (t) => dirs.reduce((s, d) => s.split(d + '/').join('').split(d + '\\').join(''), t);
   const agents = new Map(); // Agent tool_use id -> agent
+  const ids = new Map(); // every tool_use id an agent runs under (Agent call, resuming SendMessage) -> agent
+  const calls = new Set(); // ids of Agent/Task calls: only their tool_result can end an agent
   const byAgentId = (id) => (id ? [...agents.values()].find((a) => a.agentId === id) : undefined);
-  const find = (j) => agents.get(j.tool_use_id) ?? byAgentId(j.task_id);
+  const find = (j) => ids.get(j.tool_use_id) ?? byAgentId(j.task_id);
   const add = (id, type, description, agentId = null) => {
-    agents.set(String(id), {
+    const a = {
       id: String(id),
       type: short(type || 'general-purpose', 40),
       description: short(description || '', 80),
@@ -66,7 +69,9 @@ export function agentTracker(now = Date.now, root = '') {
       startedAt: now(),
       endedAt: null,
       agentId,
-    });
+    };
+    agents.set(a.id, a);
+    ids.set(a.id, a);
   };
   const resume = (a) => Object.assign(a, { status: 'running', activity: null, endedAt: null });
   const end = (a, status) => {
@@ -86,35 +91,39 @@ export function agentTracker(now = Date.now, root = '') {
       if (j.type === 'assistant')
         for (const c of content) {
           if (c.type !== 'tool_use') continue;
-          const parent = agents.get(j.parent_tool_use_id);
+          const parent = ids.get(j.parent_tool_use_id);
           if (parent && parent.status === 'running') {
             parent.activity = rel(describeTool(c.name, c.input));
             parent.tools++;
             changed = true;
           }
-          if (AGENT_TOOLS.has(c.name) && c.id && !agents.has(c.id)) {
+          if (AGENT_TOOLS.has(c.name) && c.id && !ids.has(c.id)) {
+            calls.add(String(c.id));
             add(c.id, c.input?.subagent_type, c.input?.description || c.input?.prompt);
             changed = true;
           }
           const back = c.name === 'SendMessage' && byAgentId(String(c.input?.to ?? ''));
-          if (back && back.status !== 'running') {
-            resume(back);
+          if (back) {
+            if (c.id) ids.set(String(c.id), back);
+            if (back.status !== 'running') resume(back);
             changed = true;
           }
         }
       else if (j.type === 'user')
         for (const c of content) {
-          const a = c.type === 'tool_result' && agents.get(c.tool_use_id);
+          const a = c.type === 'tool_result' && ids.get(c.tool_use_id);
           if (!a) continue;
           const text = textOf(c.content);
           a.agentId ??= /agentId: (\w+)/.exec(text)?.[1] ?? null;
           if (c.is_error) changed = end(a, 'failed') || changed;
-          else if (!/Async agent launched/i.test(text)) changed = end(a, 'done') || changed;
+          // a foreground agent's report; "Async agent launched" or a resume ack is no end
+          else if (calls.has(c.tool_use_id) && !/Async agent launched/i.test(text)) changed = end(a, 'done') || changed;
         }
       else if (j.type === 'system' && j.subtype === 'task_started') {
         const a = find(j);
         if (a) {
           a.agentId ??= j.task_id ?? null;
+          if (j.tool_use_id) ids.set(String(j.tool_use_id), a);
           if (a.status !== 'running') resume(a);
           changed = true;
         } else if (j.task_type === 'local_agent' && j.tool_use_id) {
