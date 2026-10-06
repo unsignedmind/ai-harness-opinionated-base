@@ -7,5 +7,5 @@ if (argv[0] === 'chat') {
   const { runChat } = await import('../src/chat/commands.js');
   process.exitCode = await runChat(argv.slice(1));
 } else {
-  process.exitCode = run(argv);
+  process.exitCode = await run(argv);
 }

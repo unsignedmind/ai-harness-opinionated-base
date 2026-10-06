@@ -4,10 +4,14 @@ import { parseArgs } from 'node:util';
 import { CHAT_HELP } from './chat/commands.js';
 import { createDomain } from './domain.js';
 import { EXIT, NosError } from './exit-codes.js';
+import { execCommand } from './exec.js';
+import { runGate } from './gate.js';
 import { initProject } from './init.js';
+import { listLocks, lockStatus, releaseLock, takeLock } from './lock.js';
 import { createPlan } from './plan.js';
 import { createQuickStep } from './quick-step.js';
 import { homeGuard, NOS_HOME, resolveRoots, slash } from './roots.js';
+import { commitSpecs, domainOfTarget, findStep } from './specs-git.js';
 import { setStatus } from './status.js';
 import { updatePlan } from './update-plan.js';
 
@@ -24,6 +28,11 @@ Commands:
   update-plan        Save an updated plan.json and create, move or delete phase folders and step files
   create-quick-step  Add a quick step (no plan) to <specs>/<domain>/quick-steps/
   set-status         Change the status of a plan, phase, step or quick step
+  specs commit       Commit config.json + one domain folder of the specs repo (--run, --domain or --config)
+  specs find-step    Find the spec file of a step id in any domain
+  gate               Run the quality tools of nos.config.json (--e2e: also e2e, under a slot lease)
+  exec <name>        Run a project command: install, dev (holds a slot while it runs), deploy-test
+  lock <action>      take, release or status of a lock in <specs>/.locks (merge, ids, slot-<n>)
   chat <command>     Local chat with this Claude Code session (nos chat --help)
   help <command>     Show detailed help for a command
 
@@ -304,6 +313,117 @@ Example:
     "status": "in-review"
   }`;
 
+const SPECS_HELP = `Usage: nos specs commit (--run <kind>-<id> | --domain <domain> | --config) -m <message> [--root <dir>]
+       nos specs find-step <id> [--root <dir>]
+
+specs commit
+  Commits the specs repo (<specs>, its own git repo), scoped: git -C <specs> add -- config.json <domain>
+  (adds, changes and deletions inside them, nothing else; never add -A), then commit --only those paths,
+  only when something is staged. An index.lock of another writer is retried 5 times, 200ms apart.
+  When specs.remote is set in nos.config.json: git push origin HEAD; a failed push is a warning (stderr
+  and "warning" in the result), the commit stays.
+    --run <kind>-<id>  the domain of that run file (<specs>/.runs/<kind>-<id>.json)
+    --domain <domain>  a domain outside any run (idea, plan or quick step creation)
+    --config           config.json only (e.g. setup changed the chat node); "domain" is null
+    -m, --message <m>  commit message, e.g. "step-7: develop"                (required)
+  Exactly one of --run, --domain, --config.
+
+  nos specs commit --run quick-7 -m "step-7: develop"
+  {
+    "action": "specs-commit",
+    "domain": "domain-2-auth",
+    "committed": true,
+    "sha": "<sha, null when nothing was staged>",
+    "pushed": false,
+    "files": ["D:/repo/.specs/domain-2-auth/quick-steps/quick-steps.json", ...]
+  }
+
+specs find-step
+  Scans <specs>/domain-*/plan.json and quick-steps/quick-steps.json for the step id. Exit 1 when not found.
+
+  nos specs find-step 7
+  {
+    "action": "find-step",
+    "id": 7,
+    "domain": "domain-2-auth",
+    "kind": "quick",
+    "phase": null,
+    "step": 7,
+    "slug": "fix-login-typo",
+    "intent": "Fix the typo on the login button",
+    "status": "open",
+    "specFile": "D:/repo/.specs/domain-2-auth/quick-steps/step-7-fix-login-typo.md"
+  }
+  kind "plan": phase is the phase id.`;
+
+const GATE_HELP = `Usage: nos gate [--e2e] [--root <dir>]
+
+Run the quality tools of work's nos.config.json ("quality-tools") in the work root, in order:
+test, lint, format-check, typecheck, each "additional" entry, then e2e (only with --e2e).
+Every tool runs, also after a failure. Each runs in a shell with NOS_HOME set. e2e runs under a slot
+lease (smallest free slot-<n> of worktrees.slots) with NOS_SLOT=<n>; no free slot within
+worktrees.slotWait seconds -> exit 7. Full output: <specs>/.runs/logs/<run>/<tool>.log (<run> = the
+run of this worktree, else main); the result carries the last 60 lines.
+"additional" entries: a command string (name additional-<n>) or { "name", "cmd" }.
+
+Exit: 0 all configured tools pass, 1 a tool failed (the JSON is still printed) or quality tools not
+set up (none configured), 7 no slot for e2e.
+
+Options:
+  --e2e          Also run e2e
+  --root <dir>   Work root (default: see nos --help)
+
+Example:
+  nos gate
+  {
+    "action": "gate",
+    "pass": false,
+    "tools": [
+      { "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "tail": "<last 60 lines>",
+        "log": "D:/repo/.specs/.runs/logs/quick-7/test.log" },
+      { "name": "lint", "cmd": null, "status": "not-configured", "exit": null, "tail": "", "log": null }
+    ]
+  }`;
+
+const EXEC_HELP = `Usage: nos exec <install|dev|deploy-test> [--root <dir>]
+
+Run a project command of work's nos.config.json ("project-commands") in a shell in the work root,
+stdio inherited (no JSON result), NOS_HOME set. The exit code is the command's.
+dev takes a slot lease (smallest free slot-<n> of worktrees.slots, NOS_SLOT=<n> in its env) and holds it
+until the server exits; Ctrl+C / SIGTERM stop the server's whole process tree, then the lease is released.
+No free slot within worktrees.slotWait seconds -> exit 7.
+
+Exit: the command's code, 1 the command is not configured (null), 2 unknown name, 7 no slot (dev).
+
+Example:
+  nos exec install`;
+
+const LOCK_HELP = `Usage: nos lock take <name> --token <t> [--run <kind>-<id>] [--wait <sec>] [--root <dir>]
+       nos lock release <name> (--token <t> | --break) [--root <dir>]
+       nos lock status [<name>] [--root <dir>]
+
+Locks are folders <specs>/.locks/<name> created by mkdir (atomic, exactly one taker wins) with
+holder.json { run, token, pid, command, taken }. Names: lowercase letters, digits, dashes
+(merge, ids, slot-<n>). The same token re-takes its own lock (refreshes "taken"). A lock is never
+broken automatically: --break is the user's call. --token falls back to NOS_RUN_TOKEN.
+
+  take     held by another token -> exit 4 with { lock, path, holder, ageSec, pidAlive, hint }
+           (--wait <sec>: retry that long first)
+  release  only with the holder's token (else exit 4), or --break for any holder. Not held: released false
+  status   one lock, or every lock without a name ({ "locks": [...] })
+
+Example:
+  nos lock take merge --token 1a2b3c4d --run quick-7
+  { "action": "lock-take", "lock": "merge", "path": "D:/repo/.specs/.locks/merge",
+    "holder": { "run": "quick-7", "token": "1a2b3c4d", "pid": 4242, "command": "lock take", "taken": "<iso>" },
+    "reentrant": false }
+  nos lock release merge --token 1a2b3c4d
+  { "action": "lock-release", "lock": "merge", "path": "...", "released": true, "broken": false, "holder": {...} }
+  nos lock status merge
+  { "action": "lock-status", "lock": "merge", "path": "...", "held": true, "holder": {...}, "ageSec": 12,
+    "pidAlive": false }
+  pidAlive: the holder's process still exists (false is normal for a lock taken by "nos lock take").`;
+
 const COMMANDS = {
   init: {
     help: INIT_HELP,
@@ -475,7 +595,98 @@ const COMMANDS = {
       };
     },
   },
+
+  specs: {
+    help: SPECS_HELP,
+    options: {
+      run: { type: 'string' },
+      domain: { type: 'string' },
+      config: { type: 'boolean' },
+      message: { type: 'string', short: 'm' },
+      root: { type: 'string' },
+    },
+    required: [],
+    positionals: { min: 1, max: 2 },
+    action: ([sub]) => (sub === 'find-step' ? 'find-step' : 'specs-commit'),
+    execute(values, io, roots, [sub, arg]) {
+      if (sub === 'commit') {
+        if (arg !== undefined) throw new UsageError(`specs commit takes no argument "${arg}"`, 'specs');
+        if (!values.message) throw new UsageError('Missing input: -m <message>. Please provide it and retry', 'specs');
+        const domain = domainOfTarget(roots, values);
+        const result = commitSpecs(roots, { domain, message: values.message });
+        if (result.warning) io.stderr.write(`nos: warning: ${result.warning}\n`);
+        return result;
+      }
+      if (sub === 'find-step') {
+        if (arg === undefined) throw new UsageError('Missing input: <id>. Please provide it and retry', 'specs');
+        return findStep(roots, arg);
+      }
+      throw new UsageError(`Unknown specs command "${sub}". Use commit or find-step`, 'specs');
+    },
+  },
+  gate: {
+    help: GATE_HELP,
+    options: { e2e: { type: 'boolean' }, root: { type: 'string' } },
+    required: [],
+    async execute(values, io, roots) {
+      const result = await runGate(roots, { e2e: values.e2e ?? false });
+      if (!result.pass) {
+        const failed = result.tools.filter((tool) => tool.status === 'fail').map((tool) => tool.name);
+        io.stderr.write(`nos: gate failed: ${failed.join(', ')}\n`);
+        result[EXIT_CODE] = EXIT.FAILED;
+      }
+      return result;
+    },
+  },
+  exec: {
+    help: EXEC_HELP,
+    options: { root: { type: 'string' } },
+    required: [],
+    positionals: { min: 1, max: 1 },
+    raw: true,
+    execute(values, io, roots, [name]) {
+      return execCommand(roots, name);
+    },
+  },
+  lock: {
+    help: LOCK_HELP,
+    options: {
+      token: { type: 'string' },
+      run: { type: 'string' },
+      wait: { type: 'string' },
+      break: { type: 'boolean' },
+      root: { type: 'string' },
+    },
+    required: [],
+    positionals: { min: 1, max: 2 },
+    action: ([sub]) => `lock-${sub}`,
+    execute(values, io, roots, [sub, name]) {
+      if (!['take', 'release', 'status'].includes(sub)) {
+        throw new UsageError(`Unknown lock action "${sub}". Use take, release or status`, 'lock');
+      }
+      if (sub === 'status') {
+        return name === undefined
+          ? { action: 'lock-status', locks: listLocks(roots) }
+          : { action: 'lock-status', ...lockStatus(roots, name) };
+      }
+      if (name === undefined) throw new UsageError(`Missing input: nos lock ${sub} <name>`, 'lock');
+      const token = values.token || io.env.NOS_RUN_TOKEN;
+      if (sub === 'release') {
+        if (!token && !values.break) throw new UsageError('Missing input: --token (or --break)', 'lock');
+        return { action: 'lock-release', ...releaseLock(roots, name, token, { break: values.break ?? false }) };
+      }
+      if (!token)
+        throw new UsageError('Missing input: --token (or NOS_RUN_TOKEN). Please provide it and retry', 'lock');
+      const wait = values.wait === undefined ? 0 : Number(values.wait);
+      if (!Number.isFinite(wait) || wait < 0) throw new UsageError(`Invalid --wait "${values.wait}"`, 'lock');
+      const holder = { run: values.run ?? null, token, command: 'lock take' };
+      return { action: 'lock-take', ...takeLock(roots, name, holder, { waitMs: wait * 1000 }) };
+    },
+  },
 };
+
+// A result may carry its own exit code (gate: JSON printed, exit 1 on a failed tool)
+const EXIT_CODE = Symbol('exit code');
 
 class UsageError extends Error {
   constructor(message, commandName) {
@@ -504,20 +715,25 @@ function readInput(source, io) {
 
 function parseCommand(name, command, args) {
   let parsed;
+  const { min = 0, max = 0 } = command.positionals ?? {};
   try {
-    parsed = parseArgs({ args, options: command.options, strict: true, allowPositionals: false });
+    parsed = parseArgs({ args, options: command.options, strict: true, allowPositionals: max > 0 });
   } catch (err) {
     throw new UsageError(err.message, name);
   }
+  const count = parsed.positionals.length;
+  if (count < min) throw new UsageError(`Missing input: nos ${name} needs ${min} argument(s)`, name);
+  if (count > max) throw new UsageError(`Unexpected argument "${parsed.positionals[max]}"`, name);
   const missing = command.required.find((name) => !parsed.values[name]);
   if (missing) {
     throw new UsageError(`Missing input: --${missing}. Please provide it and retry`, name);
   }
-  return parsed.values;
+  return { values: parsed.values, positionals: parsed.positionals };
 }
 
-// io.env and io.home exist for tests (NOS_SPECS_ROOT, a nos home with its own templates).
-export function run(argv, io = {}) {
+// Resolves with the exit code. io.env and io.home exist for tests (NOS_SPECS_ROOT, a nos home with its own
+// templates); children of gate and exec get process.env.
+export async function run(argv, io = {}) {
   const {
     cwd = process.cwd(),
     env = process.env,
@@ -527,6 +743,7 @@ export function run(argv, io = {}) {
     readStdin = () => readFileSync(0, 'utf8'),
   } = io;
   const [name, ...args] = argv;
+  let action = name;
 
   try {
     if (!name || isHelpFlag(name) || (name === 'help' && args.length === 0)) {
@@ -543,15 +760,18 @@ export function run(argv, io = {}) {
       stdout.write(command.help + '\n');
       return EXIT.OK;
     }
-    const values = parseCommand(name, command, args);
+    const { values, positionals } = parseCommand(name, command, args);
+    action = command.action?.(positionals) ?? name;
     const roots = resolveRoots({ root: values.root, cwd, env, home });
     homeGuard(roots, stderr);
     if (!command.setsUp && !roots.configured) throw notSetUp(roots, cwd);
-    const result = command.execute(values, { cwd, readStdin }, roots);
+    const result = await command.execute(values, { cwd, env, readStdin, stderr }, roots, positionals);
+    // raw: the command printed its own output (exec: the child's stdio) and resolved with its exit code
+    if (command.raw) return result;
     stdout.write(JSON.stringify(result, null, 2) + '\n');
-    return EXIT.OK;
+    return result[EXIT_CODE] ?? EXIT.OK;
   } catch (err) {
-    return reportError(name, err, { stdout, stderr });
+    return reportError(action, err, { stdout, stderr });
   }
 }
 

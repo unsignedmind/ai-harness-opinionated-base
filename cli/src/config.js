@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { randomToken, releaseLock, takeLock } from './lock.js';
 import { slash } from './roots.js';
 
 // <specs>/config.json: planning state only (id-counters, chat). Project config lives in nos.config.json.
@@ -74,10 +75,24 @@ export function peekIds(roots, counter, count = 1) {
   return Array.from({ length: count }, (_, i) => current + i);
 }
 
-export function reserveIds(roots, counter, count = 1) {
-  const { file, config, counters, current } = readCounter(roots, counter);
-  const ids = Array.from({ length: count }, (_, i) => current + i);
-  counters[counter] = current + count;
-  writeJsonFile(file, { ...config, 'id-counters': counters });
-  return ids;
+// Lock "ids" around the read-modify-write: two CLI processes never hand out the same id.
+export const IDS_LOCK = 'ids';
+export const IDS_WAIT_MS = 10_000;
+
+// Reserves count ids of counter under lock ids. Held longer than waitMs -> NosError HELD with the holder
+// and the hint "nos lock release ids --break".
+export function reserveIds(roots, counter, count = 1, { waitMs = IDS_WAIT_MS } = {}) {
+  // not set up: no lock folder in a missing specs root (parsing waits for the lock: a writer may be mid-write)
+  if (!existsSync(configPath(roots))) readCounter(roots, counter);
+  const token = randomToken();
+  takeLock(roots, IDS_LOCK, { token, command: `reserve-ids ${counter}` }, { waitMs });
+  try {
+    const { file, config, counters, current } = readCounter(roots, counter);
+    const ids = Array.from({ length: count }, (_, i) => current + i);
+    counters[counter] = current + count;
+    writeJsonFile(file, { ...config, 'id-counters': counters });
+    return ids;
+  } finally {
+    releaseLock(roots, IDS_LOCK, token);
+  }
 }
