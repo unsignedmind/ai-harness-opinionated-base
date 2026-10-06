@@ -14,8 +14,8 @@
 //   GET  /__chat/devices       paired devices (this machine only, src/access.ts), POST …/devices/pair|approve|
 //                              deny|revoke|rename ?id=
 // Who may call: this machine, or a paired device (src/access.ts gates every request before this).
-// Mutating calls must come from the page itself (Origin host == Host). Chat actions go to the
-// audit log (specs/.chat/audit.log) with the device that did them.
+// Mutating calls must come from the page itself (Origin host == Host). Chat actions and details
+// views go to the audit log (specs/.chat/audit.log) with the device that did them.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
@@ -221,6 +221,8 @@ export function chatHandler(root: string, opts: ChatHandlerOptions = {}) {
         return json(res, 400, { error: 'invalid key, agent or tool' });
       if (!port) return json(res, 503, { error: 'chat server not running' });
       const q = new URLSearchParams({ key: tab, ...(agent && { agent }), ...(tool && { tool }) });
+      // reading a session's steps shows everything Claude read: logged like the writes
+      note('details', tab, agent ? `agent ${agent}` : tool ? `tool ${tool}` : '');
       access.track(who, res);
       return forward(res, port, 'GET', `/transcript-events?${q}`);
     }

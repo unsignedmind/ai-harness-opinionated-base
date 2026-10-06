@@ -1,7 +1,9 @@
 // Stop hook (`nos chat hook`): when a turn ends with chat messages queued and no `await` running,
 // hand them to Claude Code as its next input. Returns the hook output object, or null for none.
+// Relay mode only: in runner mode the chat server's own Claude Code sessions answer the tabs, so
+// the hook never takes their messages (not even when the server is down).
 import { liveServer, request } from './client.js';
-import { findRoot, files, realDir, stateDirOf } from './paths.js';
+import { chatConfig, findRoot, files, realDir, stateDirOf } from './paths.js';
 import { loadState, saveState } from './sessions.js';
 
 const MAX_LISTED = 20;
@@ -17,6 +19,7 @@ export async function runHook(stdinText, { env = process.env } = {}) {
   if (!input || input.stop_hook_active === true || typeof input.cwd !== 'string') return null;
 
   const root = findRoot(input.cwd);
+  if (chatConfig(root).runner) return null;
   const stateDir = stateDirOf(root, env);
   const file = files(stateDir).sessions;
   const me = realDir(root);

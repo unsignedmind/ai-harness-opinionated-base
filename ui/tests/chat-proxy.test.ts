@@ -243,6 +243,25 @@ test('chat: open starts the project chat server; messages go through and into th
   expect(await closed).toBe('closed');
 });
 
+test('chat: opening the details view of a tab is in the audit log, with the subagent', async () => {
+  const key = keyOf(root);
+  const stream = (path: string) =>
+    new Promise<number>((done) => {
+      const req = http.get({ host: '127.0.0.1', port, path, headers: { host: `localhost:${port}` } }, (res) => {
+        res.destroy();
+        done(res.statusCode ?? 0);
+      });
+      req.on('error', () => done(0));
+    });
+  expect(await stream(`/__chat/transcript-events?key=${key}`)).toBe(200);
+  expect(await stream(`/__chat/transcript-events?key=${key}&agent=a1b2c3`)).toBe(200);
+  expect(await stream(`/__chat/transcript-events?key=${key}&agent=../x`)).toBe(400);
+  const log = readFileSync(join(state, 'audit.log'), 'utf8');
+  expect(log).toMatch(new RegExp(`\tlocal\tdetails\t${key}\t?\n`));
+  expect(log).toMatch(new RegExp(`\tlocal\tdetails\t${key}\tagent a1b2c3`));
+  expect(log).not.toMatch(/details	.*\.\.\/x/);
+});
+
 test('https: the certificate is made once and reused; cookies are Secure', { timeout: 60000 }, async () => {
   const tls = await loadTls(state, ['192.168.1.20'], 'test-host');
   const again = await loadTls(state, ['192.168.1.20'], 'test-host');

@@ -246,7 +246,7 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 | `nos chat pair` | One-time pairing link for a phone (10 min, single use; approve the device on the PC) |
 | `nos chat devices [--approve id] [--deny id] [--revoke id] [--revoke-all]` | Paired devices |
 | `nos chat server [--port n]` | Run the server in the foreground |
-| `nos chat hook` | Stop hook: hands queued messages to Claude Code |
+| `nos chat hook` | Stop hook (relay mode only): hands queued messages to Claude Code |
 
 - The project root is the nearest folder with `specs/` from the current directory (or `--root`).
 - State: `specs/.chat/` (`sessions.json`, `server.json`, `server.log`, `devices.json`, `audit.log`, `tls/`, and a

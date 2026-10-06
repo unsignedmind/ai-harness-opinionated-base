@@ -99,7 +99,15 @@ test('hook: queued message and no server gives a block decision and empties the 
   saveState(files(dir).sessions, {
     counter: 1,
     sessions: {
-      [key]: { key, dir: realpathSync.native(root), name: '', status: 'open', endedBy: null, chat: [], pending: [{ id: 'm-1', text: 'Run the tests again', at: 'x' }] },
+      [key]: {
+        key,
+        dir: realpathSync.native(root),
+        name: '',
+        status: 'open',
+        endedBy: null,
+        chat: [],
+        pending: [{ id: 'm-1', text: 'Run the tests again', at: 'x' }],
+      },
     },
   });
   assert.equal(await runHook(JSON.stringify({ cwd: root, stop_hook_active: true }), { env: ENV }), null);
@@ -111,6 +119,31 @@ test('hook: queued message and no server gives a block decision and empties the 
   assert.equal(await runHook('not json', { env: ENV }), null);
   writeFileSync(files(dir).sessions, '{bad');
   assert.equal(await runHook(JSON.stringify({ cwd: root }), { env: ENV }), null);
+});
+
+test('hook: runner mode (the default) never takes the messages, the queue stays', async (t) => {
+  const root = project(t);
+  writeFileSync(path.join(root, 'specs', 'config.json'), '{}');
+  const dir = path.join(root, 'specs', '.chat');
+  mkdirSync(dir);
+  const key = keyOf(root);
+  const { realpathSync } = await import('node:fs');
+  saveState(files(dir).sessions, {
+    counter: 1,
+    sessions: {
+      [key]: {
+        key,
+        dir: realpathSync.native(root),
+        name: '',
+        status: 'open',
+        endedBy: null,
+        chat: [],
+        pending: [{ id: 'm-1', text: 'for the runner', at: 'x' }],
+      },
+    },
+  });
+  assert.equal(await runHook(JSON.stringify({ cwd: root }), { env: ENV }), null);
+  assert.equal(JSON.parse(readFileSync(files(dir).sessions, 'utf8')).sessions[key].pending.length, 1);
 });
 
 test('restart: a fresh server process, the tabs survive', async (t) => {
