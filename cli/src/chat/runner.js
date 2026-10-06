@@ -4,6 +4,7 @@
 // user's own login; nothing here reads a token. Tool calls become activity lines, text blocks are replies,
 // subagents are tracked from the task events, the nos run of the tab from the CLI's run results.
 import { spawn } from 'node:child_process';
+import { killTree } from '../proc.js';
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export const MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan'];
@@ -260,17 +261,6 @@ export function argsFor({ sessionId, resume, mode = 'auto', model, title }) {
   if (model && /^[\w.:-]+$/.test(model)) args.push('--model', model);
   args.push('--append-system-prompt', SYSTEM_NOTE);
   return args;
-}
-
-function killTree(child, platform = process.platform) {
-  if (!child.pid || child.exitCode !== null) return;
-  try {
-    if (platform === 'win32')
-      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }).on('error', () => {});
-    else process.kill(-child.pid, 'SIGTERM');
-  } catch {
-    child.kill();
-  }
 }
 
 export function createRunner({ root, bin = 'claude', mode = 'auto', model, env = process.env, spawnFn = spawn }) {
