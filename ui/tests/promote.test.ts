@@ -9,6 +9,8 @@ import { promoteHandler } from '../src/serve-specs';
 
 // tests run inside ui/, the CLI sits next to it
 const CLI = resolve('../cli/bin/nos.js');
+// every test spawns nos several times (node + git): slow when other suites run at the same time
+const SPAWN_TIMEOUT = 30_000;
 let root = '';
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -39,24 +41,32 @@ const call = (method: string, url: string) =>
     promoteHandler(root, CLI)({ method, url } as never, res);
   });
 
-test('POST /__promote runs nos create-plan --hollow in main, the idea gets an empty open plan in .specs', async () => {
-  setup();
-  const ok = await call('POST', '/__promote?domain=domain-1-dark-mode');
-  expect(ok.status).toBe(200);
-  expect(JSON.parse(ok.body)).toMatchObject({ action: 'create-plan', hollow: true, phases: [] });
-  expect(JSON.parse(readFileSync(join(root, '.specs/domain-1-dark-mode/plan.json'), 'utf8'))).toStrictEqual({
-    name: 'Dark mode theme',
-    status: 'open',
-    phases: [],
-  });
-  const again = await call('POST', '/__promote?domain=domain-1-dark-mode');
-  expect(again.status).toBe(500);
-  expect(again.body).toContain('already has a plan.json');
-});
+test(
+  'POST /__promote runs nos create-plan --hollow in main, the idea gets an empty open plan in .specs',
+  async () => {
+    setup();
+    const ok = await call('POST', '/__promote?domain=domain-1-dark-mode');
+    expect(ok.status).toBe(200);
+    expect(JSON.parse(ok.body)).toMatchObject({ action: 'create-plan', hollow: true, phases: [] });
+    expect(JSON.parse(readFileSync(join(root, '.specs/domain-1-dark-mode/plan.json'), 'utf8'))).toStrictEqual({
+      name: 'Dark mode theme',
+      status: 'open',
+      phases: [],
+    });
+    const again = await call('POST', '/__promote?domain=domain-1-dark-mode');
+    expect(again.status).toBe(500);
+    expect(again.body).toContain('already has a plan.json');
+  },
+  SPAWN_TIMEOUT,
+);
 
-test('/__promote rejects other methods and names that are no domain folder', async () => {
-  setup();
-  expect((await call('GET', '/__promote?domain=domain-1-dark-mode')).status).toBe(405);
-  expect((await call('POST', '/__promote?domain=../etc')).status).toBe(400);
-  expect((await call('POST', '/__promote?domain=domain-9-nope')).status).toBe(500);
-});
+test(
+  '/__promote rejects other methods and names that are no domain folder',
+  async () => {
+    setup();
+    expect((await call('GET', '/__promote?domain=domain-1-dark-mode')).status).toBe(405);
+    expect((await call('POST', '/__promote?domain=../etc')).status).toBe(400);
+    expect((await call('POST', '/__promote?domain=domain-9-nope')).status).toBe(500);
+  },
+  SPAWN_TIMEOUT,
+);

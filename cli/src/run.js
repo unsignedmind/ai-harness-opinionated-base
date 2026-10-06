@@ -368,6 +368,18 @@ export async function startRun(
   return startResult(roots, run, { install: installed, leftovers, warnings });
 }
 
+// A finish or abandon of this run crashed between set-status --run and the phase change: the target is merged
+// while the phase is merge, or discarded while the phase is not yet abandoned
+function statusesFlipped(roots, run) {
+  let status;
+  try {
+    status = targetOf(roots, run).item.status;
+  } catch {
+    return false;
+  }
+  return (status === 'merged' && run.phase === 'merge') || (status === 'discarded' && run.phase !== 'abandoned');
+}
+
 // The part of run start under lock runs. Returns { done } (merged/abandoned run: token only) or
 // { run, created, leftovers, warnings }.
 function startLocked(roots, { domain, kind, id, runId, given, takeOver }) {
@@ -379,8 +391,10 @@ function startLocked(roots, { domain, kind, id, runId, given, takeOver }) {
     }
     if (!takeOver && given !== existing.token) throw heldBy(existing);
     if (takeOver) takeOverMergeLock(roots, existing);
-    // merged or abandoned: only the token (a session without it reaches run cleanup), no git work
-    if (TERMINAL.includes(existing.phase)) {
+    // merged or abandoned: only the token (a session without it reaches run cleanup), no git work. Also a finish /
+    // abandon that crashed after the statuses flipped (merged + phase merge, discarded + phase not abandoned):
+    // only the token, so run finish / run abandon completes it.
+    if (TERMINAL.includes(existing.phase) || statusesFlipped(roots, existing)) {
       const run = { ...existing, token: takeOver ? mintToken() : existing.token, seen: now() };
       writeRun(roots, run);
       return { done: startResult(roots, run) };

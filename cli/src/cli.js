@@ -348,7 +348,9 @@ sync/finish/cleanup/abandon act on --run, else the run of the worktree you sit i
 start    Validates the target (a plan with phases, or a quick step; not merged/discarded). Run file of
          this run: same token -> resume (recreates a missing worktree); another token -> 4; --take-over ->
          new token (also for a merged/abandoned run: then only the token, so cleanup can run; a merge lock
-         of the old token is released, while its finish still runs -> 4). Another run in the domain -> 6. Uncommitted specs of the domain ->
+         of the old token is released, while its finish still runs -> 4). Same for a finish / abandon that
+         crashed after the statuses (merged + phase merge, discarded + phase not abandoned): only the token,
+         then run finish / run abandon completes it. Another run in the domain -> 6. Uncommitted specs of the domain ->
          committed "<run>: leftovers". Branch <kind>-<id> (reused, else from main's current branch),
          git worktree add, run file (base, phase develop), "branch" in plan.json / the quick step.
          project-commands.install in a new worktree, output to <specs>/.runs/logs/<run>/install.log

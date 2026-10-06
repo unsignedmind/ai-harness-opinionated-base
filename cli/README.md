@@ -103,7 +103,7 @@ How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the
 
 ### Process model
 
-- A session (terminal or chat tab) starts in main. Picking a plan or quick step starts a **run**: `nos run start` creates branch `<kind>-<id>` and the worktree `<main>/.claude/worktrees/<kind>-<id>`, and prints a run token. The session then enters the worktree (`EnterWorktree path=<enter>`); subagents, tests and code commits land there.
+- A session (terminal or chat tab) starts in main. Picking a plan or quick step starts a **run**: `nos run start` creates branch `<kind>-<id>` and the worktree `<main>/.claude/worktrees/<kind>-<id>`, and prints a run token. The session then enters the worktree (`EnterWorktree path=<run.worktree>`, then it works in `enter`); subagents, tests and code commits land there.
 - Run ids: `plan-<domain id>` (one plan per domain) and `quick-<step id>`. One run per domain, one run per session.
 - The specs stay central in `<main>/.specs`, shared by all worktrees. Only the orchestrator commits them (`nos specs commit`), subagents never run git against `.specs`.
 - Code commits carry a subject prefix with a colon: `step-<id>: `, `phase-<id>: `, `architect: `, `setup: `. Code and specs are linked by that prefix, never by a sha (shas change on rebase).
@@ -134,13 +134,13 @@ Steps 1–6 run under the short lock `runs` (waits up to 10 s, then 4): two sess
 
 1. Needs git. Validates the target: a plan with at least one phase and status not merged/discarded, or an existing quick step of the domain that is not merged/discarded. `--plan` runs `plan-<domain id>`.
 2. Run file exists: same token (or `NOS_RUN_TOKEN`) → idempotent resume (recreates a missing worktree; no install when the worktree was there). No token or another token → exit 4 with `{ run, domain, phase, started, seen, ageSec }`. `--take-over` → new token; a merge lock the old token left (crashed finish) is released, but while the old holder's process still lives (its finish still runs) take-over is refused with 4.
-3. Run file in phase `merged` or `abandoned`: only the token is handled (same token → returned, `--take-over` → new token), no git work and no target check, so a session without the token reaches `run cleanup`.
+3. Run file in phase `merged` or `abandoned`, or a finish / abandon that crashed after flipping the statuses (status `merged` with phase `merge`, status `discarded` with a phase before `abandoned`): only the token is handled (same token → returned, `--take-over` → new token), no git work and no target check, so a session without the token reaches `run cleanup`, `run finish` or `run abandon` to complete it. Without a run file a merged or discarded target is refused (1).
 4. Another run in the same domain → exit 6 with `{ run, domain, phase, branch, worktree, started, seen, ageSec }`.
 5. Uncommitted specs of this domain (leftovers of a crashed session) → committed as `<run>: leftovers`, reported in `leftovers`.
 6. Branch `<kind>-<id>` (reused, or created from the branch main has checked out; detached → 1), `git -C <main> -c core.longpaths=true worktree add <main>/.claude/worktrees/<kind>-<id>` ("Filename too long" → 1 with a hint), run file with `base` (main's tip, or the merge base for a reused branch) and `phase: develop`, `branch` written into `plan.json` / the quick step entry.
 7. `project-commands.install` of the worktree's `nos.config.json`, run in the worktree, only when the worktree was created now. Output to `<specs>/.runs/logs/<run>/install.log`, never stdout. A failure is reported in `install` (`code`, `log`), the run stays. Not configured → `install: null`.
 
-`enter` (and `roots.work`) is the folder to enter: the worktree plus the project's offset in its repo (monorepo: `<worktree>/<offset>`). The result never has an `error` key (the chat detects a run by `"action": "run-start"`).
+`enter` (and `roots.work`) is the project folder in the worktree: the worktree top plus the project's offset in its repo, so in a monorepo it is a subfolder (`<worktree>/<offset>`). `EnterWorktree` takes `run.worktree` (the top: only a folder git lists as a worktree is accepted); the session then works in `enter`. The result never has an `error` key (the chat detects a run by `"action": "run-start"`).
 
 ```json
 { "action": "run-start",

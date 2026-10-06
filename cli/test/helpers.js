@@ -8,7 +8,14 @@ import { resolveRoots, SPECS_DIR } from '../src/roots.js';
 // realpath: tmpdir() may be an 8.3 short path on Windows, the resolver returns long names
 export function makeTempRoot(t) {
   const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'nos-cli-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // Windows: a process tree killed by a test (taskkill) may hold the folder for a moment -> retry, never fail the test
+  t.after(() => {
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch {
+      // left in the temp folder
+    }
+  });
   return root;
 }
 

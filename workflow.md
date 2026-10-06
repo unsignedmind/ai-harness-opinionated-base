@@ -19,7 +19,7 @@
     <code n="2">usage → fix the call. Never guess around it</code>
     <code n="3">rebase conflict (sync, finish) → run ability "integrate" with the run file and the conflict list.
         <do>pass → nos specs commit --run <run> -m "<run>: integrate", then repeat the same command</do>
-        <do>blocked → park, report both specs it cites
+        <do>blocked → stop, report both specs it cites. Ask only this question (not the question of park step2)
             <question>The two specs contradict each other. How do you want to continue?
                 <choice key="DECIDE">Say which intent wins → rerun ability "integrate" with that decision (it overrides the contradiction), then repeat the command</choice>
                 <choice key="PAUSE">Pause → park choice PAUSE</choice>
@@ -29,7 +29,7 @@
     </code>
     <code n="4" from="run start, sync, finish, cleanup, abandon" when="details without lock">run held by another token → report holder and age ("seen", "ageSec" in the details)
         <question>The run is held by another session. How do you want to continue?
-            <choice key="TAKEOVER">Take the run over: "nos run start --domain <domain> --plan|--quick <step id> --take-over", keep the new token, then repeat the command. Only when the other session is gone</choice>
+            <choice key="TAKEOVER">Take the run over: "nos run start --domain <domain> --plan|--quick <step id> --take-over", keep the new token. Came from run start → continue option "run" step2 with the new token (EnterWorktree, nos roots, …). Came from another nos run command → repeat it with the new token. Only when the other session is gone</choice>
             <choice key="STOP">Stop here</choice>
         </question>
     </code>
@@ -57,7 +57,7 @@
             <choice key="NO">Skip. Abilities that run quality checks will stop until setup ran</choice>
         </question>
     </check>
-    <check>inWorktree true → the run whose "worktree" in <specs>/.runs/*.json is <work> → option "run" step2 with that run</check>
+    <check>inWorktree true → the run whose "worktree" in <specs>/.runs/*.json is <work> or contains it → option "run" step2 with that run. No such run → ExitWorktree action=keep, nos roots, then the menu</check>
     <question>What do you want to do?
         <choice key="IDEA">Document an idea</choice>
         <choice key="PLAN">Create a plan from an idea</choice>
@@ -152,11 +152,12 @@
         </question>
     </step1>
     <step2>Enter the run:
-        <do>Cleanup pending (status merged or discarded, run file phase merged or abandoned) → inside its worktree: ExitWorktree action=keep. nos run cleanup --token <token> (no token → TAKEOVER question of exit code 4 first, to get one). nos roots. Report. End</do>
+        <do>Cleanup pending (status merged or discarded, run file phase merged or abandoned) → inside its worktree → ExitWorktree action=keep. nos run cleanup --token <token> (no token → TAKEOVER question of exit code 4 first, to get one). nos roots. Report. End</do>
+        <do>Crashed finish (status merged, run file phase merge) → nos run finish --token <token> (no token → TAKEOVER question of exit code 4 first): cycle "finish" from step1. Crashed abandon (status discarded, run file phase not abandoned) → ExitWorktree action=keep when inside its worktree, nos run abandon --token <token> (no token → TAKEOVER first). nos roots. Report. End</do>
         <do>Inside the worktree of a different run → ExitWorktree action=keep, nos roots</do>
-        <do>Inside its worktree and this session holds its token → no run start. Otherwise → nos run start --domain <domain> --plan, or --quick <step id>, with --token <token> when this session holds one. Exit 4|6 → exit code table. Keep "token" from the output. Install failure in the output ("install" with code not 0) → report it, continue. "warnings" in the output (e.g. .claude/worktrees not ignored) → report them, continue. Not inside yet → EnterWorktree path=<enter></do>
+        <do>Inside its worktree and this session holds its token → no run start. Otherwise → nos run start --domain <domain> --plan, or --quick <step id>, with --token <token> when this session holds one. Exit 4|6 → exit code table. Keep "token" from the output. Install failure in the output ("install" with code not 0) → report it, continue. "warnings" in the output (e.g. .claude/worktrees not ignored) → report them, continue. Not inside yet → EnterWorktree path=<run.worktree> (the worktree top: EnterWorktree accepts only a folder git knows as a worktree). "enter" differs from run.worktree (the project is a subfolder of its repo) → work in <enter> from now on: cd there, pass it as work</do>
         <do>Always: nos roots → home, work (= the worktree), specs. Read the run file <specs>/.runs/<run>.json: run id, mainBranch, base</do>
-        <do>Rebase check (run file phase develop): nos run sync --token <token>. Exit 3 (details.rebaseInProgress: a stopped rebase, or a new conflict) → run ability "integrate", then nos run sync again. Other codes → exit code table</do>
+        <do>Rebase check (run file phase develop): nos run sync --token <token>. Exit 3 (details.rebaseInProgress: a stopped rebase, or a new conflict) → run ability "integrate", then nos run sync again. Exit 5 → no rebase is open: continue, commit nothing (an interrupted ability finishes its own work on resume). Other codes → exit code table</do>
     </step2>
     <step3>Mode given (e.g. by quick-step) → skip
         <question>How should the plan run?
@@ -185,7 +186,7 @@
 <cycle name="finish">
     <step1>nos run finish --token <token>. It locks, checks main, syncs, runs the full gate (e2e included when configured) and merges ff-only. Exit 0 → step3. Exit 1 → step2. Other codes → exit code table (3: integrate, then repeat step1; 4: wait for the merge lock)</step1>
     <step2>Exit 1:
-        <do>Gate fail (gate JSON in the details) → park, report the failing tools and their tails
+        <do>Gate fail (gate JSON in the details) → stop, report run id and token, the failing tools and their tails. Ask only this question (not the question of park step2)
             <question>The gate failed while integrating. How do you want to continue?
                 <choice key="FIX">Run ability "develop" (resume) for the last done step with the failing tools and tails as feedback. It commits "step-<id>: gate fix". nos specs commit --run <run> -m "step-<id>: gate fix". Repeat step1</choice>
                 <choice key="PAUSE">Pause → park choice PAUSE</choice>
@@ -242,7 +243,7 @@
         <park mode="manual"/>
     </step2>
     <step3 resume-at="in-progress">
-        <do>nos run sync --token <token>. Exit 3 → integrate, then sync again. Other codes → exit code table</do>
+        <do when="not a resume at in-progress">nos run sync --token <token>. Exit 3 → integrate, then sync again. Other codes → exit code table. Resumed at in-progress → no sync: develop finishes its half-done work first, the next develop syncs</do>
         <status target="step" from="specified" to="in-progress"/>
         <do>Run ability "develop" with domain, phase id, step id and user feedback if any</do>
         <park mode="auto,manual" when="verdict blocked"/>

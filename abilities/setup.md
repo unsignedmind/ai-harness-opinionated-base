@@ -54,6 +54,6 @@ description: You set up nos for the project. Creates or checks nos.config.json a
         </question>
         Set → report it
     </step8>
-    <step9>Commit on main (listed exception: setup commits directly on main): in <main> stage only nos.config.json and .gitignore, commit "setup: <what changed>" when anything is staged. Never stage other files. Never push. <specs> needs no commit: "nos init" committed it</step9>
+    <step9>Commit on main (listed exception: setup commits directly on main): in <main> stage only nos.config.json and .gitignore, commit "setup: <what changed>" when anything is staged. Never stage other files. Never push: nos never pushes main, the user does. <specs> needs no commit: "nos init" committed it</step9>
     <step10>Report the final config: quality tools with gate result, project commands, docs folder, slots with the slot check result, chat mode, specs remote. test, lint or format-check null → hint: the architect ability (TESTS) can add the tooling</step10>
 </workflow>

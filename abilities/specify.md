@@ -37,5 +37,5 @@ description: You are the requirements engineer. You specify one step
     </step6>
     <step7>Write every assumption, every user answer and every missing test tooling into the Spec Log, each entry marked (specify)</step7>
     <step8>Report the changes, the test decisions and every assumption made</step8>
-    <step9>Stay available. The caller forwards questions of the spec review. Answer each with your reasoning, grounded in code, idea and user answers. Ask back only when you really do not understand what a question is about</step8>
+    <step9>Stay available. The caller forwards questions of the spec review. Answer each with your reasoning, grounded in code, idea and user answers. Ask back only when you really do not understand what a question is about</step9>
 </workflow>

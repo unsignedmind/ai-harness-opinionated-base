@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lockStatus, takeLock } from '../src/lock.js';
 import { readRun, writeRun } from '../src/runs.js';
+import { setRunStatus } from '../src/status.js';
 import { gitOk, makeTempRoot, writeFile } from './helpers.js';
 import { branchExists, commitIn, done, head, mergeHeld, noGit, nos, quickStatus, setup, start } from './run-helpers.js';
 
@@ -215,3 +216,59 @@ test(
     assert.deepEqual(res.json.removed, { worktree: true, branch: true, runFile: true });
   },
 );
+
+test(
+  'finish crashed after the statuses (merged, phase merge): a fresh session takes over, finish completes',
+  noGit,
+  async (t) => {
+    const { root, roots, quick } = setup(t);
+    const a = await start(root, quick.a);
+    commitIn(a.enter, 'src/x.txt', 'x\n', `step-${quick.a.id}: x`);
+    done(roots, quick.a);
+    writeRun(roots, { ...readRun(roots, quick.a.runId), phase: 'merge' });
+    gitOk(['merge', '--ff-only', quick.a.runId], root);
+    setRunStatus(roots, { run: quick.a.runId, status: 'merged' });
+
+    const taken = await nos([...startArgs(quick.a), '--take-over'], root);
+    assert.equal(taken.code, 0, taken.err);
+    assert.notEqual(taken.json.token, a.token);
+    const fin = await nos(['run', 'finish', '--token', taken.json.token], root);
+    assert.equal(fin.code, 0, fin.err);
+    assert.equal(readRun(roots, quick.a.runId).phase, 'merged');
+    assert.equal(quickStatus(roots, quick.a), 'merged');
+    const clean = await nos(['run', 'cleanup', '--token', taken.json.token], root);
+    assert.equal(clean.code, 0, clean.err);
+    assert.equal(readRun(roots, quick.a.runId), null);
+    assert.equal(branchExists(root, quick.a.runId), false);
+  },
+);
+
+test(
+  'abandon crashed after the statuses (discarded, phase develop): a fresh session takes over, abandon completes',
+  noGit,
+  async (t) => {
+    const { root, roots, quick } = setup(t);
+    const a = await start(root, quick.a);
+    setRunStatus(roots, { run: quick.a.runId, status: 'discarded' });
+    assert.equal(readRun(roots, quick.a.runId).phase, 'develop');
+
+    const taken = await nos([...startArgs(quick.a), '--take-over'], root);
+    assert.equal(taken.code, 0, taken.err);
+    assert.notEqual(taken.json.token, a.token);
+    const res = await nos(['run', 'abandon', '--token', taken.json.token], root);
+    assert.equal(res.code, 0, res.err);
+    assert.equal(quickStatus(roots, quick.a), 'discarded');
+    assert.equal(readRun(roots, quick.a.runId), null);
+    assert.equal(branchExists(root, quick.a.runId), false);
+  },
+);
+
+test('run start without a run file still refuses a merged or discarded target', noGit, async (t) => {
+  const { root, roots, quick } = setup(t);
+  const a = await start(root, quick.a);
+  setRunStatus(roots, { run: quick.a.runId, status: 'discarded' });
+  assert.equal((await nos(['run', 'abandon', '--token', a.token], root)).code, 0);
+  const res = await nos(startArgs(quick.a), root);
+  assert.equal(res.code, 1);
+  assert.match(res.err, /is discarded: nothing to run/);
+});
