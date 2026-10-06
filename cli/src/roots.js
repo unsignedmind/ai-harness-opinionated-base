@@ -37,7 +37,9 @@ export function isInside(child, parent) {
   return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
-export const NOS_HOME = canonical(fileURLToPath(new URL('../../', import.meta.url)));
+// from the file path, not new URL('../../', import.meta.url): under jsdom (spec-ui tests) the global URL is
+// jsdom's, which fileURLToPath refuses
+export const NOS_HOME = canonical(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'));
 
 // Walks up from start to the first folder with nos.config.json, null when there is none.
 // Walking first makes nested repos (nos itself, .specs) harmless: git is asked from the project, not from them.

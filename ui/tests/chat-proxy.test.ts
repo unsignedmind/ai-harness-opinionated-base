@@ -11,7 +11,8 @@ import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 
 import { createAccess, DEVICE_COOKIE, isLocal, PENDING_COOKIE, type Access } from '../src/access';
-import { chatHandler, keyOf, stateDirOf } from '../src/chat-proxy';
+import { stateDirOf } from '../../cli/src/chat/paths.js';
+import { chatHandler, keyOf } from '../src/chat-proxy';
 import { loadTls } from '../src/tls';
 
 // tests run inside ui/, the CLI sits next to it
@@ -32,10 +33,12 @@ function handler(req: http.IncomingMessage, res: http.ServerResponse) {
 beforeAll(async () => {
   process.env.NOS_CHAT_PORT = '0';
   root = mkdtempSync(join(tmpdir(), 'nos-chat-ui-'));
-  mkdirSync(join(root, 'specs'));
+  // set up like nos init leaves it: the chat needs nos.config.json, its state lives in .specs/.chat
+  writeFileSync(join(root, 'nos.config.json'), JSON.stringify({ specs: { dir: '.specs', remote: null } }));
+  mkdirSync(join(root, '.specs'));
   // relay mode: these tests never start Claude Code (runner mode is covered in cli/test/chat)
-  writeFileSync(join(root, 'specs', 'config.json'), JSON.stringify({ chat: { runner: false } }));
-  state = stateDirOf(root);
+  writeFileSync(join(root, '.specs', 'config.json'), JSON.stringify({ chat: { runner: false } }));
+  state = stateDirOf({ specs: join(root, '.specs') });
   access = createAccess({
     stateDir: state,
     onChange: () => changes++,

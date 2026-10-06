@@ -1,5 +1,5 @@
 // Paired devices of the chat (spec-ui on the home network). Shared by `nos chat pair|devices` and the
-// spec-ui dev server, through specs/.chat/devices.json (read fresh, written whole: tmp + rename).
+// spec-ui dev server, through <specs>/.chat/devices.json (read fresh, written whole: tmp + rename).
 //
 // Pairing: a one-time code (10 min, single use) → the device that opens it becomes *pending* and
 // shows a 4-digit confirm number → someone on the PC approves it (same number) → on its next status
@@ -69,9 +69,7 @@ export function createDeviceStore({ dir, now = () => Date.now() }) {
     };
     const t = now();
     state.codes = state.codes.filter((c) => c.expiresAt > t);
-    state.devices = state.devices.filter((d) =>
-      d.status === 'pending' ? d.expiresAt > t : d.lastSeen + IDLE_MS > t,
-    );
+    state.devices = state.devices.filter((d) => (d.status === 'pending' ? d.expiresAt > t : d.lastSeen + IDLE_MS > t));
     return state;
   }
   function save(state) {
@@ -181,7 +179,9 @@ export function createDeviceStore({ dir, now = () => Date.now() }) {
     rename(id, name) {
       const state = load();
       const d = state.devices.find((x) => x.id === id);
-      const n = String(name ?? '').trim().slice(0, 40);
+      const n = String(name ?? '')
+        .trim()
+        .slice(0, 40);
       if (!d || !n) return false;
       d.name = n;
       save(state);

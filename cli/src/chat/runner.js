@@ -1,7 +1,8 @@
 // Runs Claude Code headless for a chat tab: one long-lived `claude -p` with stream-json in and out,
-// resumed by session id, so every tab is one ongoing Claude Code conversation in the project root.
-// Unmodified Claude Code with the user's own login; nothing here reads a token. Tool calls become
-// activity lines, text blocks are replies, subagents are tracked from the task events.
+// resumed by session id, so every tab is one ongoing Claude Code conversation started in the main checkout
+// of the project (a run then enters its worktree with EnterWorktree). Unmodified Claude Code with the
+// user's own login; nothing here reads a token. Tool calls become activity lines, text blocks are replies,
+// subagents are tracked from the task events, the nos run of the tab from the CLI's run results.
 import { spawn } from 'node:child_process';
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -16,28 +17,50 @@ export const SYSTEM_NOTE =
   'after the bracket verbatim with SendMessage to that id, then confirm in one short line.';
 
 // environment of the Claude Code session that may have started the server: never inherited
-const SESSION_VARS = /^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_(SESSION_ID|CHILD_SESSION|MESSAGING_.*|ENTRYPOINT|SESSION_ATTENDED|EXECPATH))$/;
+const SESSION_VARS =
+  /^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_(SESSION_ID|CHILD_SESSION|MESSAGING_.*|ENTRYPOINT|SESSION_ATTENDED|EXECPATH))$/;
+// nos variables a tab's session must not inherit either: NOS_SPECS_ROOT would beat the resolver's walk
+// from the session's cwd (its worktree), NOS_RUN_TOKEN would hand it the run of another session
+const NOS_VARS = new Set(['NOS_SPECS_ROOT', 'NOS_RUN_TOKEN']);
 
 export function cleanEnv(env) {
-  return Object.fromEntries(Object.entries(env).filter(([k]) => !SESSION_VARS.test(k)));
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !SESSION_VARS.test(k) && !NOS_VARS.has(k)));
 }
 
 const short = (s, n = 80) => {
-  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  const t = String(s ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return t.length > n ? t.slice(0, n - 1) + '…' : t;
 };
 
 // one line for a tool call: "Bash: npm test", "Edit: src/app.ts"
 export function describeTool(name, input = {}) {
   const arg =
-    input.command ?? input.file_path ?? input.path ?? input.pattern ?? input.url ?? input.description ?? input.prompt ?? '';
+    input.command ??
+    input.file_path ??
+    input.path ??
+    input.pattern ??
+    input.url ??
+    input.description ??
+    input.prompt ??
+    '';
   return arg ? `${name}: ${short(arg)}` : name;
 }
 
-// paths in the project root, relative to it (both slash forms)
+// paths in the project root (main), relative to it (both slash forms)
 export function relTo(root = '') {
   const dirs = root ? [...new Set([root, root.replace(/\\/g, '/'), root.replace(/\//g, '\\')])] : [];
-  return (t) => dirs.reduce((s, d) => s.split(d + '/').join('').split(d + '\\').join(''), t);
+  return (t) =>
+    dirs.reduce(
+      (s, d) =>
+        s
+          .split(d + '/')
+          .join('')
+          .split(d + '\\')
+          .join(''),
+      t,
+    );
 }
 
 const AGENT_TOOLS = new Set(['Agent', 'Task']);
@@ -159,6 +182,64 @@ export function agentTracker(now = Date.now, root = '') {
   };
 }
 
+// The end of the JSON object that starts at text[start] ('{'), -1 when it does not close
+function closeOf(text, start) {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === '\\') i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+// The outermost JSON objects in a text (CLI output, single line or pretty-printed, maybe between other
+// lines), in order. Text that is no JSON is skipped.
+export function jsonObjects(text) {
+  const found = [];
+  for (let i = text.indexOf('{'); i >= 0;) {
+    const end = closeOf(text, i);
+    let value;
+    try {
+      value = end > 0 ? JSON.parse(text.slice(i, end + 1)) : undefined;
+    } catch {
+      value = undefined;
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      found.push(value);
+      i = text.indexOf('{', end + 1);
+    } else i = text.indexOf('{', i + 1);
+  }
+  return found;
+}
+
+const RUN_ACTION = /"action"\s*:\s*"run-(start|cleanup|abandon)"/;
+const field = (v) => (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v)) ? v : null);
+
+// The nos run a tool result reports (D-8): the result of `nos run start` → { kind, id, domain, branch,
+// worktree } (never the token), of `nos run cleanup` or `nos run abandon` → null, anything else (no run
+// result, an error report { action, error, … }, output that is no JSON) → undefined. The last one wins.
+// content: the tool_result content, a string or an array of { type: 'text', text } items.
+export function runOf(content) {
+  const text = textOf(content);
+  if (!RUN_ACTION.test(text)) return undefined;
+  let run;
+  for (const o of jsonObjects(text)) {
+    if ('error' in o) continue;
+    if (o.action === 'run-start' && o.run && typeof o.run === 'object') {
+      const r = { kind: field(o.run.kind), id: field(o.run.id), domain: field(o.run.domain) };
+      Object.assign(r, { branch: field(o.run.branch), worktree: field(o.run.worktree) });
+      if (r.id !== null || r.worktree !== null) run = r;
+    } else if (o.action === 'run-cleanup' || o.action === 'run-abandon') run = null;
+  }
+  return run;
+}
+
 export function argsFor({ sessionId, resume, mode = 'auto', model, title }) {
   if (!UUID.test(sessionId)) throw new Error('invalid session id');
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'];
@@ -174,7 +255,8 @@ export function argsFor({ sessionId, resume, mode = 'auto', model, title }) {
 function killTree(child, platform = process.platform) {
   if (!child.pid || child.exitCode !== null) return;
   try {
-    if (platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }).on('error', () => {});
+    if (platform === 'win32')
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }).on('error', () => {});
     else process.kill(-child.pid, 'SIGTERM');
   } catch {
     child.kill();
@@ -188,7 +270,7 @@ export function createRunner({ root, bin = 'claude', mode = 'auto', model, env =
     // so they reach Claude at once (also while it works) and background agents keep running after
     // a turn ends. Each top-level text block is a reply as soon as it comes; a turn ends with a
     // `result`. Callbacks: onStarted (the session exists), onBusy(bool), onText, onError,
-    // onActivity, onAgents, onExit({ stopped, error }).
+    // onActivity, onAgents, onRun(run or null: a nos run started or ended, see runOf), onExit({ stopped, error }).
     open({
       sessionId,
       resume,
@@ -199,6 +281,7 @@ export function createRunner({ root, bin = 'claude', mode = 'auto', model, env =
       onError = () => {},
       onActivity = () => {},
       onAgents = () => {},
+      onRun = () => {},
       onExit = () => {},
     }) {
       const child = spawnFn(bin, argsFor({ sessionId, resume, mode, model, title }), {
@@ -254,6 +337,12 @@ export function createRunner({ root, bin = 'claude', mode = 'auto', model, env =
               onText(c.text.trim());
             }
           }
+        } else if (j.type === 'user' && Array.isArray(j.message?.content)) {
+          for (const c of j.message.content) {
+            if (c?.type !== 'tool_result' || c.is_error) continue;
+            const run = runOf(c.content);
+            if (run !== undefined) onRun(run);
+          }
         } else if (j.type === 'result') {
           const text = String(j.result ?? '').trim();
           if (j.is_error) onError(text || String(j.subtype ?? 'error'));
@@ -278,7 +367,7 @@ export function createRunner({ root, bin = 'claude', mode = 'auto', model, env =
           stopped,
           error:
             e.code === 'ENOENT'
-              ? `Claude Code ("${bin}") was not found on the host. Install it or set "chat": { "claude": "<path>" } in specs/config.json.`
+              ? `Claude Code ("${bin}") was not found on the host. Install it or set "chat": { "claude": "<path>" } in <specs>/config.json.`
               : e.message,
         }),
       );

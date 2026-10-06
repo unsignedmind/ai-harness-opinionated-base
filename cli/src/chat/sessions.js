@@ -50,6 +50,8 @@ export function createSessionStore({ file }) {
           title: '',
           claudeSession: null,
           claudeStarted: false,
+          // the nos run the tab's session works on: { kind, id, domain, branch, worktree } (runner.js), or null
+          run: null,
           chat: [],
           pending: [],
           createdAt: at,
@@ -70,7 +72,7 @@ export function createSessionStore({ file }) {
     update(key, fields) {
       const s = get(key);
       if (!s) return null;
-      for (const k of ['title', 'claudeSession', 'claudeStarted']) if (k in fields) s[k] = fields[k];
+      for (const k of ['title', 'claudeSession', 'claudeStarted', 'run']) if (k in fields) s[k] = fields[k];
       s.updatedAt = now();
       save();
       return s;
@@ -134,6 +136,7 @@ export function createSessionStore({ file }) {
         pending: s.pending.length,
         title: s.title ?? '',
         claudeSession: s.claudeSession ?? null,
+        run: s.run ?? null,
         messages: s.chat.length,
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,
