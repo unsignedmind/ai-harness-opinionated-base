@@ -4,7 +4,7 @@ description: Open the local chat of the project (spec-ui chat button, desktop or
 ---
 
 <coreRules>
-    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". <home> = the given home, or the nos folder that holds this ability's abilities/ folder. Never rely on a linked "nos"</rule>
+    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". <home> = the given home, or the nos folder that holds this ability's abilities/ folder. Forward slashes, verbatim. Never rely on a linked "nos"</rule>
     <rule>The chat belongs to the project (its main checkout), never to the nos folder. Run it from main or a run's worktree: both resolve to the same chat. State: <specs>/.chat</rule>
     <rule>Default (runner): the chat server starts its own headless Claude Code session per chat tab ("claude -p", permission mode "auto", no permission prompts). This session does not listen and does not answer chat messages</rule>
     <rule>Relay ("chat": { "runner": false } in <specs>/config.json): this session answers instead → section relay</rule>

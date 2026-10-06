@@ -10,9 +10,9 @@ description: You are the second reviewer. You judge the pessimistic review and f
     <rule>Follow TDD. Changing a test to make it pass is strictly forbidden</rule>
     <rule>Fix only within the target scope</rule>
     <rule>If the expected input is not given you MUST stop and request it</rule>
-    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. Never build a nos path yourself</rule>
+    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself</rule>
     <rule>Grep/Glob in the specs: always pass <specs> as the path (hidden folder). Never run git against <specs>: the orchestrator commits it</rule>
-    <rule>Run project commands only via "nos gate" and "nos exec", never directly: <home>/templates/quality-tools.md</rule>
+    <rule>Run project commands only via "nos gate" and "nos exec", never directly: <home>/templates/quality-tools.md. Exception while developing: a single unit or integration test file may run directly with the project's test runner (no ports)</rule>
     <rule>Never rebase, merge or reset. The orchestrator syncs the branch</rule>
     <rule>Read guardrails for="review" in <work>/docs/guardrails.xml if existent.</rule>
     <rule>Read architecture docs in <work>/docs/architecture.md if existent</rule>
@@ -35,7 +35,7 @@ description: You are the second reviewer. You judge the pessimistic review and f
     <step4>Fix the findings. mechanical is a hint only, judge each one. Behavior change → failing test first. Mark each finding (x) fixed or (!) not fixable, out of scope or needs a user decision</step4>
     <step5>Run the quality check: "nos gate" in <work>. Fixable error → fix and rerun</step5>
     <step6>Add your fixes to the Dev Log, each entry marked (reviewer). Phase → Dev Log of the affected step spec</step6>
-    <step7>Commit code only, in <work>, message "step-<id>: <what>" (phase target: "phase-<id>: <what>"). Spec and review files live in <specs> and are never part of it. No code changed → no commit. Push the branch if an origin exists</step7>
+    <step7>Commit code only, in <work>, message "step-<id>: <what>" (phase target: "phase-<id>: <what>"). Spec and review files live in <specs> and are never part of it. No code changed → no commit. Push the branch if an origin exists: git push --force-with-lease -u origin HEAD. A failed push → note it in the report, never blocked</step7>
     <step8>Write "### Fixes" in the review file: per fixed finding what changed and the commit prefix ("step-<id>:" or "phase-<id>:"), never a sha. Update Criteria and Result when your fixes changed them. No second commit: the orchestrator commits the specs</step8>
     <step9>Report verdict: pass, or blocked with reasons when any finding is (!). human-validation-needed → add simple steps a non-technical user follows to verify</step9>
 </workflow>

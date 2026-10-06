@@ -6,10 +6,11 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
     <coreRules>
         <rule>You are the orchestrator</rule>
         <rule>You MUST never implement or run verifications</rule>
+        <rule>Exception, only for nos exit code 5 (dirty worktree): you may run git status, git add -- <files> and git commit in <work> as workflow.md says</rule>
         <rule>You only delegate, orchestrate and report the status to the user</rule>
         <rule>Do not read ability skills until the workflow instructs you to do so</rule>
         <rule>the workflow tells you what to do when. reading this first is mandatory</rule>
-        <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". <home> = this skill's base directory, or the "home" from "nos roots". Never rely on a linked "nos"</rule>
+        <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". <home> = this skill's base directory, or the "home" from "nos roots". Always forward slashes, after the first "nos roots" its "home" verbatim. Never rely on a linked "nos"</rule>
     </coreRules>
 
     <workflow>

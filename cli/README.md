@@ -10,7 +10,7 @@ It uses no dependencies and needs Node.js 20 or newer.
 npm install     # no dependencies; nothing else to install
 ```
 
-Invocation: `nos` = `node <home>/cli/bin/nos.js`, `<home>` = the nos folder (e.g. `D:/repo/.claude/skills/nos`). Orchestrator, abilities, hooks and permissions always use this absolute form; they never rely on a linked `nos` (`npm link` still works for your own terminal). In this README `nos` stands for that call. Runs need git.
+Invocation: `nos` = `node <home>/cli/bin/nos.js`, `<home>` = the nos folder with forward slashes (e.g. `D:/repo/.claude/skills/nos`); the orchestrator uses the `home` printed by `nos roots` verbatim, so permission rules match. Orchestrator, abilities, hooks and permissions always use this absolute form; they never rely on a linked `nos` (`npm link` still works for your own terminal). In this README `nos` stands for that call. Runs need git.
 
 ## Usage
 
@@ -32,7 +32,7 @@ nos <command> --help
 | `run start\|sync\|finish\|cleanup\|abandon` | Run lifecycle: branch + worktree, rebase onto main, gate + ff-only merge, removal |
 | `gate`              | Run the quality tools of the checkout's `nos.config.json`, JSON per tool    |
 | `exec`              | Run a project command (`install`, `dev`, `deploy-test`)                     |
-| `specs commit`      | Commit the specs of one run or domain in `.specs`                           |
+| `specs commit`      | Commit the specs of one run or domain (or only `config.json`) in `.specs`   |
 | `specs find-step`   | Find the spec file of a step id in any domain                              |
 | `lock`              | Take, release or show a lock (`merge`, `ids`, `slot-<n>`)                   |
 
@@ -85,7 +85,7 @@ Home guard: when `<main>/.claude/skills/nos` exists and is not this nos, or this
 
 For codes 3–7 stdout also gets `{ "action", "error", "exit", "details" }` (details: holder, file lists) and stderr one line. Codes and `NosError` live in `src/exit-codes.js`.
 
-How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the same command again. 4 / 6 → report holder and age, the user decides (`--take-over` or stop). 5 → commit the leftover work with the current step prefix, or park. 7 and 1 → park and report.
+How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the same command again (contradicting specs → the user decides which intent wins). 4 from `run start` → report holder and age, the user decides (`--take-over` or stop); 4 from `run finish` (merge lock) → wait 60s and retry, up to 10×. 6 → report the other run, the user decides. 5 → commit the step's own leftover files (`git add -- <files>`, never `-A`) with the current step prefix, or park. 1 from `run finish` with a gate fail → `FIX` reruns develop. 7 and other 1 → park and report.
 
 ### Process model
 
@@ -209,12 +209,14 @@ A slot is a lease on a set of ports: `<specs>/.locks/slot-<n>`, `n` in `1..workt
 ### `specs commit`
 
 ```sh
-nos specs commit (--run <kind>-<id> | --domain <domain>) -m "<message>"
+nos specs commit (--run <kind>-<id> | --domain <domain> | --config) -m "<message>"
 ```
 
-`git -C <specs> add config.json <domain dir>` and a commit when anything is staged. Never `add -A`: exact because one run owns its domain. Retries a held `index.lock` (5×). Pushes when `specs.remote` is set (a failed push is a warning). `--domain` is for idea, plan and quick step creation outside a run. Prints `{committed, sha, pushed}`.
+`git -C <specs> add config.json <domain dir>` and a commit when anything is staged. Never `add -A`: exact because one run owns its domain. Retries a held `index.lock` (5×). Pushes when `specs.remote` is set (a failed push is a warning). `--domain` is for idea, plan and quick step creation outside a run. `--config` commits only `config.json` (e.g. setup's chat node). Prints `{committed, sha, pushed}`.
 
-Messages: `step-<id>: <ability>`, `phase-<id>: <ability>` inside a run, `<ability>: <domain>` outside.
+Caveat: `--domain` for a domain that a run of another session owns also commits that run's spec edits. Never do it; check `<specs>/.runs` first.
+
+Messages: `step-<id>: <ability>`, `phase-<id>: <ability>`, `<run>: <what>` inside a run, `<ability>: <domain>` or `<ability>: <what>` outside.
 
 ### `specs find-step`
 

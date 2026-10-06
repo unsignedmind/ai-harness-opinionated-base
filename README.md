@@ -222,12 +222,12 @@ A resumed session (`claude --resume`, a restarted chat) is back in the run's wor
 
 | nos exit code | Meaning | nos does |
 | --- | --- | --- |
-| 3 | rebase conflict | integrate, then the same command again |
-| 4 | held by another session (run token or lock) | shows holder and age, you decide: take over or stop |
-| 5 | dirty worktree | commits the step's leftovers, or stops |
+| 3 | rebase conflict | integrate, then the same command again. Contradicting specs: you decide which intent wins (`DECIDE`), pause or abandon |
+| 4 | held by another session (run token or merge lock) | run: shows holder and age, you decide: take over or stop. Merge lock: waits and retries, then stops |
+| 5 | dirty worktree | commits the step's own leftover files (never `git add -A`), or stops and asks you to ignore or delete the rest |
 | 6 | another run in the domain | shows it, you decide |
 | 7 | no free slot in time | stops |
-| 1 | failed (gate, main busy or dirty) | stops and reports |
+| 1 | failed (gate, main busy or dirty) | stops and reports. Gate fail at integration: `FIX` runs develop for the last step with the failures |
 
 ### Controlling human validation
 
@@ -508,7 +508,7 @@ Used in ACs, the Task List and review findings:
 | `nos create-quick-step --domain <d> --step <file>` | quick-step | new step id, quick step file, entry in `quick-steps/quick-steps.json` |
 | `nos set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | orchestrator | changes one status, checked against the matching `status.xml` section. A step id not in `plan.json` is looked up in the quick steps |
 | `nos run start\|sync\|finish\|cleanup\|abandon` | orchestrator | run lifecycle (branch, worktree, rebase, gate, ff-only merge, removal) |
-| `nos specs commit (--run <r>\|--domain <d>) -m <msg>` | orchestrator | commits one domain's specs in `.specs` |
+| `nos specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | orchestrator | commits one domain's specs (or only `config.json`) in `.specs` |
 | `nos specs find-step <id>` | integrate | spec file of a step id in any domain |
 | `nos gate [--e2e]` | develop, reviewers, integrate, architect, setup | the quality check, JSON per tool |
 | `nos exec <install\|dev\|deploy-test>` | setup, `run start` | project commands with slot lease |
@@ -517,7 +517,7 @@ Used in ACs, the Task List and review findings:
 
 | Role | Writes code | Writes spec | Changes status | Commits |
 | --- | --- | --- | --- | --- |
-| orchestrator | no | no | yes (nos) | `.specs` only (`nos specs commit`) |
+| orchestrator | no | no | yes (nos) | `.specs` only (`nos specs commit`); in the worktree only a step's leftovers on exit code 5 |
 | idea / plan / quick-step | no | idea / plan / quick step (nos) | no | no |
 | specify | no | Description, ACs, Spec Log, Test Strategy. Read-only once done | no | no |
 | spec-review | no | Description, ACs, Spec Log, Test Strategy | no | no |
@@ -541,7 +541,7 @@ Used in ACs, the Task List and review findings:
 | Block | Purpose |
 | --- | --- |
 | `<rules>` | Invocation and roots. Runs, token, specs commits after every ability, code commit prefixes. Every ability runs in a new subagent. Statuses change only via `nos set-status`. Questions from subagents are relayed to you and the answers sent back to the same subagent. Reports use simple language. Every question uses the `A - text [KEY]` format |
-| `<exitCodes>` | What to do on each nos exit code: 3 integrate, 4/6 take over or stop, 5 commit leftovers or park, 7 and 1 park |
+| `<exitCodes>` | What to do on each nos exit code: 3 integrate (blocked → DECIDE), 4 take over or stop (merge lock: wait and retry), 6 switch, wait or stop, 5 commit the step's leftover files or park, 7 and 1 park |
 | `<start>` | The IDEA / PLAN / RUN / QUICK / ARCHITECT / SETUP menu |
 | `<option name="idea">` | Runs idea, then offers PLAN |
 | `<option name="architect">` | Runs architect. Tech debt handed over → offers an idea for all bugs or one per bug |
@@ -807,7 +807,7 @@ Invocation: `node <home>/cli/bin/nos.js <command>`, `<home>` = the nos folder, a
 
 | Command | Does |
 | --- | --- |
-| `roots` | prints the resolved `home`, `work`, `main`, `specs` (absolute) |
+| `roots` | prints the resolved `home`, `work`, `main`, `specs` (absolute), `inWorktree`, `configured` |
 | `init` | creates `nos.config.json`, `.specs/` (own git repo) and the `.gitignore` entries if missing. Run on main |
 | `create-domain --idea <file\|-> --slug <s>` | a domain id, creates `.specs/domain-<id>-<slug>/idea.md` and `domain.json` |
 | `create-plan --domain <d> --plan <file\|->` | saves `plan.json`, creates phase folders and empty step files, fills `spec-file`. One plan per domain |
@@ -818,7 +818,7 @@ Invocation: `node <home>/cli/bin/nos.js <command>`, `<home>` = the nos folder, a
 | `run sync\|finish\|cleanup\|abandon --token <t>` | rebase onto main; lock + checks + gate + ff-only merge; remove worktree and branch; drop the run |
 | `gate [--e2e]` | the quality tools of `nos.config.json`, JSON per tool |
 | `exec <install\|dev\|deploy-test>` | a project command; `dev` holds a slot |
-| `specs commit (--run <r>\|--domain <d>) -m <msg>` | commits one domain's specs in `.specs` |
+| `specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | commits one domain's specs (or only `config.json`) in `.specs`. Never `--domain` for a domain another session's run owns |
 | `specs find-step <id>` | spec file of a step id |
 | `lock take\|release\|status <name> --token <t> [--break]` | the `merge`, `ids`, `slot-<n>` locks |
 

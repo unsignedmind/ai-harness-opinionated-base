@@ -10,7 +10,7 @@ description: You create a quick step. One step without a plan, allocated to a do
     <rule>Return every question to the caller and wait for the answer</rule>
     <rule>Every question with choices: one choice per line, "<letter> - <choice text> [<key>]". Letters A, B, C… in choice order. The user answers with letter or key</rule>
     <rule>Files only via the nos cli: create-domain, create-quick-step</rule>
-    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. Never build a nos path yourself</rule>
+    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself</rule>
     <rule>Grep/Glob in the specs: always pass <specs> as the path (hidden folder). Never run git against <specs>: the orchestrator commits it</rule>
 </coreRules>
 
@@ -24,7 +24,7 @@ description: You create a quick step. One step without a plan, allocated to a do
             <choice key="MANUAL">You choose the domain and how the quick step runs</choice>
         </question>
     </step2>
-    <step3>Find matching domains: read idea.md, plan.json and quick-steps/quick-steps.json of each <specs>/domain-* folder (Glob with path <specs>). Skip quick steps and plans with status merged or discarded. Rank them by fit to the intent</step3>
+    <step3>Find matching domains: read idea.md, plan.json and quick-steps/quick-steps.json of each <specs>/domain-* folder (Glob with path <specs>). Skip quick steps and plans with status merged or discarded. A domain with a run file in <specs>/.runs (a running plan or quick step) → rank it last and say so: a new quick step there cannot start before that run is merged. Auto never picks it. Rank them by fit to the intent</step3>
     <step4 mode="manual">
         <question>Which domain should the quick step belong to?
             <choice key="domain id">One choice per matching domain: domain name and why it fits. Mark the best one "(suggested)"</choice>

@@ -1,34 +1,40 @@
 <rules>
-    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". <home> = this skill's base directory, or the "home" from "nos roots". Never rely on a linked "nos"</rule>
+    <rule>Invocation: "nos" = "node <home>/cli/bin/nos.js". <home> = this skill's base directory, or the "home" from "nos roots". Always forward slashes. After the first "nos roots" use its "home" verbatim in every call (identical string, so permission rules match). Never rely on a linked "nos"</rule>
     <rule>Run every ability in a new subagent. Pass it the ability skill path, home, work, specs and its inputs. Exception: "chat" runs in the main session</rule>
     <rule>Roots: "nos roots" prints home, work, main, specs, inWorktree, configured. Run it at start, after entering a worktree and after leaving one. Pass home, work and specs to every ability; inside a run also the run id and "mainBranch" of <specs>/.runs/<run>.json. Never build a nos path yourself. Grep/Glob over the specs: always pass <specs> as the path (hidden folder)</rule>
     <rule>Run: one plan (run id plan-<domain id>) or one quick step (run id quick-<step id>) in its own branch and git worktree <main>/.claude/worktrees/<run>. The session works inside that worktree. One run per session, one run per domain. Running runs: <specs>/.runs/*.json</rule>
-    <rule>Token: "nos run start" prints the run token. Remember it (it stays in this transcript) and pass --token <token> to every "nos run" command. Fresh session without the token → only --take-over, and only after the user chose TAKEOVER</rule>
-    <rule>Specs commits: only you commit <specs>, only with "nos specs commit". Subagents never run git against <specs>. Inside a run, after every ability returns: nos specs commit --run <run> -m "step-<id>: <ability>" (phase abilities: "phase-<id>: <ability>"). Outside a run (idea, plan, quick step creation): nos specs commit --domain <domain> -m "<ability>: <domain>". Status changes are picked up by the next specs commit</rule>
+    <rule>Token: "nos run start" prints the run token. Remember it (it stays in this transcript) and pass --token <token> to every "nos run" command. Fresh session without the token → only --take-over, and only after the user chose TAKEOVER. State run id and token in every park report, so they survive a compacted context</rule>
+    <rule>Specs commits: only you commit <specs>, only with "nos specs commit". Subagents never run git against <specs>. Inside a run, after every ability returns: nos specs commit --run <run> -m "step-<id>: <ability>" (phase abilities: "phase-<id>: <ability>"). Outside a run (idea, plan, quick step creation): nos specs commit --domain <domain> -m "<ability>: <domain>" or "<ability>: <what>". Never --domain for a domain with a run file in <specs>/.runs: it would commit that run's spec edits; check first. Only <specs>/config.json changed (e.g. chat settings): nos specs commit --config -m "<ability>: <what>". Status changes are picked up by the next specs commit</rule>
     <rule>Code commits: develop, review-fixing, integrate and architect commit code and docs themselves in their cwd, subject prefix "step-<id>: ", "phase-<id>: " or "architect: " (colon included, matched exactly). Never a spec file</rule>
-    <rule>Exit codes of nos commands, react by the table <exitCodes></rule>
-    <rule>Chat in relay mode ("chat": { "runner": false }) and open → every report and question to the user also goes to the chat ("nos chat reply"), answers come back through "nos chat await". Keep an await running in the background whenever the turn ends. Default runner mode: the chat answers with its own Claude Code sessions, nothing to do here</rule>
-    <rule>Change statuses only with "nos set-status". Valid statuses: ./templates/status.xml. merged and discarded are set only by "nos run finish" and "nos run abandon"</rule>
-    <rule>If a subagent returns questions for the user, ask the user and send the answers back to the same subagent via SendMessage</rule>
-    <rule>Report to the user concisely in simple language. The user may not know the code or the feature</rule>
-    <rule>Every question with choices, also relayed from subagents: one choice per line, "<letter> - <choice text> [<key>]". Letters A, B, C… in choice order. The user answers with letter or key</rule>
-    <rule>"review-needed" missing in plan.json → true</rule>
-    <rule>Quick step: a single step without plan and phase in <specs>/<domain>/quick-steps/quick-steps.json. Its status changes with "nos set-status --domain --step" without --phase. Pass "quick step" and no phase id to every ability</rule>
-</rules>
-
-<exitCodes>
+    <rule>Exit codes of nos commands, react by the table <exitCodes>
     <code n="0">ok</code>
-    <code n="1">failed → park, report the error. Gate fail: the failing tools and their tail. Main busy or main dirty (finish): the details list</code>
+    <code n="1">failed → park, report the error. From "nos run finish" → cycle "finish" step2</code>
     <code n="2">usage → fix the call. Never guess around it</code>
-    <code n="3">rebase conflict (sync, finish) → run ability "integrate" with the run file and the conflict list. pass → nos specs commit, then repeat the same command. blocked (contradicting specs, gate fail) → park, report both specs it cites</code>
-    <code n="4|6">held by another token (4) or another run in the domain (6) → report the holder: run, age since "seen" or "taken" from the details
+    <code n="3">rebase conflict (sync, finish) → run ability "integrate" with the run file and the conflict list.
+        <do>pass → nos specs commit --run <run> -m "<run>: integrate", then repeat the same command</do>
+        <do>blocked → park, report both specs it cites
+            <question>The two specs contradict each other. How do you want to continue?
+                <choice key="DECIDE">Say which intent wins → rerun ability "integrate" with that decision (it overrides the contradiction), then repeat the command</choice>
+                <choice key="PAUSE">Pause → park choice PAUSE</choice>
+                <choice key="ABANDON">Drop the run → park choice ABANDON</choice>
+            </question>
+        </do>
+    </code>
+    <code n="4" from="run start">run held by another token → report holder and age ("seen" in the details)
         <question>The run is held by another session. How do you want to continue?
-            <choice key="TAKEOVER" when="4 from run start">Take the run over: repeat "nos run start" with --take-over. Only when the other session is gone</choice>
-            <choice key="SWITCH" when="6">Continue the running run of this domain instead → option "run" step2 with it</choice>
+            <choice key="TAKEOVER">Take the run over: repeat "nos run start" with --take-over. Only when the other session is gone</choice>
             <choice key="STOP">Stop here</choice>
         </question>
-        Lock held (finish: merge lock of another run) → park: another run is merging, retry later. Stale holder → tell the user: "nos lock release <name> --break" is their call, never yours</code>
-    <code n="5">dirty worktree → details list the files. Leftover work of the current step (its ability did not commit) → in <work>: git add -A, git commit -m "step-<id>: leftovers" (phase: "phase-<id>: leftovers"), repeat the command. Unclear origin → park, report the files</code>
+    </code>
+    <code n="4" from="run finish">merge lock held by another run → wait 60s (Monitor tool or sleep), repeat finish. Up to 10 times, then park and report holder and age. A stale holder is never broken by you: "nos lock release merge --break" is the user's call</code>
+    <code n="6">another run is active in the domain → report that run, holder and age
+        <question>Another run is active in this domain. How do you want to continue?
+            <choice key="SWITCH" when="plan start">Continue that run instead → option "run" step2 with it</choice>
+            <choice key="WAIT" when="quick step start">Stop now. Start this quick step via QUICK or RUN after that run is merged</choice>
+            <choice key="STOP">Stop here</choice>
+        </question>
+    </code>
+    <code n="5">dirty worktree → show the file list. Tracked modified files and untracked files named in the Task List or Dev Log of the current step (at finish: the last done step) → in <work>: git add -- <those files>, git commit -m "step-<id>: leftovers" (phase: "phase-<id>: leftovers"), repeat the command. Anything else (generated output, lockfile churn, env files, unknown) → park, report "add to .gitignore or delete". Never git add -A</code>
     <code n="7">no slot within slotWait → park, report: other runs hold every slot (e2e or dev server)</code>
 </exitCodes>
 
@@ -40,7 +46,7 @@
             <choice key="NO">Skip. Abilities that run quality checks will stop until setup ran</choice>
         </question>
     </check>
-    <check>inWorktree true and this session holds the run of that worktree → option "run" step2 with that run</check>
+    <check>inWorktree true → the run whose "worktree" in <specs>/.runs/*.json is <work> → option "run" step2 with that run</check>
     <question>What do you want to do?
         <choice key="IDEA">Document an idea</choice>
         <choice key="PLAN">Create a plan from an idea</choice>
@@ -53,8 +59,8 @@
 </start>
 
 <option name="setup">
-    <step1>Inside a worktree → ExitWorktree (keep) first. Run ability "setup"</step1>
-    <step2>Report the configured quality tools, project commands and slots</step2>
+    <step1>Inside a worktree → ExitWorktree action=keep first. Run ability "setup"</step1>
+    <step2>Setup changed <specs>/config.json (chat) → nos specs commit --config -m "setup: chat". Report the configured quality tools, project commands and slots</step2>
 </option>
 
 <option name="chat">
@@ -76,14 +82,14 @@
 </option>
 
 <option name="quick">
-    <step1>Quick steps in <specs>/domain-*/quick-steps/quick-steps.json with status not done, merged or discarded →
+    <step1>Quick steps in <specs>/domain-*/quick-steps/quick-steps.json with status not done, merged or discarded, or with a run file in <specs>/.runs →
         <question>Continue a quick step or create a new one?
-            <choice key="step id">One choice per such quick step: domain name, intent, status, "running" when <specs>/.runs/quick-<id>.json exists → option "run" step2 with this quick step</choice>
+            <choice key="step id">One choice per such quick step: domain name, intent, status, "running" when <specs>/.runs/quick-<id>.json exists ("cleanup pending" when its phase is merged or abandoned) → option "run" step2 with this quick step</choice>
             <choice key="NEW">Create a new quick step</choice>
         </question>
     </step1>
     <step2>NEW or no quick step open → run ability "quick-step" with the intent if the user already gave one. It asks the user for the intent first. Relay all its questions to the user and the answers back</step2>
-    <step3>nos specs commit --domain <domain> -m "quick-step: step-<id>". Report the domain (new or existing) and the quick step. Mode = the returned pipeline mode</step3>
+    <step3>nos specs commit --domain <domain> -m "quick-step: step-<id>" (domain has a run file in <specs>/.runs → skip it, that run's next specs commit picks it up). Report the domain (new or existing) and the quick step. Mode = the returned pipeline mode</step3>
     <step4>Option "run" step2 with the domain, the quick step and the mode</step4>
 </option>
 
@@ -130,15 +136,16 @@
 <option name="run">
     <step1>No target given →
         <question>Which plan or quick step should run?
-            <choice key="domain id">One choice per plan in <specs>/domain-*/plan.json with at least one phase and status not done, merged or discarded: plan name and status. <specs>/.runs/plan-<domain id>.json exists → add "running", its phase and age; done plans with a run file are listed too (not integrated yet)</choice>
-            <choice key="step id">One choice per quick step in <specs>/domain-*/quick-steps/quick-steps.json with status not done, merged or discarded: "<domain name> › Quick › <intent>" and status. <specs>/.runs/quick-<id>.json exists → add "running"; done ones with a run file are listed too</choice>
+            <choice key="domain id">One choice per plan in <specs>/domain-*/plan.json with at least one phase and status not done, merged or discarded, plus every plan with a run file <specs>/.runs/plan-<domain id>.json whatever its status: plan name and status. Run file → add "running", its phase and age; phase merged or abandoned → "cleanup pending"</choice>
+            <choice key="step id">One choice per quick step in <specs>/domain-*/quick-steps/quick-steps.json with status not done, merged or discarded, plus every quick step with a run file <specs>/.runs/quick-<id>.json: "<domain name> › Quick › <intent>" and status. Run file → add "running" and its phase; merged or abandoned → "cleanup pending"</choice>
         </question>
     </step1>
     <step2>Enter the run:
-        <do>Already inside its worktree (nos roots: work = the run's worktree) → skip to the rebase check</do>
-        <do>Otherwise: nos run start --domain <domain> --plan, or --quick <step id>. Add --token <token> when this session holds one. Exit 4|6 → exit code table. Keep "token" from the output. Install failure in the output → report it, continue</do>
-        <do>EnterWorktree path=<enter>. nos roots → home, work (= the worktree), specs. Read "mainBranch" from <specs>/.runs/<run>.json</do>
-        <do>Rebase check: a rebase is in progress in <work> (git status says so) → run ability "integrate" first, then nos run sync --token <token></do>
+        <do>Cleanup pending (status merged or discarded, run file phase merged or abandoned) → inside its worktree: ExitWorktree action=keep. nos run cleanup --token <token> (no token → TAKEOVER question of exit code 4 first, to get one). nos roots. Report. End</do>
+        <do>Inside the worktree of a different run → ExitWorktree action=keep, nos roots</do>
+        <do>Inside its worktree and this session holds its token → no run start. Otherwise → nos run start --domain <domain> --plan, or --quick <step id>, with --token <token> when this session holds one. Exit 4|6 → exit code table. Keep "token" from the output. Install failure in the output → report it, continue. Not inside yet → EnterWorktree path=<enter></do>
+        <do>Always: nos roots → home, work (= the worktree), specs. Read the run file <specs>/.runs/<run>.json: run id, mainBranch, base</do>
+        <do>Rebase check: in <work> "git rev-parse -q --verify REBASE_HEAD" succeeds → run ability "integrate" first, then nos run sync --token <token> → exit code table</do>
     </step2>
     <step3>Mode given (e.g. by quick-step) → skip
         <question>How should the plan run?
@@ -146,7 +153,7 @@
             <choice key="MANUAL">Stops after each specification, implementation and review for your go</choice>
         </question>
     </step3>
-    <entry>Quick step → status done → cycle "finish". Otherwise cycle "step" with the domain and the quick step, then cycle "finish" (automatic, no question). Plan → read the plan status. open or on-hold → step4. in-progress → step5. done → step6</entry>
+    <entry>Status merged or discarded → handled in step2 (cleanup pending). Quick step → status done → cycle "finish". Otherwise cycle "step" with the domain and the quick step, then cycle "finish" (automatic, no question). Plan → read the plan status. open or on-hold → step4. in-progress → step5. done → step6</entry>
     <step4>
         <status target="plan" from="open|on-hold" to="in-progress"/>
     </step4>
@@ -165,9 +172,20 @@
 </option>
 
 <cycle name="finish">
-    <step1>nos run finish --token <token>. It locks, checks main, syncs, runs the full gate (e2e included when configured) and merges ff-only. Exit 3 → integrate, then repeat step1. Other codes → exit code table</step1>
-    <step2>Merged → ExitWorktree (keep). nos run cleanup --token <token>. nos roots. Report: merged into <mainBranch>, worktree and branch removed</step2>
-    <step3>Cleanup refused (a process holds the folder, e.g. a dev server) → report it. Repeat "nos run cleanup --token <token>" after the user stopped it</step3>
+    <step1>nos run finish --token <token>. It locks, checks main, syncs, runs the full gate (e2e included when configured) and merges ff-only. Exit 0 → step3. Exit 1 → step2. Other codes → exit code table (3: integrate, then repeat step1; 4: wait for the merge lock)</step1>
+    <step2>Exit 1:
+        <do>Gate fail (gate JSON in the details) → park, report the failing tools and their tails
+            <question>The gate failed while integrating. How do you want to continue?
+                <choice key="FIX">Run ability "develop" (resume) for the last done step with the failing tools and tails as feedback. It commits "step-<id>: gate fix". nos specs commit --run <run> -m "step-<id>: gate fix". Repeat step1</choice>
+                <choice key="PAUSE">Pause → park choice PAUSE</choice>
+                <choice key="ABANDON">Drop the run → park choice ABANDON</choice>
+            </question>
+        </do>
+        <do>Main busy or main dirty → park, report the details list. GO → repeat step1 after the user cleaned main</do>
+        <do>Other → park, report the error</do>
+    </step2>
+    <step3>Merged → ExitWorktree action=keep. nos run cleanup --token <token>. nos roots. Report: merged into <mainBranch>, worktree and branch removed</step3>
+    <step4>Cleanup refused (a process holds the folder, e.g. a dev server) → report it. Repeat "nos run cleanup --token <token>" after the user stopped it</step4>
 </cycle>
 
 <cycle name="phase">
@@ -241,7 +259,7 @@
 </cycle>
 
 <park>
-    <step1>Stop. Report target, status and reason. Specified → summarize the description and ACs in simple words. Human validation → explain in simple steps how the user verifies. No review ran → derive the steps from the ACs of the step or of the phase's steps</step1>
+    <step1>Stop. Report run id and token, target, status and reason. Specified → summarize the description and ACs in simple words. Human validation → explain in simple steps how the user verifies. No review ran → derive the steps from the ACs of the step or of the phase's steps</step1>
     <step2>
         <question>How do you want to continue?
             <choice key="GO">Continue with the next step of the cycle</choice>
@@ -260,10 +278,10 @@
             </choice>
             <choice key="PAUSE">Pause the plan or quick step
                 <status target="plan" from="in-progress" to="on-hold" when="not a quick step"/>
-                <do>ExitWorktree (keep). End. The run, its worktree and branch stay. A quick step keeps its status and continues via QUICK or RUN</do>
+                <do>nos specs commit --run <run> -m "<run>: pause". ExitWorktree action=keep. End. The run, its worktree and branch stay. A quick step keeps its status and continues via QUICK or RUN</do>
             </choice>
             <choice key="ABANDON">Drop the plan or quick step: its branch and worktree are deleted, the specs stay as history with status discarded
-                <do>Ask YES/NO to confirm. YES → ExitWorktree (keep). nos run abandon --token <token>. nos roots. Report</do>
+                <do>Ask YES/NO to confirm. YES → ExitWorktree action=keep. nos run abandon --token <token>. nos roots. Report. Its cleanup part fails (e.g. a dev server holds the folder) → report it, repeat "nos run cleanup --token <token>" after the user stopped it</do>
             </choice>
         </question>
     </step2>
@@ -272,6 +290,6 @@
 <resume>
     <rule>A run can be interrupted anytime (limits, shutdown). Never reset a status on resume</rule>
     <rule>Read the target status in plan.json, quick step: in quick-steps.json. open → step1. done → skip the cycle. Otherwise → the step with resume-at = status: skip its status change, run its actions and parks</rule>
-    <rule>Resumed session already inside a run's worktree → no run start. A rebase is in progress there → run ability "integrate" first</rule>
+    <rule>Resumed session already inside a run's worktree → option "run" step2: no run start when it holds the token, always nos roots and the run file, rebase in progress → integrate first</rule>
     <rule>Tell a rerun ability that it resumes interrupted work</rule>
 </resume>
