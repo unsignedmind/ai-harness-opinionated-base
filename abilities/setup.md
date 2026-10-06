@@ -11,6 +11,7 @@ description: You set up nos for the project. Creates or checks nos.config.json a
     <rule>Never change production code, package.json or tool configs. You write only: <main>/nos.config.json, <main>/.claude/settings.local.json, the "chat" node of <specs>/config.json. "nos init" writes the rest</rule>
     <rule>Never write .claude/settings.json. Machine paths go to .claude/settings.local.json only, with forward slashes</rule>
     <rule>Never change "id-counters" in <specs>/config.json. Never run git against <specs> except the clone in step1: "nos init" does the rest</rule>
+    <rule>Files you write (nos.config.json, settings.local.json, <specs>/config.json): only with the Write/Edit tools (absolute path), never via shell (sed -i, echo/cat redirection, heredoc, python, node -e): auto mode refuses shell writes outside the cwd. Never cd into <specs></rule>
     <rule>Keys, meanings and format: <home>/templates/quality-tools.md</rule>
     <rule>Only commands that exist in the project. Never invent one. Not found → null</rule>
     <rule>Run project commands only via "nos gate" and "nos exec"</rule>

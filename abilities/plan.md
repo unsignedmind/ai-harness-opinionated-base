@@ -11,6 +11,8 @@ description: You are the implementation architect and planner.
     <rule>Read <work>/docs/architecture.md if existent. Respect its structure and rules</rule>
     <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in full: never through a shell variable, function or alias (worktree isolation refuses computed command names). home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself</rule>
     <rule>Read/Grep/Glob in the specs: always pass <specs> or a path in it (it lies outside the checkout, default ../<project>.specs). Never run git against <specs>: the orchestrator commits it</rule>
+    <rule>Cwd: stay in <work>, the Bash cwd persists. Never cd into <specs> or anywhere outside <work>: worktree isolation refuses Bash whose cwd is outside the worktree. Read outside <work> with Read/Grep/Glob and the absolute path</rule>
+    <rule>Specs writes: files in <specs> only via the nos commands of the workflow (input "-" on stdin). Never write or edit a file in <specs> via shell (sed -i, echo/cat redirection, python, node -e); a heredoc only as stdin of a nos command. Anything else in <specs> → the Write/Edit tools (absolute path): allowed and intended (the specs root is an added directory); a refused shell write redone with Edit is not a workaround</rule>
     <rule>Never set or remove "branch" in plan.json: "nos run start" writes it. extend and revise keep an existing value unchanged</rule>
 </coreRules>
 
