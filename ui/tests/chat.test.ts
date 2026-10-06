@@ -675,3 +675,11 @@ test('renderTabs shows the run of a tab next to its title, escaped', () => {
   expect(withRun.querySelector('b')).toBeNull();
   expect(without.querySelector('.run-tag')).toBeNull();
 });
+
+test('contextOf uses the specs root of the model, also a non-default one', () => {
+  const m = buildModel(fixtureFiles(), [], 'plans/specs');
+  expect(contextOf(m, parseRoute('#domains/dark-mode'))?.path).toBe('plans/specs/domain-2-dark-mode/');
+  expect(contextOf(m, parseRoute('#domains/dark-mode/tokens/extract-tokens'))?.path).toBe(
+    'plans/specs/domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md',
+  );
+});

@@ -259,3 +259,26 @@ test('invalid quick-steps.json shows as an error on the idea', () => {
   expect(m.ideas[0].error).toMatch(/^quick-steps\.json: /);
   expect(m.ideas[0].quickSteps).toStrictEqual([]);
 });
+
+test('a plan run joins by its id (= the domain id) even when its domain field differs', () => {
+  const plan = run({ kind: 'plan', id: 2, domain: 'domain-2-renamed', branch: 'plan-2' });
+  const m = buildModel(quickFixtureFiles(), [plan]);
+  expect(m.ideas[1].run).toBe(plan);
+  expect(m.ideas[0].run).toBeNull();
+});
+
+test('a quick run joins only a step whose id comes from its spec-file, never the list position', () => {
+  const files = quickFixtureFiles();
+  const quick = JSON.parse(files['domain-2-dark-mode/quick-steps/quick-steps.json']);
+  quick[0]['spec-file'] = '';
+  files['domain-2-dark-mode/quick-steps/quick-steps.json'] = JSON.stringify(quick);
+  // the step falls back to number 1 (its position): a quick-1 run must not land on it
+  const m = buildModel(files, [run({ id: 1 })]);
+  expect(m.ideas[1].quickSteps[0].number).toBe(1);
+  expect(m.ideas[1].quickSteps[0].run).toBeNull();
+});
+
+test('specsRel defaults to .specs and is carried as given', () => {
+  expect(buildModel({}).specsRel).toBe('.specs');
+  expect(buildModel({}, [], 'plans/specs').specsRel).toBe('plans/specs');
+});

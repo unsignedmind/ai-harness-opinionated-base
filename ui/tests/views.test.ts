@@ -8,7 +8,7 @@ import { renderBoard } from '../src/views/board';
 import { renderExplore, type ExploreUi } from '../src/views/explore';
 import { SUGGEST_MAX, filterBar, suggestions } from '../src/views/filterbar';
 import { branchBadge, pill, runBadge } from '../src/views/parts';
-import type { Run } from '../src/runs';
+import { parseRuns, runsKey, type Run } from '../src/runs';
 import { normStatus } from '../src/status';
 import { fixtureFiles, quickFixtureFiles } from './fixtures';
 
@@ -345,7 +345,7 @@ const run = (over: Partial<Run> = {}): Run => ({
   domain: 'domain-2-dark-mode',
   branch: 'quick-4',
   phase: 'develop',
-  seen: '2026-10-06T10:00:00Z',
+  seen: new Date(Date.now() - 125_000).toISOString(),
   ageSec: 125,
   worktree: 'D:/p/.claude/worktrees/quick-4',
   ahead: 3,
@@ -449,4 +449,76 @@ test('merged and discarded render as plain pills without the ⚠ flag', () => {
   const asked = mount(renderBoard(m, f({ statuses: ['discarded'] })));
   expect(asked.querySelector('.col[data-status="discarded"] .kcard')).not.toBeNull();
   expect(asked.querySelector('.col[data-status="discarded"] .pill.flagged')).toBeNull();
+});
+
+test('a stale run is greyed and does not pulse; a merged or abandoned run awaits cleanup', () => {
+  const stale = mount(runBadge(run({ seen: new Date(Date.now() - 3 * 3600_000).toISOString() })));
+  expect(stale.querySelector('.run.stale .dot.stale')).not.toBeNull();
+  expect(stale.querySelector('.dot.running')).toBeNull();
+  expect(stale.querySelector('.run')!.getAttribute('title')).toMatch(
+    /^stale: quick-4, phase develop, last seen 3h ago/,
+  );
+  for (const phase of ['merged', 'abandoned']) {
+    const done = mount(runBadge(run({ phase, seen: new Date(Date.now() - 5 * 3600_000).toISOString() })));
+    expect(done.querySelector('.run.cleanup .dot.cleanup')).not.toBeNull();
+    expect(done.querySelector('.dot.running, .dot.stale')).toBeNull();
+    expect(done.textContent).toContain(`${phase}, awaiting cleanup`);
+  }
+});
+
+test('the age comes from seen at render time, not from the server ageSec', () => {
+  const root = mount(runBadge(run({ ageSec: 99999, seen: new Date(Date.now() - 30_000).toISOString() })));
+  expect(root.querySelector('.run')!.getAttribute('title')).toContain('last seen 30s ago');
+});
+
+test('a non-default specs dir shows in folder and spec file rows', () => {
+  const m = buildModel(quickFixtureFiles(), [], 'plans/specs');
+  const idea = mount(renderExplore(m, parseRoute('#domains/dark-mode'), ui()));
+  expect(idea.querySelector('dl.meta')!.textContent).toContain('plans/specs/domain-2-dark-mode/');
+  const step = mount(renderExplore(m, parseRoute('#domains/dark-mode/quick-steps/fix-contrast'), ui()));
+  expect(step.querySelector('dl.meta')!.textContent).toContain(
+    'plans/specs/domain-2-dark-mode/quick-steps/step-4-fix-contrast.md',
+  );
+});
+
+test('backlog: the all tile counts the default view, a discarded tile shows only when there are any', () => {
+  const files = quickFixtureFiles();
+  const before = mount(renderBacklog(buildModel(files), f()));
+  expect(before.querySelector('.stat[data-status="discarded"]')).toBeNull();
+  expect(before.querySelector('.stat.all')!.getAttribute('title')).toBeNull();
+  const plan = JSON.parse(files['domain-2-dark-mode/plan.json']);
+  plan.phases[0].steps[0].status = 'discarded';
+  files['domain-2-dark-mode/plan.json'] = JSON.stringify(plan);
+  const m = buildModel(files);
+  const after = mount(renderBacklog(m, f()));
+  expect(after.querySelector('.stat[data-status="discarded"] b')?.textContent).toBe('1');
+  expect(after.querySelector('.stat.all b')?.textContent).toBe(String(m.steps.length - 1));
+  expect(after.querySelector('.stat.all')!.getAttribute('title')).toBe('without discarded (1)');
+  expect(after.querySelectorAll('tbody tr')).toHaveLength(m.steps.length - 1);
+});
+
+test('parseRuns drops what is no run and coerces numbers; runsKey ignores the age', () => {
+  const runs = parseRuns([
+    { kind: 'quick', id: 4, domain: 'd', ahead: 2.7, behind: '3', ageSec: -5, dirty: 'yes', seen: 7, error: '' },
+    { kind: 'other', id: 1, domain: 'd' },
+    { kind: 'plan', id: 1.5, domain: 'd' },
+    null,
+  ]);
+  expect(runs).toStrictEqual([
+    {
+      kind: 'quick',
+      id: 4,
+      domain: 'd',
+      branch: '',
+      phase: '',
+      seen: null,
+      ageSec: 0,
+      worktree: '',
+      ahead: 2,
+      behind: null,
+      dirty: null,
+    },
+  ]);
+  expect(runsKey([run({ ageSec: 1 })])).toBe(runsKey([run({ ageSec: 500 })]));
+  expect(runsKey([run({ ahead: 1 })])).not.toBe(runsKey([run({ ahead: 2 })]));
 });

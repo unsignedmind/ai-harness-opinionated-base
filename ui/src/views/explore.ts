@@ -2,8 +2,8 @@
 // boards on the right. Domains shows domains with a plan, Ideas the ones without; cross-cutting
 // domains are grouped on both.
 import { esc, inline, renderMd } from '../markdown';
-import { isMatured, type Idea, type Model, type Phase, type Step } from '../model';
-import { age } from '../runs';
+import { isMatured, specsPathOf, type Idea, type Model, type Phase, type Step } from '../model';
+import { age, ageOf } from '../runs';
 import { hrefOf, hrefOfQuick, QUICK_SEGMENT, type Route } from '../route';
 import { askButtons } from './chat';
 import { kanban } from './kanban';
@@ -29,12 +29,14 @@ import {
 // `canPick`: standalone viewer, data comes from a folder the user picks (undefined on the dev server).
 // `canPromote`: the host can write the specs (dev server), so Ideas offer "Manual promote".
 // `canChat`: the chat with the project's Claude Code session is there (dev server): "Ask Claude".
+// `specsRel`: the specs root as the project sees it (model.specsRel, e.g. .specs), set per render.
 export type ExploreUi = {
   expanded: Set<string>;
   tabs: Record<string, string>;
   canPick?: boolean;
   canPromote?: boolean;
   canChat?: boolean;
+  specsRel?: string;
 };
 
 const ask = (ui: ExploreUi, kinds: Parameters<typeof askButtons>[0]) => (ui.canChat ? askButtons(kinds) : '');
@@ -82,8 +84,8 @@ function scopeOf(model: Model, r: Route): Scope {
 // [regular, cross-cutting]
 const byGroup = (domains: Idea[]) => [domains.filter((i) => !i.crossCutting), domains.filter((i) => i.crossCutting)];
 
-// the folder of a domain as the project sees it (the specs root is .specs/ unless nos.config.json says else)
-const specsPath = (rel: string) => `.specs/${rel}`;
+// a path relative to the specs root as the project sees it (<specsRel>/<rel>)
+const specsPath = (ui: ExploreUi, rel: string) => specsPathOf(ui.specsRel, rel);
 
 // a running dot in the tree: plan steps share the plan's run, shown once on the domain
 const runTail = (run: Step['run']) => (run ? `<span class="tail-run">${runDot(run)}</span>` : '');
@@ -209,7 +211,7 @@ function promote(i: Idea, ui: ExploreUi) {
 }
 
 // meta rows of a running plan or quick step; no merge button: finishing a run needs a session (nos run finish)
-function runRows(run: Step['run']) {
+function runRows(run: Step['run'], now = Date.now()) {
   if (!run) return '';
   const ab =
     run.ahead == null || run.behind == null
@@ -217,7 +219,7 @@ function runRows(run: Step['run']) {
       : `${run.ahead} ahead, ${run.behind} behind main`;
   return `<dt>Run</dt><dd>${runBadge(run)}</dd>
       <dt>Main</dt><dd>${ab}${run.dirty ? ' · <span class="hvn">uncommitted changes</span>' : ''}</dd>
-      <dt>Seen</dt><dd>${esc(age(run.ageSec))} ago</dd>
+      <dt>Seen</dt><dd>${esc(age(ageOf(run, now)))} ago</dd>
       ${run.worktree ? `<dt>Worktree</dt><dd class="mono">${esc(run.worktree)}</dd>` : ''}
       ${run.error ? `<dt>Git</dt><dd class="error">${esc(run.error)}</dd>` : ''}`;
 }
@@ -236,7 +238,7 @@ function ideaDetail(i: Idea, ui: ExploreUi, root: Crumb) {
       ${i.steps.length ? `<dt>Steps</dt><dd>${rollup(i.steps)}</dd>` : ''}
       ${i.branch ? `<dt>Branch</dt><dd>${branchBadge(i.branch)}</dd>` : ''}
       ${runRows(i.run)}
-      <dt>Folder</dt><dd class="mono">${esc(specsPath(i.folder))}/</dd>
+      <dt>Folder</dt><dd class="mono">${esc(specsPath(ui, i.folder))}/</dd>
     </dl>
     ${i.intent ? `<p>${inline(i.intent)}</p>` : ''}
     ${subtabs(ui, 'idea', {
@@ -278,7 +280,7 @@ function quickDetail(i: Idea, ui: ExploreUi, root: Crumb) {
   return (
     crumbs(root, [i.title, hrefOf(i)], ['Quick steps']) +
     `<h1>Quick steps ${quickBadge(true)}</h1>
-    <p class="muted">Single steps outside the plan, in <code>${esc(specsPath(i.folder))}/quick-steps/</code>.</p>
+    <p class="muted">Single steps outside the plan, in <code>${esc(specsPath(ui, i.folder))}/quick-steps/</code>.</p>
     <div class="row">${rollup(i.quickSteps)}</div>
     ${ask(ui, ['discuss'])}
     ${subtabs(ui, 'quick', {
@@ -301,7 +303,7 @@ function stepDetail(s: Step, ui: ExploreUi, root: Crumb) {
     <dl class="meta">
       <dt>Progress</dt><dd>${progressText('AC', s.ac, 'ac') || '<span class="muted">no AC</span>'} ${progressText('Tasks', s.tasks, 'tasks')}</dd>
       <dt>Human check</dt><dd>${s.hvn ? hvnBadge(true) : 'no'}</dd>
-      <dt>Spec file</dt><dd class="mono">${s.specPath ? esc(specsPath(s.specPath)) : '—'}</dd>
+      <dt>Spec file</dt><dd class="mono">${s.specPath ? esc(specsPath(ui, s.specPath)) : '—'}</dd>
       ${s.branch ? `<dt>Branch</dt><dd>${branchBadge(s.branch)}</dd>` : ''}
       ${runRows(s.run)}
     </dl>
@@ -315,7 +317,8 @@ function stepDetail(s: Step, ui: ExploreUi, root: Crumb) {
 const notFound = (what: string, scope: Scope) =>
   `<h1>Not found</h1><p class="muted">${esc(what)} does not exist (anymore).</p><p><a href="${scope.href}">Back to ${scope.label.toLowerCase()}</a></p>`;
 
-export function renderExplore(model: Model, r: Route, ui: ExploreUi): string {
+export function renderExplore(model: Model, r: Route, explore: ExploreUi): string {
+  const ui: ExploreUi = { ...explore, specsRel: model.specsRel };
   const scope = scopeOf(model, r);
   const root: Crumb = [scope.label, scope.href];
   const idea = r.idea ? scope.domains.find((i) => i.slug === r.idea) : undefined;

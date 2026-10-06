@@ -698,7 +698,7 @@ during the fix phase review. Which statuses are set, and where does it resume?
 
 **Without a server (standalone):**
 1. Open `.claude/skills/nos/ui/index.html` straight from disk in Chrome or Edge. These browsers support the File System Access API.
-2. Click **Open folder…** and pick the repo root (or `.specs/`, then Docs stays empty).
+2. Click **Open the project folder** and pick the project root (or `.specs/`, then Docs stays empty).
 3. The folder is remembered, so the next visit takes one click (**Reopen**). **↻ Reload** reads the folder again.
 
 **With live reload (dev server):**
@@ -708,6 +708,16 @@ npm install      # once
 npm run dev           # or: npm run dev-to-lan
 ```
 This serves `dev.html` on http://localhost:5180. The server reads `.specs/` and the docs folder from disk and the page fetches them (`/__specs`, `/__docs`). When a spec or doc changes the page refreshes by itself; **↻ Reload** fetches again. It is handy for watching a run in AUTO mode.
+
+The dev server finds the project with the nos resolver: it walks up from `ui/` to the first `nos.config.json`. Not set up yet → the page says "nos is not set up … run nos init". Environment:
+
+| Variable | Effect |
+| --- | --- |
+| `NOS_SPECS_ROOT=<project>` | serve another project than the one nos sits in (also turns the browser auto-open off) |
+| `NOS_UI_OPEN=0` / `1` | never / always open `dev.html` in the browser on start (default: open, except under `NOS_SPECS_ROOT`, vitest or CI) |
+| `NOS_CHAT_PORT` | port of the chat server the dev server (re)starts |
+
+Runs (`nos run start`) show live: `/__runs` lists `.specs/.runs/*.json` with ahead/behind main and a dirty worktree. A chat tab working in a run shows its id (`quick-7`). Domains, quick steps and cards get a dot: pulsing = running, grey = stale (not seen for 2h), green = merged/abandoned, awaiting `nos run cleanup`. Statuses `merged` and `discarded` have their own pills; Board and Backlog hide `discarded` unless the status filter asks for it.
 
 `npm run dev-to-lan` does the same, but also listens on the network. Other devices open the printed `Network` URL (`http://<host-ip>:5180/`) and see the host's `.specs/` without picking a folder. Windows may ask to let Node through the firewall.
 

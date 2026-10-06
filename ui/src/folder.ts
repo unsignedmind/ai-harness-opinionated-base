@@ -46,10 +46,12 @@ const setting = (cfg: Record<string, unknown>, section: string, key: string) => 
   return typeof v === 'string' && v.trim() ? v.trim() : null;
 };
 
-// "a/b" -> ['a', 'b']; null for an empty path or one that leaves the folder
-function segments(path: string): string[] | null {
+// "a/b" -> ['a', 'b']; null for an empty path or one that leaves the folder. hidden: segments may
+// start with "." (the specs root .specs), else such a segment (.git, .specs, ..) is refused
+function segments(path: string, hidden = false): string[] | null {
   const parts = path.split(/[\\/]/).filter((p) => p && p !== '.');
-  return parts.length && !parts.includes('..') && !/^[A-Za-z]:$/.test(parts[0]) ? parts : null;
+  if (!parts.length || parts.includes('..') || /^[A-Za-z]:$/.test(parts[0])) return null;
+  return hidden || parts.every((p) => !p.startsWith('.')) ? parts : null;
 }
 
 async function descend(dir: DirLike, parts: string[]): Promise<DirLike | null> {
@@ -63,20 +65,21 @@ async function descend(dir: DirLike, parts: string[]): Promise<DirLike | null> {
 
 // The specs root and the project folder it sits in (null when the specs root itself was picked).
 // The project folder is the one with nos.config.json; its "specs" -> "dir" names the specs root.
-export async function locateSpecs(picked: DirLike): Promise<{ specs: DirLike; root: DirLike | null }> {
+// rel: the specs root relative to the project folder (".specs"); its own name when picked alone.
+export async function locateSpecs(picked: DirLike): Promise<{ specs: DirLike; root: DirLike | null; rel: string }> {
   const kids = await children(picked);
-  if (kids.some(isDomain)) return { specs: picked, root: null };
+  if (kids.some(isDomain)) return { specs: picked, root: null, rel: picked.name };
   if (fileIn(kids, PROJECT_CONFIG_FILE)) {
     const dir = setting(await projectConfig(picked), 'specs', 'dir') ?? DEFAULT_SPECS_DIR;
-    const parts = segments(dir);
+    const parts = segments(dir, true);
     const specs = parts && (await descend(picked, parts));
-    if (specs) return { specs, root: picked };
+    if (specs) return { specs, root: picked, rel: parts.join('/') };
     throw new Error(`"${picked.name}/" has no ${dir}/ folder: run nos init there, or pick the specs folder itself.`);
   }
   const specs = kids.find((h): h is DirLike => h.kind === 'directory' && h.name === DEFAULT_SPECS_DIR);
-  if (specs) return { specs, root: picked };
+  if (specs) return { specs, root: picked, rel: DEFAULT_SPECS_DIR };
   // a specs root without any domain yet
-  if (picked.name === DEFAULT_SPECS_DIR) return { specs: picked, root: null };
+  if (picked.name === DEFAULT_SPECS_DIR) return { specs: picked, root: null, rel: picked.name };
   throw new Error(
     `"${picked.name}/" has no domain-* folders and no ${PROJECT_CONFIG_FILE}: pick the project folder or its ${DEFAULT_SPECS_DIR}/ folder.`,
   );
@@ -145,7 +148,7 @@ export async function readDocs(specs: DirLike, root: DirLike | null): Promise<Do
     return {
       folder: docsSetting,
       files: {},
-      error: `"docs-folder" in ${PROJECT_CONFIG_FILE} must name a folder inside the project, not "${docsSetting}".`,
+      error: `"docs-folder" in ${PROJECT_CONFIG_FILE} must name a folder inside the project (no part starting with "."), not "${docsSetting}".`,
     };
   const folder = parts.join('/');
   const dir = await descend(root, parts);

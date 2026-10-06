@@ -413,6 +413,24 @@ main {
     animation: none;
   }
 }
+/* active but not seen for hours: the holder may be gone */
+.dot.stale {
+  background: var(--discarded);
+  box-shadow: 0 0 0 2px var(--discarded-bg);
+}
+.run.stale {
+  border-color: var(--discarded);
+  color: var(--discarded);
+}
+/* merged or abandoned: only nos run cleanup is left */
+.dot.cleanup {
+  background: var(--merged);
+  box-shadow: 0 0 0 2px var(--merged-bg);
+}
+.run.cleanup {
+  border-color: var(--merged);
+  color: var(--merged);
+}
 .node .tail-run {
   display: inline-flex;
   align-items: center;

@@ -1,20 +1,24 @@
 // Entry of the live viewer (dev.html). The dev server reads the specs root (.specs/), the runs and the
 // docs folder on the host (src/serve-specs.ts), so every device on the network sees the same data.
-// Reload fetches again; a change under any of them on the host refreshes by itself. While runs exist
-// they are fetched again every 15s too: ahead/behind and dirty change without a file event in .specs. The chat panel (src/chat.ts) talks to the
-// project's Claude Code session through the same dev server.
+// Reload fetches again; a change under any of them on the host refreshes by itself. While a run is
+// active the runs are fetched again every 15s too: ahead/behind and dirty change without a file event
+// in .specs. A poll that brings nothing new does not re-render. The chat panel (src/chat.ts) talks to
+// the project's Claude Code session through the same dev server.
 import { mountApp } from './app';
 import { mountChat } from './chat';
 import { buildDocs } from './docs';
 import { esc } from './markdown';
-import { buildModel } from './model';
+import { buildModel, DEFAULT_SPECS_REL } from './model';
 import { parseRoute } from './route';
-import { parseRuns, type Run } from './runs';
+import { isActive, parseRuns, runsKey, type Run } from './runs';
 import { askPrompt, contextOf, type AskKind } from './views/chat';
 
 let model = buildModel({});
 let specs: Record<string, string> = {};
+let specsRel = DEFAULT_SPECS_REL;
 let runs: Run[] = [];
+let shownRuns = '';
+let runsLoading: Promise<void> | null = null;
 const RUNS_POLL_MS = 15000;
 let poll: ReturnType<typeof setInterval> | null = null;
 const context = () => contextOf(model, parseRoute(location.hash));
@@ -44,11 +48,13 @@ async function get(url: string) {
 const getRuns = () => get('/__runs').then(parseRuns, () => [] as Run[]);
 
 function show() {
-  model = buildModel(specs, runs);
+  model = buildModel(specs, runs, specsRel);
+  shownRuns = runsKey(runs);
   app.setModel(model);
-  // poll only while something runs
-  if (runs.length && !poll) poll = setInterval(() => void refreshRuns(), RUNS_POLL_MS);
-  else if (!runs.length && poll) {
+  // poll only while a run is active (merged/abandoned only wait for their cleanup)
+  const active = runs.some(isActive);
+  if (active && !poll) poll = setInterval(() => void refreshRuns(), RUNS_POLL_MS);
+  else if (!active && poll) {
     clearInterval(poll);
     poll = null;
   }
@@ -57,7 +63,8 @@ function show() {
 async function refresh() {
   try {
     const [s, docs, r] = await Promise.all([get('/__specs'), get('/__docs'), getRuns()]);
-    specs = s;
+    specs = s?.files ?? {};
+    specsRel = typeof s?.specsRel === 'string' && s.specsRel ? s.specsRel : DEFAULT_SPECS_REL;
     runs = r;
     show();
     app.setDocs(buildDocs(docs));
@@ -68,9 +75,17 @@ async function refresh() {
   }
 }
 
-async function refreshRuns() {
-  runs = await getRuns();
-  show();
+// one fetch at a time; nothing new -> no re-render (the age shown is computed from seen anyway)
+function refreshRuns() {
+  runsLoading ??= getRuns()
+    .then((r) => {
+      runs = r;
+      if (runsKey(r) !== shownRuns) show();
+    })
+    .finally(() => {
+      runsLoading = null;
+    });
+  return runsLoading;
 }
 
 // Manual promote: the host runs `nos create-plan --hollow`, then the idea shows under Domains

@@ -10,8 +10,8 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { writeRun } from '../../cli/src/runs.js';
 import { buildModel } from '../src/model';
 import { parseRuns, type Run } from '../src/runs';
-import { listRunViews, runsHandler } from '../src/serve-runs';
-import { nodeDir, serveSpecs, specsEvent, specsSetup } from '../src/serve-specs';
+import { isBranchName, listRunViews, runsHandler, runsScanner, runView } from '../src/serve-runs';
+import { nodeDir, openBrowser, serveSpecs, specsEvent, specsRelOf, specsSetup } from '../src/serve-specs';
 import { readSpecsFolder } from '../src/folder';
 
 const CLI = resolve('../cli/bin/nos.js');
@@ -118,8 +118,8 @@ afterAll(() => {
 
 const byId = (runs: Run[]) => Object.fromEntries(runs.map((r) => [`${r.kind}-${r.id}`, r]));
 
-test('every run file is listed with ahead/behind main, dirty and age; never the token', () => {
-  const runs = byId(listRunViews(roots()));
+test('every run file is listed with ahead/behind main, dirty and age; never the token', async () => {
+  const runs = byId(await listRunViews(roots()));
   expect(Object.keys(runs).sort()).toStrictEqual(['plan-1', `quick-${id}`, 'quick-99']);
   expect(runs[`quick-${id}`]).toMatchObject({
     kind: 'quick',
@@ -137,10 +137,31 @@ test('every run file is listed with ahead/behind main, dirty and age; never the 
   for (const r of Object.values(runs)) expect(r).not.toHaveProperty('token');
 });
 
-test('a run git cannot answer for gets nulls and an error, the others are unharmed', () => {
-  const gone = byId(listRunViews(roots()))['quick-99'];
+test('a run git cannot answer for gets nulls and an error, the others are unharmed', async () => {
+  const gone = byId(await listRunViews(roots()))['quick-99'];
   expect(gone).toMatchObject({ ahead: null, behind: null, dirty: null, ageSec: null, seen: 'not a date' });
   expect(gone.error).toMatch(/ahead\/behind: .*; worktree missing: /);
+});
+
+test('branch names that look like options or revisions never reach git; a non-top worktree is not asked', async () => {
+  mkdirSync(join(wt('plan-1'), 'sub'), { recursive: true });
+  const evil = { ...base, kind: 'quick' as const, domain: 'domain-3-x', worktree: join(wt('plan-1'), 'sub') };
+  const opt = await runView(
+    { main },
+    { ...evil, id: 70, branch: '--output=pwned', base: 'x', seen: '', phase: 'develop' },
+  );
+  expect(opt.ahead).toBeNull();
+  expect(opt.error).toMatch(/not a branch name/);
+  expect(opt.error).toMatch(/is not the top of a worktree/);
+  expect(opt.dirty).toBeNull();
+  const range = await runView(
+    { main },
+    { ...evil, id: 71, branch: 'main..plan-1', base: 'x', seen: '', phase: 'develop' },
+  );
+  expect(range.error).toMatch(/not a branch name/);
+  for (const ok of ['quick-7', 'plan-29', 'feature/x.y', 'main']) expect(isBranchName(ok)).toBe(true);
+  for (const bad of ['-x', 'a..b', 'a/.b', 'x.lock', 'a b', 'HEAD@{1}', 'a~1', '', 'x.'])
+    expect(isBranchName(bad)).toBe(false);
 });
 
 test('GET /__runs answers 200 JSON without tokens, parseable by the page', async () => {
@@ -159,15 +180,50 @@ test('GET /__runs answers 200 JSON without tokens, parseable by the page', async
   expect(parseRuns(JSON.parse(res.body))).toHaveLength(3);
 });
 
-test('no .runs folder is no runs', () => {
-  expect(listRunViews({ main, specs: join(main, 'nowhere') })).toStrictEqual([]);
+test('pages asking at once share one scan, and the result is reused for a moment', async () => {
+  const scan = runsScanner(roots(), 60_000);
+  const [a, b] = [scan(), scan()];
+  expect(a).toBe(b);
+  const first = await a;
+  expect(await scan()).toBe(first);
+  const fresh = runsScanner(roots(), 0);
+  const x = await fresh();
+  expect(await fresh()).not.toBe(x);
+});
+
+test('the scan never blocks the event loop: a timer fires while git runs', async () => {
+  let ticked = false;
+  setTimeout(() => (ticked = true), 0);
+  const pending = listRunViews(roots());
+  await new Promise((r) => setTimeout(r, 1));
+  expect(ticked).toBe(true);
+  await pending;
+});
+
+test('no .runs folder is no runs', async () => {
+  expect(await listRunViews({ main, specs: join(main, 'nowhere') })).toStrictEqual([]);
 });
 
 test('the model joins the runs: the quick run to its step, the plan run to the domain', async () => {
-  const m = buildModel(await readSpecsFolder(nodeDir(specs)), listRunViews(roots()));
+  const m = buildModel(await readSpecsFolder(nodeDir(specs)), await listRunViews(roots()));
   const sync = m.ideas[0];
   expect(sync.run?.branch).toBe('plan-1');
   expect(sync.quickSteps[0].run).toMatchObject({ kind: 'quick', id, ahead: 2 });
+});
+
+test('specsRel: the specs root relative to main, absolute outside it', () => {
+  expect(specsRelOf({ main, specs })).toBe('.specs');
+  expect(specsRelOf({ main, specs: join(main, 'plans', 'specs') })).toBe('plans/specs');
+  const outside = join(tmpdir(), 'elsewhere');
+  expect(specsRelOf({ main, specs: outside })).toBe(resolve(outside).split(sep).join('/'));
+});
+
+test('the browser opens only when nobody scripts the dev server', () => {
+  expect(openBrowser({})).toBe(true);
+  expect(openBrowser({ NOS_UI_OPEN: '0' })).toBe(false);
+  expect(openBrowser({ NOS_SPECS_ROOT: 'x' })).toBe(false);
+  expect(openBrowser({ VITEST: 'true' })).toBe(false);
+  expect(openBrowser({ NOS_SPECS_ROOT: 'x', NOS_UI_OPEN: '1' })).toBe(true);
 });
 
 test('a change in .runs/*.json is runs:changed, logs and local state are nothing, the rest specs:changed', () => {

@@ -161,3 +161,19 @@ test('a broken nos.config.json falls back to docs/ and .specs', async () => {
   expect(d.folder).toBe('docs');
   expect(d.error).toBeUndefined();
 });
+
+test('locateSpecs names the specs root as the project sees it', async () => {
+  expect(
+    (await locateSpecs(dir('p', { 'nos.config.json': '{"specs":{"dir":"plans/specs"}}', plans: { specs } }))).rel,
+  ).toBe('plans/specs');
+  expect((await locateSpecs(dir('p', { '.specs': specs }))).rel).toBe('.specs');
+  expect((await locateSpecs(dir('.specs', specs))).rel).toBe('.specs');
+});
+
+test('docs-folder may not name a hidden folder', async () => {
+  for (const bad of ['.git', 'docs/.private', '.specs']) {
+    const d = await docsOf(repo({ 'spec-ui': { 'docs-folder': bad } }));
+    expect(d.files).toStrictEqual({});
+    expect(d.error).toMatch(/no part starting with "\."/);
+  }
+});

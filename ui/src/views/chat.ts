@@ -2,7 +2,7 @@
 // the user looks at), the "Ask Claude" prompts, the panel markup, the tab bar and the message log.
 // Message text only ever reaches the page through textContent.
 import { esc } from '../markdown';
-import type { Model } from '../model';
+import { specsPathOf, type Model } from '../model';
 import { QUICK_SEGMENT, type Route } from '../route';
 import { itemId } from './parts';
 
@@ -213,16 +213,14 @@ ${
 }`;
 }
 
-// the specs root as Claude sees it from main (spec paths in the model are relative to it)
-export const SPECS_PREFIX = '.specs/';
-
 // what the user looks at, as a spec path Claude can open
 export function contextOf(model: Model, r: Route): ChatContext | null {
   if (r.view !== 'domains' && r.view !== 'ideas') return null;
   const idea = r.idea ? model.ideas.find((i) => i.slug === r.idea) : undefined;
   if (!idea) return null;
-  const base = `${SPECS_PREFIX}${idea.folder}/`;
-  const spec = (s: { specPath: string }) => (s.specPath ? SPECS_PREFIX + s.specPath : '');
+  // spec paths as Claude sees them from main: <specsRel>/<path relative to the specs root>
+  const base = specsPathOf(model.specsRel, `${idea.folder}/`);
+  const spec = (s: { specPath: string }) => (s.specPath ? specsPathOf(model.specsRel, s.specPath) : '');
   if (r.phase === QUICK_SEGMENT) {
     const s = r.step ? idea.quickSteps.find((q) => q.slug === r.step) : undefined;
     return s

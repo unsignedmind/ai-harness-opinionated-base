@@ -33,10 +33,10 @@ async function open(h: Permissioned) {
   try {
     const dir = h as unknown as DirLike;
     const files = await readSpecsFolder(dir);
-    const { specs, root } = await locateSpecs(dir);
+    const { specs, root, rel } = await locateSpecs(dir);
     const docs = await readDocs(specs, root);
     current = h;
-    app.setModel(buildModel(files));
+    app.setModel(buildModel(files, [], rel));
     app.setDocs(buildDocs(docs));
     app.setSource(`${h.name}/`);
     app.setNotice(null);

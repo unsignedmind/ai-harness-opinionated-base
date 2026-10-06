@@ -1,7 +1,8 @@
 // Dev server side of the live viewer (dev.html). The host reads the project's specs root (.specs/,
 // roots.specs from cli/src/roots.js) from its own disk on every request, so any device on the network
-// sees it without picking a folder. Serves `/` as dev.html, `GET /__specs` as `path -> text` JSON
-// (paths relative to the specs root), `GET /__docs` as the docs folder named in main's nos.config.json
+// sees it without picking a folder. Serves `/` as dev.html, `GET /__specs` as
+// `{ specsRel, files: path -> text }` (paths relative to the specs root, specsRel = the specs root
+// relative to main, e.g. ".specs"), `GET /__docs` as the docs folder named in main's nos.config.json
 // (relative to main), `GET /__runs` as the runs (src/serve-runs.ts), and pushes "specs:changed",
 // "runs:changed" (a run file in .specs/.runs/) and "docs:changed" when a file under them changes.
 // `POST /__promote?domain=<folder>` runs `nos create-plan --domain <folder> --hollow --root <main>`
@@ -14,7 +15,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
-import { basename, join, resolve, sep } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import qrcode from 'qrcode-generator';
 import type { Connect, Plugin } from 'vite';
 
@@ -68,6 +69,22 @@ export function specsSetup({
     return { error: msg.startsWith('nos is not set up') ? msg : `nos is not set up: ${msg}` };
   }
 }
+
+// the specs root as the project sees it: relative to main with forward slashes (".specs"), absolute
+// when it lies outside main
+export function specsRelOf(roots: Pick<Roots, 'main' | 'specs'>): string {
+  const rel = relative(roots.main, roots.specs);
+  const out = !rel || rel.startsWith('..') || isAbsolute(rel) ? resolve(roots.specs) : rel;
+  return out.split(sep).join('/');
+}
+
+// Whether `npm run dev` opens dev.html in the browser: NOS_UI_OPEN=1 always, NOS_UI_OPEN=0 never; else
+// not for scripted runs (NOS_SPECS_ROOT set, vitest, CI), which must never open a tab in the user's browser.
+export const openBrowser = (env: Record<string, string | undefined>) =>
+  env.NOS_UI_OPEN === '1' || (env.NOS_UI_OPEN !== '0' && !env.NOS_SPECS_ROOT && !env.VITEST && !env.CI);
+
+// GET /__specs
+export type SpecsData = { specsRel: string; files: Record<string, string> };
 
 const DOMAIN = /^domain-\d+-[a-z0-9-]+$/;
 
@@ -153,6 +170,7 @@ export function serveSpecs(setup: SpecsSetup, serveOpts: ServeOptions = {}): Plu
   const roots = setup.roots;
   const dir = resolve(roots.specs);
   const root = roots.main;
+  const specsRel = specsRelOf(roots);
   // set on each /__docs request, since the config may change
   let docsDir: string | null = null;
   const promote = promoteHandler(root);
@@ -191,7 +209,7 @@ export function serveSpecs(setup: SpecsSetup, serveOpts: ServeOptions = {}): Plu
         if (path !== '/__specs' && path !== '/__docs') return next();
         const read =
           path === '/__specs'
-            ? readSpecsFolder(nodeDir(dir))
+            ? readSpecsFolder(nodeDir(dir)).then((files): SpecsData => ({ specsRel, files }))
             : readDocs(nodeDir(dir), nodeDir(root)).then((docs) => {
                 if (!docs.error) {
                   docsDir = resolve(root, docs.folder);

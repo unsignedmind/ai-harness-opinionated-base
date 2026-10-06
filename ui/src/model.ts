@@ -78,7 +78,16 @@ export type Model = {
   phases: Phase[];
   steps: Step[];
   labels: string[];
+  // the specs root as the project sees it: relative to main (".specs", nos.config.json specs.dir), or
+  // absolute when it lies outside; spec paths shown to the user and to Claude start with it
+  specsRel: string;
 };
+
+export const DEFAULT_SPECS_REL = '.specs';
+
+// <specsRel>/<rel>, forward slashes
+export const specsPathOf = (specsRel: string | undefined, rel: string) =>
+  `${(specsRel || DEFAULT_SPECS_REL).replace(/\/+$/, '')}/${rel}`;
 
 type RawStep = Partial<{
   slug: string;
@@ -159,7 +168,11 @@ const numberIn = (path: string, prefix: string) => {
   return m ? Number(m[1]) : null;
 };
 
-export function buildModel(input: Record<string, string>, runs: Run[] = []): Model {
+export function buildModel(
+  input: Record<string, string>,
+  runs: Run[] = [],
+  specsRel: string = DEFAULT_SPECS_REL,
+): Model {
   const files = new Map<string, string>();
   for (const [p, text] of Object.entries(input)) files.set(normPath(p), text);
 
@@ -175,7 +188,7 @@ export function buildModel(input: Record<string, string>, runs: Run[] = []): Mod
   const phases = ideas.flatMap((i) => i.phases);
   const steps = ideas.flatMap((i) => i.steps);
   const labels = [...new Set(ideas.flatMap((i) => i.labels))].sort();
-  return { ideas, phases, steps, labels };
+  return { ideas, phases, steps, labels, specsRel };
 }
 
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
@@ -230,7 +243,8 @@ function buildIdea(folder: string, files: Map<string, string>, runs: Run[]): Ide
     steps: [],
     quickSteps: [],
     branch: str(raw?.branch),
-    run: runs.find((r) => r.kind === 'plan' && r.domain === folder) ?? null,
+    // a plan run's id is the domain id
+    run: runs.find((r) => r.kind === 'plan' && (r.domain === folder || (!!m && r.id === Number(m[1])))) ?? null,
   };
 
   let stepIndex = 0;
@@ -268,7 +282,11 @@ function buildIdea(folder: string, files: Map<string, string>, runs: Run[]): Ide
         const step = buildStep(rs, files, idea, null, qi + 1);
         step.labels = rs.labels ?? idea.labels;
         step.branch = str(rs.branch);
-        step.run = runs.find((r) => r.kind === 'quick' && r.id === step.number && r.domain === folder) ?? null;
+        // only a step whose id is known (from its spec-file), never the list position
+        const known = numberIn(step.specPath, 'step') !== null;
+        step.run = known
+          ? (runs.find((r) => r.kind === 'quick' && r.id === step.number && r.domain === folder) ?? null)
+          : null;
         idea.quickSteps.push(step);
         idea.steps.push(step);
       });
