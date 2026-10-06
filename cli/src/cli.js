@@ -11,8 +11,9 @@ import { listLocks, lockStatus, releaseLock, takeLock } from './lock.js';
 import { createPlan } from './plan.js';
 import { createQuickStep } from './quick-step.js';
 import { homeGuard, NOS_HOME, resolveRoots, slash } from './roots.js';
+import { abandonRun, cleanupRun, finishRun, startRun, syncRun } from './run.js';
 import { commitSpecs, domainOfTarget, findStep } from './specs-git.js';
-import { setStatus } from './status.js';
+import { setRunStatus, setStatus } from './status.js';
 import { updatePlan } from './update-plan.js';
 
 export const USAGE = `nos - file manager for the nos harness
@@ -28,6 +29,8 @@ Commands:
   update-plan        Save an updated plan.json and create, move or delete phase folders and step files
   create-quick-step  Add a quick step (no plan) to <specs>/<domain>/quick-steps/
   set-status         Change the status of a plan, phase, step or quick step
+                     (--run <kind>-<id> merged|discarded: a whole run, only run finish / abandon)
+  run <command>      Run lifecycle: start, sync, finish, cleanup, abandon (branch + worktree per run)
   specs commit       Commit config.json + one domain folder of the specs repo (--run, --domain or --config)
   specs find-step    Find the spec file of a step id in any domain
   gate               Run the quality tools of nos.config.json (--e2e: also e2e, under a slot lease)
@@ -279,6 +282,7 @@ Example:
   }`;
 
 const SET_STATUS_HELP = `Usage: nos set-status --domain <domain-<id>-<slug>> [--phase <id>] [--step <id>] --status <status> [--root <dir>]
+       nos set-status --run <kind>-<id> merged|discarded [--root <dir>]
 
 Change a status in <specs>/<domain>/plan.json or of a quick step.
 
@@ -292,6 +296,15 @@ Change a status in <specs>/<domain>/plan.json or of a quick step.
 The status must be listed in templates/status.xml of this nos:
 <plans> for the plan, <phases> for phases, <steps> for steps.
 Only the "status" field is changed; the rest of plan.json is kept as-is.
+merged and discarded are refused here (exit 1): they are set for a whole run with --run.
+
+--run <kind>-<id> merged|discarded flips every target of a run, one write per file (run finish and
+run abandon call it; the domain comes from the run file <specs>/.runs/<kind>-<id>.json):
+  plan merged       plan done -> merged, steps done -> merged, phases unchanged
+  plan discarded    plan and every step not merged -> discarded
+  quick merged      the quick step done -> merged
+  quick discarded   the quick step (anything except merged) -> discarded
+Targets already at the status stay. A violation (e.g. a step not done for merged) -> exit 1, nothing written.
 
 Options:
   --domain <name>    Domain folder name, e.g. domain-1-user-auth      (required)
@@ -311,6 +324,64 @@ Example:
     "slug": "login-endpoint",
     "previous": "implemented",
     "status": "in-review"
+  }
+  nos set-status --run quick-7 merged
+  {
+    "action": "set-status",
+    "run": "quick-7",
+    "domain": "domain-1-user-auth",
+    "status": "merged",
+    "file": "D:/repo/.specs/domain-1-user-auth/quick-steps/quick-steps.json",
+    "changes": [{ "target": "step", "id": 7, "slug": "fix-login-typo", "previous": "done", "status": "merged" }]
+  }`;
+
+const RUN_HELP = `Usage: nos run start --domain <domain> (--plan | --quick <stepId>) [--token <t>] [--take-over] [--root <dir>]
+       nos run sync|finish|cleanup|abandon --token <t> [--run <kind>-<id>] [--root <dir>]
+
+A run is one plan (run id plan-<domain id>) or one quick step (quick-<step id>) in branch <kind>-<id> and
+worktree <main>/.claude/worktrees/<kind>-<id>. Run file: <specs>/.runs/<kind>-<id>.json. Needs git.
+--token falls back to NOS_RUN_TOKEN. Missing token -> 1, another token -> 4. Every token call updates "seen".
+sync/finish/cleanup/abandon act on --run, else the run of the worktree you sit in, else the run holding the token.
+
+start    Validates the target (a plan with phases, or a quick step; not merged/discarded). Run file of
+         this run: same token -> resume (recreates a missing worktree); another token -> 4; --take-over ->
+         new token (also for a merged/abandoned run: then only the token, so cleanup can run; a merge lock
+         of the old token is released). Another run in the domain -> 6. Uncommitted specs of the domain ->
+         committed "<run>: leftovers". Branch <kind>-<id> (reused, else from main's current branch),
+         git worktree add, run file (base, phase develop), "branch" in plan.json / the quick step.
+         project-commands.install in a new worktree, output to <specs>/.runs/logs/<run>/install.log
+         (a failure is reported in "install", the run stays).
+sync     Rebase in progress -> 3. Dirty worktree -> 5 (never autostashed). git rebase <mainBranch> in the
+         worktree; conflict -> 3 with the files, the rebase is left open. Clean -> updates base.
+finish   The plan / quick step must be done. Under lock merge (another token -> 4): phase integrate,
+         main on mainBranch, main busy (MERGE_HEAD, CHERRY_PICK_HEAD, REVERT_HEAD, rebase
+         folders) -> 1, main dirty on the paths the branch touches -> 1, sync (3, 5), phase gate: the full
+         gate in the worktree (e2e when configured) -> fail 1 with the gate in details, phase merge:
+         git merge --ff-only (refused -> sync + gate once more, then 1), set-status --run merged,
+         specs commit "<run>: merged", phase merged. A failure releases the lock, phase develop.
+         A crash keeps lock and phase: the same token resumes.
+cleanup  Not from inside the worktree. Phase merged or abandoned. git worktree remove, branch -d (merged)
+         / -D (abandoned), run file deleted. Parts already gone are skipped (rerun after a failure).
+abandon  Not for a merged run, not from inside the worktree. set-status --run discarded, specs commit
+         "<run>: discarded", phase abandoned, then the cleanup with --force / -D.
+
+Exit: 0 ok, 1 failed (finish: gate fail, main busy/dirty print { action, error, exit, details }),
+2 usage, 3 rebase conflict, 4 held by another token (run or merge lock), 5 dirty worktree,
+6 another run in the domain, 7 no slot for the e2e gate.
+
+Example:
+  nos run start --domain domain-2-auth --quick 7
+  {
+    "action": "run-start",
+    "run": { "kind": "quick", "id": 7, "domain": "domain-2-auth", "branch": "quick-7",
+             "worktree": "D:/repo/.claude/worktrees/quick-7", "base": "<sha>", "mainBranch": "main",
+             "phase": "develop", "started": "<iso>", "seen": "<iso>" },
+    "token": "1a2b3c4d",
+    "roots": { "home": "D:/repo/.claude/skills/nos", "work": "D:/repo/.claude/worktrees/quick-7",
+               "main": "D:/repo", "specs": "D:/repo/.specs" },
+    "enter": "D:/repo/.claude/worktrees/quick-7",
+    "install": { "code": 0, "log": "D:/repo/.specs/.runs/logs/quick-7/install.log" },
+    "leftovers": null
   }`;
 
 const SPECS_HELP = `Usage: nos specs commit (--run <kind>-<id> | --domain <domain> | --config) -m <message> [--root <dir>]
@@ -586,10 +657,26 @@ const COMMANDS = {
       phase: { type: 'string' },
       step: { type: 'string' },
       status: { type: 'string' },
+      run: { type: 'string' },
       root: { type: 'string' },
     },
-    required: ['domain', 'status'],
-    execute(values, io, roots) {
+    required: [],
+    positionals: { min: 0, max: 1 },
+    execute(values, io, roots, [given]) {
+      if (values.run) {
+        if (values.domain || values.phase || values.step) {
+          throw new UsageError('--run takes no --domain, --phase or --step', 'set-status');
+        }
+        if (given && values.status) throw new UsageError('Give the status once', 'set-status');
+        const status = given ?? values.status;
+        if (!status)
+          throw new UsageError('Missing input: merged or discarded. Please provide it and retry', 'set-status');
+        return setRunStatus(roots, { run: values.run, status });
+      }
+      if (given !== undefined) throw new UsageError(`Unexpected argument "${given}"`, 'set-status');
+      for (const name of ['domain', 'status']) {
+        if (!values[name]) throw new UsageError(`Missing input: --${name}. Please provide it and retry`, 'set-status');
+      }
       const result = setStatus(roots, values);
       return {
         action: 'set-status',
@@ -604,7 +691,42 @@ const COMMANDS = {
       };
     },
   },
-
+  run: {
+    help: RUN_HELP,
+    options: {
+      domain: { type: 'string' },
+      plan: { type: 'boolean' },
+      quick: { type: 'string' },
+      token: { type: 'string' },
+      'take-over': { type: 'boolean' },
+      run: { type: 'string' },
+      root: { type: 'string' },
+    },
+    required: [],
+    positionals: { min: 1, max: 1 },
+    action: ([sub]) => `run-${sub}`,
+    async execute(values, io, roots, [sub]) {
+      if (sub === 'start') {
+        if (values.run) throw new UsageError('run start takes no --run: use --domain with --plan or --quick', 'run');
+        if (!values.domain) throw new UsageError('Missing input: --domain. Please provide it and retry', 'run');
+        return startRun(roots, {
+          domain: values.domain,
+          plan: values.plan ?? false,
+          quick: values.quick,
+          token: values.token,
+          takeOver: values['take-over'] ?? false,
+          env: io.env,
+        });
+      }
+      const commands = { sync: syncRun, finish: finishRun, cleanup: cleanupRun, abandon: abandonRun };
+      if (!commands[sub]) {
+        throw new UsageError(`Unknown run command "${sub}". Use start, sync, finish, cleanup or abandon`, 'run');
+      }
+      const startOnly = ['domain', 'plan', 'quick', 'take-over'].find((name) => values[name] !== undefined);
+      if (startOnly) throw new UsageError(`run ${sub} takes no --${startOnly}`, 'run');
+      return commands[sub](roots, { run: values.run, token: values.token, env: io.env, cwd: io.cwd });
+    },
+  },
   specs: {
     help: SPECS_HELP,
     options: {
@@ -794,7 +916,8 @@ function notSetUp(roots, cwd) {
 }
 
 // Error -> exit code. Every error gets one stderr line. NosError 3-7 are states the orchestrator reacts to:
-// { action, error, exit, details } (holder, file lists) also goes to stdout as JSON.
+// { action, error, exit, details } (holder, file lists) also goes to stdout as JSON, as for a NosError marked
+// report (a 1 with details).
 export function reportError(action, err, { stdout, stderr }) {
   stderr.write(`nos: ${err.message}\n`);
   if (err instanceof UsageError) {
@@ -802,7 +925,8 @@ export function reportError(action, err, { stdout, stderr }) {
     return EXIT.USAGE;
   }
   if (!(err instanceof NosError)) return EXIT.FAILED;
-  if (err.code >= EXIT.CONFLICT && err.code <= EXIT.SLOT_TIMEOUT) {
+  // report: a 1 whose details the orchestrator needs (run finish: gate result, main busy / dirty lists)
+  if ((err.code >= EXIT.CONFLICT && err.code <= EXIT.SLOT_TIMEOUT) || err.report) {
     const report = { action, error: err.message, exit: err.code, details: err.details };
     stdout.write(JSON.stringify(report, null, 2) + '\n');
     return err.code;

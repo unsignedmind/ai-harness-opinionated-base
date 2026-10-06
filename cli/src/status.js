@@ -1,11 +1,15 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { templatePath } from './config.js';
+import { templatePath, writeJsonFile } from './config.js';
+import { FAILED, NosError, USAGE } from './exit-codes.js';
 import { asList, resolveDomain, PLAN_FILE } from './plan.js';
 import { quickStepId, quickStepsPath, readQuickSteps, writeQuickSteps } from './quick-step.js';
 import { slash, specFileOf } from './roots.js';
+import { parseRunId, readRun } from './runs.js';
 
 export const STATUS_FILE = 'status.xml';
+// set only for a whole run (set-status --run), by nos run finish (merged) and nos run abandon (discarded)
+export const RUN_STATUSES = Object.freeze(['merged', 'discarded']);
 const CATEGORIES = { plan: 'plans', phase: 'phases', step: 'steps' };
 
 // status.xml of the running nos (roots.home/templates)
@@ -78,6 +82,13 @@ export function setStatus(roots, { domain, phase, step, status } = {}) {
   if (typeof status !== 'string' || !status.trim()) {
     throw new Error('Missing input: status. set-status requires the new status');
   }
+  if (RUN_STATUSES.includes(status)) {
+    throw new NosError(
+      FAILED,
+      `Status "${status}" is set only for a whole run, by nos run finish (merged) or nos run abandon (discarded): ` +
+        `nos set-status --run <kind>-<id> ${status}`,
+    );
+  }
   const domainDir = resolveDomain(roots, domain, 'set-status');
   const phaseNumber = parseId(phase, 'phase');
   const stepNumber = parseId(step, 'step');
@@ -133,5 +144,100 @@ export function setStatus(roots, { domain, phase, step, status } = {}) {
     slug: item.slug,
     previous,
     status,
+  };
+}
+
+// The domain of a run: its run file, else (plan) the domain-<id>-* folder or (quick) the domain whose
+// quick-steps.json has the step.
+function domainOfRun(roots, kind, id) {
+  const file = readRun(roots, `${kind}-${id}`);
+  if (file?.domain) return file.domain;
+  let domains = [];
+  try {
+    domains = readdirSync(roots.specs, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && /^domain-\d+-[a-z0-9-]+$/.test(entry.name))
+      .map((entry) => entry.name);
+  } catch {
+    // no specs root: nothing found
+  }
+  const found =
+    kind === 'plan'
+      ? domains.find((d) => d.startsWith(`domain-${id}-`))
+      : domains.find((d) => readQuickSteps(path.join(roots.specs, d)).some((s) => quickStepId(s) === id));
+  if (!found) throw new NosError(FAILED, `No ${kind === 'plan' ? 'domain' : 'quick step'} for run ${kind}-${id}`);
+  return found;
+}
+
+// One transition of set-status --run. merged: done -> merged (merged stays). discarded: anything except
+// merged -> discarded (discarded stays); a merged step of a discarded plan keeps merged (keepMerged).
+function transition(status, previous, { keepMerged = false } = {}) {
+  if (previous === status) return 'same';
+  if (status === 'merged') return previous === 'done' ? 'flip' : 'violation';
+  if (previous === 'merged') return keepMerged ? 'same' : 'violation';
+  return 'flip';
+}
+
+// set-status --run <kind>-<id> merged|discarded: flips the plan and its steps (phases unchanged) or the quick
+// step of a run, one write per file. Plan merged: plan and steps done -> merged. Plan discarded: plan and every
+// step not merged -> discarded. Quick: done -> merged, or anything except merged -> discarded. Targets already
+// at the status stay (a crashed finish or abandon reruns it). A violation -> NosError FAILED
+// { violations }, nothing written. dryRun: checks only.
+// Returns { action: 'set-status', run, domain, status, file, changes: [{ target, id, slug, previous, status }] }.
+export function setRunStatus(roots, { run, status, dryRun = false } = {}) {
+  const { runId, kind, id } = parseRunId(run);
+  if (!RUN_STATUSES.includes(status)) {
+    throw new NosError(USAGE, `set-status --run takes ${RUN_STATUSES.join(' or ')}, not "${status ?? ''}"`);
+  }
+  const valid = readValidStatuses(roots);
+  for (const category of ['plans', 'steps']) {
+    if (!valid[category].includes(status)) {
+      throw new NosError(FAILED, `${slash(statusFilePath(roots))} has no status "${status}" in <${category}>`);
+    }
+  }
+  const domain = domainOfRun(roots, kind, id);
+  const domainDir = path.join(roots.specs, domain);
+  const changes = [];
+  const violations = [];
+  const apply = (target, targetId, item, options) => {
+    const previous = item.status ?? null;
+    const result = transition(status, previous, options);
+    if (result === 'violation') violations.push({ target, id: targetId, slug: item.slug ?? null, status: previous });
+    if (result !== 'flip') return;
+    changes.push({ target, id: targetId, slug: item.slug ?? null, previous, status });
+    item.status = status;
+  };
+
+  let file;
+  let data;
+  if (kind === 'plan') {
+    file = path.join(domainDir, PLAN_FILE);
+    if (!existsSync(file)) throw new NosError(FAILED, `Domain ${domain} has no plan.json`);
+    data = readPlan(file);
+    apply('plan', id, data);
+    for (const phase of asList(data.phases)) {
+      for (const step of asList(phase.steps)) apply('step', idsOf(step).step ?? null, step, { keepMerged: true });
+    }
+  } else {
+    file = quickStepsPath(domainDir);
+    data = readQuickSteps(domainDir);
+    const step = data.find((s) => quickStepId(s) === id);
+    if (!step) throw new NosError(FAILED, `Quick step ${id} is not in ${slash(file)}`);
+    apply('step', id, step);
+  }
+
+  if (violations.length) {
+    const list = violations.map((v) => `${v.target} ${v.id ?? v.slug} is ${v.status ?? 'without status'}`).join(', ');
+    const need = status === 'merged' ? 'every target must be done' : 'nothing may be merged';
+    throw new NosError(FAILED, `Cannot set ${runId} to ${status}: ${list} (${need})`, { run: runId, violations });
+  }
+  if (changes.length && !dryRun) writeJsonFile(file, data);
+  return {
+    action: 'set-status',
+    run: runId,
+    domain,
+    status,
+    file: slash(file),
+    changes,
+    ...(dryRun && { dryRun: true }),
   };
 }

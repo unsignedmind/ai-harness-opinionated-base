@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { peekIds, reserveIds } from './config.js';
 import { asList, parsePlan, resolveDomain, validatePlan, PHASES_DIR, PLAN_FILE } from './plan.js';
@@ -78,6 +78,44 @@ function matchPlan(phases, domain, { phasesBySlug, stepsBySpec }) {
   });
 }
 
+// Fields update-plan does not manage survive an update that leaves them out: top-level fields (branch, status,
+// review-needed, ...) and the fields of kept phases (by slug) and kept steps (by spec-file), e.g. status.
+// "branch" is written by nos run start only: the current value always wins.
+function keepUnmanaged(parsed, planPath, matched) {
+  let current;
+  try {
+    current = JSON.parse(readFileSync(planPath, 'utf8'));
+  } catch {
+    return;
+  }
+  if (!current || typeof current !== 'object') return;
+  const fill = (target, source, skip) => {
+    if (!source || typeof source !== 'object') return;
+    for (const [key, value] of Object.entries(source)) {
+      if (!skip.includes(key) && !Object.hasOwn(target, key)) target[key] = value;
+    }
+  };
+  fill(parsed, current, ['phases', 'labels']);
+  if (Object.hasOwn(current, 'branch')) parsed.branch = current.branch;
+  const phasesBySlug = new Map(asList(current.phases).map((phase) => [phase?.slug, phase]));
+  const stepsBySpec = new Map();
+  for (const phase of asList(current.phases)) {
+    for (const step of asList(phase?.steps)) {
+      try {
+        stepsBySpec.set(specFileOf(step), step);
+      } catch {
+        // a legacy spec-file: matchPlan reports it for the updated plan
+      }
+    }
+  }
+  for (const { phase, existing, steps } of matched) {
+    if (existing) fill(phase, phasesBySlug.get(phase.slug), ['steps']);
+    for (const { step, source } of steps) {
+      if (source) fill(step, stepsBySpec.get(source.specFile), ['spec-file']);
+    }
+  }
+}
+
 export function updatePlan(roots, { domain, plan, force = false, dryRun = false } = {}) {
   const domainDir = resolveDomain(roots, domain, 'update-plan');
   const parsed = parsePlan(plan, 'update-plan');
@@ -90,6 +128,7 @@ export function updatePlan(roots, { domain, plan, force = false, dryRun = false 
   const phasesDir = path.join(domainDir, PHASES_DIR);
   const existing = scanPhases(domain, phasesDir);
   const matched = matchPlan(phases, domain, indexExisting(existing));
+  keepUnmanaged(parsed, planPath, matched);
 
   const keptPhases = new Set(matched.map((m) => m.existing).filter(Boolean));
   const keptSteps = new Set(matched.flatMap((m) => m.steps.map((s) => s.source)).filter(Boolean));

@@ -204,3 +204,49 @@ test('refuses a legacy spec-file with the specs/ prefix: run the migration', (t)
   assert.throws(() => updatePlan(roots, { domain, plan }), (err) => err instanceof NosError && /legacy spec-file.*migration/.test(err.message));
   assert.deepEqual(tree(), before);
 });
+
+test('keeps fields it does not manage: branch always, status and others when the update leaves them out', (t) => {
+  const { roots, domain, current } = setup(t);
+  const plan = current();
+  plan.branch = 'plan-1';
+  plan.status = 'in-progress';
+  plan['review-needed'] = true;
+  plan.phases[0].status = 'implemented';
+  plan.phases[0].steps[0].status = 'done';
+  plan.phases[0].steps[0].owner = 'x';
+  writeFile(roots.specs, `${domain}/plan.json`, plan);
+
+  // an extend that rebuilt the plan: no branch / status / review-needed, a kept step without status, a new step
+  const update = {
+    name: 'Auth v2',
+    branch: 'other',
+    phases: [
+      {
+        slug: 'data-model',
+        name: 'Data model',
+        steps: [{ slug: 'user-table', 'spec-file': plan.phases[0].steps[0]['spec-file'] }, plan.phases[0].steps[1]],
+      },
+      { ...plan.phases[1], steps: [...plan.phases[1].steps, step('logout')] },
+    ],
+  };
+  updatePlan(roots, { domain, plan: update });
+
+  const saved = current();
+  assert.equal(saved.branch, 'plan-1', 'branch is written by run start only');
+  assert.equal(saved.name, 'Auth v2', 'a given field wins');
+  assert.equal(saved.status, 'in-progress');
+  assert.equal(saved['review-needed'], true);
+  assert.equal(saved.phases[0].status, 'implemented');
+  assert.equal(saved.phases[0].name, 'Data model');
+  assert.equal(saved.phases[0].steps[0].status, 'done');
+  assert.equal(saved.phases[0].steps[0].owner, 'x');
+  assert.equal(saved.phases[0].steps[0].intent, 'user-table');
+  assert.equal(saved.phases[1].steps[1].slug, 'logout');
+  assert.equal(saved.phases[1].steps[1].status, 'open');
+});
+
+test('a plan without branch gets none', (t) => {
+  const { roots, domain, current } = setup(t);
+  updatePlan(roots, { domain, plan: current() });
+  assert.equal(Object.hasOwn(current(), 'branch'), false);
+});

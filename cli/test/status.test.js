@@ -5,8 +5,10 @@ import path from 'node:path';
 import { createDomain } from '../src/domain.js';
 import { createPlan } from '../src/plan.js';
 import { createQuickStep } from '../src/quick-step.js';
-import { readValidStatuses, setStatus } from '../src/status.js';
-import { makeRoots, readJson, writeFile, STATUS_XML } from './helpers.js';
+import { FAILED, NosError, USAGE } from '../src/exit-codes.js';
+import { writeRun } from '../src/runs.js';
+import { readValidStatuses, RUN_STATUSES, setRunStatus, setStatus } from '../src/status.js';
+import { invokeCli, makeProject, makeRoots, readJson, writeFile, STATUS_XML } from './helpers.js';
 
 const step = (slug) => ({ slug, intent: slug, status: 'open', description: '', 'spec-file': '' });
 const phase = (slug, steps) => ({ slug, name: slug, status: 'open', intent: '', description: '', steps });
@@ -181,4 +183,180 @@ test('a legacy spec-file with the specs/ prefix is refused: run the migration', 
 
   assert.throws(() => setStatus(roots, { domain, step: '4', status: 'implemented' }), /legacy spec-file "specs\/domain-1-auth\/.*run the migration/);
   assert.throws(() => setStatus(roots, { domain, step: '1', status: 'implemented' }), /legacy spec-file/);
+});
+
+// ---- set-status --run: statuses of a whole run (the real status.xml has merged and discarded)
+
+const REAL_STATUS_XML = readFileSync(new URL('../../templates/status.xml', import.meta.url), 'utf8');
+const isCode = (code) => (err) => err instanceof NosError && err.code === code;
+
+// domain-1-auth: plan (phase 1: steps 1, 2; phase 2: step 3) and quick step 4
+function runSetup(t) {
+  const roots = makeRoots(t);
+  writeFile(roots.home, 'templates/status.xml', REAL_STATUS_XML);
+  const { folder: domain } = createDomain(roots, { idea: '# Auth', slug: 'auth' });
+  createPlan(roots, {
+    domain,
+    plan: { name: 'Auth', status: 'open', phases: [phase('a', [step('s1'), step('s2')]), phase('b', [step('s3')])] },
+  });
+  createQuickStep(roots, { domain, step: { slug: 'fix', intent: 'fix' } });
+  const plan = () => readJson(roots.specs, `${domain}/plan.json`);
+  const quick = () => readJson(roots.specs, `${domain}/quick-steps/quick-steps.json`);
+  const setAll = (status) => {
+    for (const id of ['1', '2', '3']) setStatus(roots, { domain, step: id, status });
+  };
+  return { roots, domain, plan, quick, setAll };
+}
+
+const stepStatuses = (plan) => plan.phases.flatMap((p) => p.steps.map((s) => s.status));
+const planFile = (roots, domain) => path.join(roots.specs, domain, 'plan.json');
+
+test('status.xml has merged and discarded for plans and steps, not for phases', () => {
+  const section = (tag) => REAL_STATUS_XML.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))[1];
+  for (const status of RUN_STATUSES) {
+    assert.match(section('plans'), new RegExp(`<name>${status}</name>`));
+    assert.match(section('steps'), new RegExp(`<name>${status}</name>`));
+    assert.doesNotMatch(section('phases'), new RegExp(`<name>${status}</name>`));
+  }
+});
+
+test('plain set-status refuses merged and discarded with a hint to --run', (t) => {
+  const { roots, domain, plan } = runSetup(t);
+  for (const status of RUN_STATUSES) {
+    assert.throws(() => setStatus(roots, { domain, status }), (err) => isCode(FAILED)(err) && /--run/.test(err.message));
+    assert.throws(() => setStatus(roots, { domain, step: '4', status }), /set-status --run/);
+  }
+  assert.equal(plan().status, 'open');
+});
+
+test('plan merged: plan and steps done -> merged, phases unchanged, one write; a rerun changes nothing', (t) => {
+  const { roots, domain, plan, setAll } = runSetup(t);
+  setAll('done');
+  setStatus(roots, { domain, phase: '1', status: 'done' });
+  setStatus(roots, { domain, status: 'done' });
+
+  const result = setRunStatus(roots, { run: 'plan-1', status: 'merged' });
+
+  assert.equal(result.action, 'set-status');
+  assert.equal(result.run, 'plan-1');
+  assert.equal(result.domain, domain);
+  assert.equal(result.file, planFile(roots, domain).split(path.sep).join('/'));
+  assert.deepEqual(
+    result.changes.map((c) => [c.target, c.id, c.previous, c.status]),
+    [
+      ['plan', 1, 'done', 'merged'],
+      ['step', 1, 'done', 'merged'],
+      ['step', 2, 'done', 'merged'],
+      ['step', 3, 'done', 'merged'],
+    ],
+  );
+  const saved = plan();
+  assert.equal(saved.status, 'merged');
+  assert.deepEqual(stepStatuses(saved), ['merged', 'merged', 'merged']);
+  assert.deepEqual(
+    saved.phases.map((p) => p.status),
+    ['done', 'open'],
+    'phases unchanged',
+  );
+  assert.deepEqual(setRunStatus(roots, { run: 'plan-1', status: 'merged' }).changes, []);
+});
+
+test('plan merged: a plan or step not done is a violation, nothing written', (t) => {
+  const { roots, domain, setAll } = runSetup(t);
+  setAll('done');
+  setStatus(roots, { domain, step: '2', status: 'reviewed' });
+  setStatus(roots, { domain, status: 'done' });
+  const before = readFileSync(planFile(roots, domain), 'utf8');
+  assert.throws(
+    () => setRunStatus(roots, { run: 'plan-1', status: 'merged' }),
+    (err) => isCode(FAILED)(err) && err.details.violations.length === 1 && err.details.violations[0].id === 2,
+  );
+  assert.equal(readFileSync(planFile(roots, domain), 'utf8'), before);
+  setStatus(roots, { domain, status: 'in-progress' });
+  assert.throws(() => setRunStatus(roots, { run: 'plan-1', status: 'merged' }), /plan 1 is in-progress/);
+});
+
+test('plan discarded: plan and every step not merged -> discarded; a merged plan cannot be discarded', (t) => {
+  const { roots, domain, plan } = runSetup(t);
+  setStatus(roots, { domain, status: 'in-progress' });
+  setStatus(roots, { domain, step: '1', status: 'done' });
+  const saved = plan();
+  saved.phases[0].steps[1].status = 'merged';
+  writeFile(roots.specs, `${domain}/plan.json`, saved);
+
+  const result = setRunStatus(roots, { run: 'plan-1', status: 'discarded' });
+
+  assert.deepEqual(
+    result.changes.map((c) => [c.target, c.id, c.previous]),
+    [
+      ['plan', 1, 'in-progress'],
+      ['step', 1, 'done'],
+      ['step', 3, 'open'],
+    ],
+  );
+  assert.equal(plan().status, 'discarded');
+  assert.deepEqual(stepStatuses(plan()), ['discarded', 'merged', 'discarded']);
+
+  const merged = plan();
+  merged.status = 'merged';
+  writeFile(roots.specs, `${domain}/plan.json`, merged);
+  assert.throws(() => setRunStatus(roots, { run: 'plan-1', status: 'discarded' }), /plan 1 is merged/);
+});
+
+test('quick: done -> merged, anything except merged -> discarded; only the step of the run changes', (t) => {
+  const { roots, domain, quick, plan } = runSetup(t);
+  assert.throws(() => setRunStatus(roots, { run: 'quick-4', status: 'merged' }), /step 4 is open/);
+  setStatus(roots, { domain, step: '4', status: 'done' });
+  const dry = setRunStatus(roots, { run: 'quick-4', status: 'merged', dryRun: true });
+  assert.equal(dry.dryRun, true);
+  assert.equal(quick()[0].status, 'done', 'a dry run writes nothing');
+
+  const result = setRunStatus(roots, { run: 'quick-4', status: 'merged' });
+  assert.deepEqual(result.changes, [{ target: 'step', id: 4, slug: 'fix', previous: 'done', status: 'merged' }]);
+  assert.match(result.file, /quick-steps\/quick-steps\.json$/);
+  assert.equal(quick()[0].status, 'merged');
+  assert.equal(plan().status, 'open', 'the plan is untouched');
+  assert.throws(() => setRunStatus(roots, { run: 'quick-4', status: 'discarded' }), /step 4 is merged/);
+
+  const other = runSetup(t);
+  setStatus(other.roots, { domain: other.domain, step: '4', status: 'in-review' });
+  assert.equal(setRunStatus(other.roots, { run: 'quick-4', status: 'discarded' }).changes[0].previous, 'in-review');
+  assert.equal(other.quick()[0].status, 'discarded');
+});
+
+test('set-status --run: the domain comes from the run file; bad input is refused', (t) => {
+  const { roots, domain } = runSetup(t);
+  writeRun(roots, { kind: 'quick', id: 4, domain, phase: 'develop' });
+  setStatus(roots, { domain, step: '4', status: 'done' });
+  assert.equal(setRunStatus(roots, { run: 'quick-4', status: 'merged' }).domain, domain);
+  assert.throws(() => setRunStatus(roots, { run: 'quick-4', status: 'done' }), isCode(USAGE));
+  assert.throws(() => setRunStatus(roots, { run: 'step-4', status: 'merged' }), isCode(USAGE));
+  assert.throws(() => setRunStatus(roots, { run: 'quick-99', status: 'merged' }), /No quick step for run quick-99/);
+  assert.throws(() => setRunStatus(roots, { run: 'plan-9', status: 'merged' }), /No domain for run plan-9/);
+});
+
+test('nos set-status --run <run> merged|discarded via the CLI', async (t) => {
+  const { root, roots } = makeProject(t);
+  const { folder: domain } = createDomain(roots, { idea: '# A', slug: 'a' });
+  createQuickStep(roots, { domain, step: { slug: 'fix', intent: 'fix' } });
+  setStatus(roots, { domain, step: '1', status: 'done' });
+
+  const refused = await invokeCli(['set-status', '--domain', domain, '--step', '1', '--status', 'merged'], {
+    cwd: root,
+  });
+  assert.equal(refused.code, 1);
+  assert.match(refused.err, /set-status --run/);
+
+  const done = await invokeCli(['set-status', '--run', 'quick-1', 'merged'], { cwd: root });
+  assert.equal(done.code, 0, done.err);
+  assert.deepEqual(Object.keys(done.json), ['action', 'run', 'domain', 'status', 'file', 'changes']);
+  assert.equal(done.json.changes[0].status, 'merged');
+
+  const usage = await invokeCli(['set-status', '--run', 'quick-1', '--domain', domain, 'merged'], { cwd: root });
+  assert.equal(usage.code, 2);
+  const missing = await invokeCli(['set-status', '--run', 'quick-1'], { cwd: root });
+  assert.equal(missing.code, 2);
+  const violation = await invokeCli(['set-status', '--run', 'quick-1', '--status', 'discarded'], { cwd: root });
+  assert.equal(violation.code, 1);
+  assert.match(violation.err, /step 1 is merged/);
 });
