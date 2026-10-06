@@ -11,10 +11,10 @@ import { gitOk, hasGit, initRepo, makeProject, makeTempRoot, writeFile } from '.
 const noGit = { skip: !hasGit && 'git is not available' };
 
 // nos roots through the CLI, as the orchestrator calls it
-function nosRoots(cwd, { env = {}, home } = {}) {
+async function nosRoots(cwd, { env = {}, home } = {}) {
   let out = '';
   let err = '';
-  const code = run(['roots'], {
+  const code = await run(['roots'], {
     cwd,
     env,
     ...(home && { home }),
@@ -32,7 +32,7 @@ function addWorktree(root, name = 'quick-1') {
   return wt;
 }
 
-test('plain dir without nos.config.json: work = main = cwd, specs = cwd/.specs', (t) => {
+test('plain dir without nos.config.json: work = main = cwd, specs = cwd/.specs', async (t) => {
   const root = makeTempRoot(t);
 
   const roots = resolveRoots({ cwd: root, env: {} });
@@ -44,7 +44,7 @@ test('plain dir without nos.config.json: work = main = cwd, specs = cwd/.specs',
   assert.equal(roots.git, false);
 });
 
-test('the walk from a subfolder lands on the folder with nos.config.json', (t) => {
+test('the walk from a subfolder lands on the folder with nos.config.json', async (t) => {
   const { root } = makeProject(t);
   const deep = path.join(root, 'src', 'lib');
   mkdirSync(deep, { recursive: true });
@@ -56,7 +56,7 @@ test('the walk from a subfolder lands on the folder with nos.config.json', (t) =
   assert.equal(roots.specs, path.join(root, SPECS_DIR));
 });
 
-test('specs.dir of nos.config.json sets the specs root', (t) => {
+test('specs.dir of nos.config.json sets the specs root', async (t) => {
   const { root } = makeProject(t, { config: { specs: { dir: 'planning' } } });
   assert.equal(resolveRoots({ cwd: root, env: {} }).specs, path.join(root, 'planning'));
 });
@@ -121,14 +121,14 @@ test(
 test(
   'nos roots prints the same specs from main, a worktree, <main>/.claude/skills/nos and <main>/.specs',
   noGit,
-  (t) => {
+  async (t) => {
     const { root } = makeProject(t, { git: true });
     const wt = addWorktree(root);
     const nos = initRepo(path.join(root, '.claude', 'skills', 'nos'));
     const specs = initRepo(path.join(root, SPECS_DIR));
     const home = nos;
 
-    const results = [root, wt, nos, specs].map((cwd) => nosRoots(cwd, { home }));
+    const results = await Promise.all([root, wt, nos, specs].map((cwd) => nosRoots(cwd, { home })));
 
     const expected = slash(path.join(root, SPECS_DIR));
     assert.deepEqual(
@@ -167,14 +167,14 @@ test('NOS_SPECS_ROOT sets the work root; --root wins over it; both resolve again
   assert.equal(relative.work, wt);
 });
 
-test('--root is used as given: no walk up to nos.config.json', (t) => {
+test('--root is used as given: no walk up to nos.config.json', async (t) => {
   const { root } = makeProject(t);
   const sub = path.join(root, 'packages', 'a');
   mkdirSync(sub, { recursive: true });
   assert.equal(resolveRoots({ root: sub, cwd: root, env: {} }).work, sub);
 });
 
-test('home guard: quiet for the project nos, warns for another nos and for a copy inside a worktree', (t) => {
+test('home guard: quiet for the project nos, warns for another nos and for a copy inside a worktree', async (t) => {
   const { root } = makeProject(t);
   const projectNos = path.join(root, '.claude', 'skills', 'nos');
   mkdirSync(projectNos, { recursive: true });
@@ -292,14 +292,14 @@ test('worktreeProjectDir: the project folder inside a worktree exists at <wt>/<o
   );
 });
 
-test('configured and via tell how the roots were found', (t) => {
+test('configured and via tell how the roots were found', async (t) => {
   const { root } = makeProject(t);
   const bare = makeTempRoot(t);
   assert.deepEqual(pick(resolveRoots({ cwd: root, env: {} })), { configured: true, via: 'walk' });
   assert.deepEqual(pick(resolveRoots({ cwd: bare, env: {} })), { configured: false, via: 'cwd' });
   assert.deepEqual(pick(resolveRoots({ cwd: bare, env: { NOS_SPECS_ROOT: root } })), { configured: true, via: 'env' });
   assert.deepEqual(pick(resolveRoots({ root: bare, cwd: root, env: {} })), { configured: false, via: 'root' });
-  assert.equal(nosRoots(bare).configured, false);
+  assert.equal((await nosRoots(bare)).configured, false);
 });
 const pick = ({ configured, via }) => ({ configured, via });
 

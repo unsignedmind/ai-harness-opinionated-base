@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -110,3 +111,43 @@ export const STATUS_XML = `<valid-statuses>
         <status><name>in-review</name><description>under review</description></status>
     </steps>
 </valid-statuses>`;
+
+// run() of the CLI with captured output. home: this nos unless given; env empty so a NOS_SPECS_ROOT of the
+// shell never leaks in.
+export async function invokeCli(args, { cwd, env = {}, home, stdin = '' } = {}) {
+  let out = '';
+  let err = '';
+  const { run } = await import('../src/cli.js');
+  const code = await run(args, {
+    cwd,
+    env,
+    ...(home && { home }),
+    readStdin: () => stdin,
+    stdout: { write: (s) => (out += s) },
+    stderr: { write: (s) => (err += s) },
+  });
+  return {
+    code,
+    out,
+    err,
+    get json() {
+      return JSON.parse(out);
+    },
+  };
+}
+
+// URL of a src module, for child scripts: import { x } from '${srcUrl('lock.js')}'
+export const srcUrl = (file) => new URL(`../src/${file}`, import.meta.url).href;
+
+// Runs an ESM script in a child node process: { code, stdout, stderr }
+export function runNode(script, { cwd, env = process.env } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], { cwd, env, windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => (stdout += d));
+    child.stderr.on('data', (d) => (stderr += d));
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}

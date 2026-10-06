@@ -30,22 +30,21 @@ nos <command> --help
 | `create-quick-step` | Add a quick step (one step outside any plan) to a domain                    |
 | `set-status`        | Change the status of a plan, phase, step or quick step (`--run`: merged/discarded for a whole run) |
 | `run start\|sync\|finish\|cleanup\|abandon` | Run lifecycle: branch + worktree, rebase onto main, gate + ff-only merge, removal |
-| `gate`              | Run the quality tools of the checkout's `nos.config.json`, JSON per tool    |
-| `exec`              | Run a project command (`install`, `dev`, `deploy-test`)                     |
-| `specs commit`      | Commit the specs of one run or domain (or only `config.json`) in `.specs`   |
-| `specs find-step`   | Find the spec file of a step id in any domain                              |
-| `lock`              | Take, release or show a lock (`merge`, `ids`, `slot-<n>`)                   |
+| `specs commit`      | Commit `config.json` + one domain folder of the specs repo (`--run`, `--domain` or `--config`) |
+| `specs find-step`   | Find the spec file of a step id in any domain                               |
+| `gate`              | Run the quality tools of `nos.config.json` (`--e2e`: also e2e, under a slot lease) |
+| `exec <name>`       | Run a project command: `install`, `dev` (holds a slot while it runs), `deploy-test` |
+| `lock <action>`     | `take`, `release` or `status` of a lock in `<specs>/.locks`                 |
 
 General rules:
 
 - `nos` never generates slugs. They must be lowercase kebab-case, e.g. `user-auth`.
 - Pass `-` as a file argument to read that input from stdin.
 - Every command accepts `--root <dir>`, the work root (see [Roots](#roots)).
-- Every command except `init` and `roots` needs a project set up by `nos init`. Without `nos.config.json` it fails (exit 1) with "nos is not set up here: no nos.config.json found from <cwd> up. Run nos init from the project root". `create-domain` no longer creates `<specs>/config.json` itself.
+- Every command except `init`, `roots` and `help` needs a project set up by `nos init`. Without `nos.config.json` it fails (exit 1) with "nos is not set up here: no nos.config.json found from <cwd> up. Run nos init from the project root". `create-domain` no longer creates `<specs>/config.json` itself.
 - Results are printed to stdout as JSON. Every path in a result is absolute with forward slashes (`D:/repo/.specs/...`). Errors go to stderr.
 - `spec-file` fields in `plan.json` / `quick-steps.json` are relative to the specs root, e.g. `domain-1-user-auth/phases/phase-1-data-model/step-1-user-table.md`. A value with the old `specs/` prefix fails with "legacy spec-file … run the migration" (exit 1).
 - Templates (`config.json`, `nos.config.json`, `status.xml`) are read from `<home>/templates/` of the running nos, never from a copy in the project.
-- Every command except `roots`, `help` and `init` refuses to run without a `nos.config.json` ("run nos init").
 
 ### Roots
 
@@ -84,7 +83,16 @@ Home guard: when `<main>/.claude/skills/nos` exists and is not this nos, or this
 | `6`  | Another run is active in the domain            |
 | `7`  | Timeout waiting for a slot                     |
 
-For codes 3–7 stdout also gets `{ "action", "error", "exit", "details" }` (details: holder, file lists) and stderr one line. Codes and `NosError` live in `src/exit-codes.js`.
+For codes 3–7 stdout also gets `{ "action", "error", "exit", "details" }` (details: holder, file lists) and stderr one line. Codes and `NosError` live in `src/exit-codes.js`. `action` is the command's action name (`lock-take`, `gate`, `exec`, ...).
+
+| Command | Exit codes |
+| --- | --- |
+| `specs commit` | 0, 1 (not its own repo, unknown run or domain, git failed), 2 (not exactly one of `--run`/`--domain`/`--config`, no `-m`) |
+| `specs find-step` | 0, 1 not found, 2 bad id |
+| `gate` | 0 pass, 1 a tool failed or timed out (JSON still printed), not set up or interrupted, 7 no slot for e2e |
+| `exec` | the command's code (130 after SIGINT, 143 after SIGTERM), 1 not configured, 2 unknown name, 7 no slot (dev) |
+| `lock take` / `lock release` | 0, 4 held by another token, 2 no token / bad name |
+| any command reserving ids | 4 when lock `ids` stays held 10s (hint `nos lock release ids --break`) |
 
 How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the same command again (contradicting specs → the user decides which intent wins). 4 from `run start` → report holder and age, the user decides (`--take-over` or stop); 4 from `run finish` (merge lock) → wait 60s and retry, up to 10×. 6 → report the other run, the user decides. 5 → commit the step's own leftover files (`git add -- <files>`, never `-A`) with the current step prefix, or park. 1 from `run finish` with a gate fail → `FIX` reruns develop. 7 and other 1 → park and report.
 
@@ -108,8 +116,8 @@ How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the
   "phase": "develop | integrate | gate | merge | merged | abandoned" }
 ```
 
-- **Token = holder.** `run start` mints it. Every mutating run command needs `--token <t>` (fallback env `NOS_RUN_TOKEN`). Missing → exit 1 "--token required", another token → exit 4. Every token call updates `seen`. Cooperative guard for solo use, not a security boundary.
-- **Locks:** `<specs>/.locks/<name>/holder.json`, created by `mkdir` (atomic). Holder `{run, token, pid, command, taken}`. Reentrant for the same token, so a crashed `finish` resumes. Never broken automatically; `--break` is the user's call. Names: `merge` (finish), `ids` (id counters, CLI internal), `slot-<n>` (gate e2e, exec dev).
+- **Token = holder.** `run start` mints it. Every mutating run command needs `--token <t>` (fallback env `NOS_RUN_TOKEN`). Missing → exit 1 "--token required", another token → exit 4. Every token call updates `seen`. Cooperative guard for solo use, not a security boundary. `src/runs.js` writes run files atomically (tmp + rename).
+- **Locks:** `<specs>/.locks/<name>/holder.json`, created by `mkdir` (atomic). Holder `{run, token, pid, command, taken}`. Reentrant for the same token, so a crashed `finish` resumes. Locks (`merge`, `ids`) and runs are never broken automatically; `--break` is the user's call. Only a slot lease whose process is gone is reclaimed (see [Slots](#slots)) [D-10]. Names: `merge` (finish), `ids` (id counters, CLI internal), `slot-<n>` (gate e2e, exec dev). Lock `ids`: every id reservation (`create-domain`, `create-plan`, `update-plan`, `create-quick-step`) runs its read-modify-write of `<specs>/config.json` under it, waiting up to 10 s (then exit 4, hint `nos lock release ids --break`).
 
 ### `run start`
 
@@ -183,57 +191,123 @@ Flips a whole run in one write per file. Plan merged: plan `done → merged`, st
 ### `gate`
 
 ```sh
-nos gate [--e2e]
+nos gate [--e2e] [--root <dir>]
 ```
 
-Runs the `quality-tools` of the work root's `nos.config.json` in the work root: test, lint, format-check, typecheck, each `additional` entry, then e2e with `--e2e`. Every tool runs, also after a failure. Env: `NOS_HOME`, and `NOS_SLOT` for e2e, which runs under a slot lease. Full logs in `<specs>/.runs/logs/<run|main>/<tool>.log`.
+Runs the `quality-tools` of work's `nos.config.json` in the work root, in order: `test`, `lint`, `format-check`, `typecheck`, each `additional` entry (a command string, named `additional-<n>`, or `{ "name", "cmd" }`), then `e2e` (only with `--e2e`). Every tool runs, also after a failure. Each runs in a shell with `NOS_HOME`; only e2e runs under a slot lease with `NOS_SLOT=<n>`. Full output goes to `<specs>/.runs/logs/<run>/<tool>.log` (`<run>` = the run of this worktree, else `main`), the result carries the last 60 lines. No tool configured at all (e2e counts only with `--e2e`) → exit 1 "quality tools are not set up".
 
-```json
-{ "action": "gate", "pass": false,
-  "tools": [{ "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "tail": "<last 60 lines>", "log": "D:/repo/.specs/.runs/logs/quick-7/test.log" }] }
+- Timeout: a tool running longer than `quality-tools.timeout` minutes (default 30) is killed with its process tree: `status: "fail"`, `timedOut: true`. `signal` is the signal that ended a tool (else `null`).
+- Ctrl+C / SIGTERM: the running tool's tree is killed, the e2e lease released, exit 1 "gate interrupted".
+- A slot lease of a dead process taken over for e2e adds `"reclaimed": { "slot", "holder" }` to the result.
+
+`status`: `pass`, `fail`, `not-configured`.
+
+```sh
+$ nos gate
+{
+  "action": "gate",
+  "pass": false,
+  "tools": [
+    { "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "signal": null, "timedOut": false,
+      "tail": "<last 60 lines>", "log": "D:/repo/.specs/.runs/logs/quick-7/test.log" },
+    { "name": "lint", "cmd": null, "status": "not-configured", "exit": null, "signal": null, "timedOut": false,
+      "tail": "", "log": null }
+  ]
+}
 ```
-
-`status`: `pass`, `fail`, `not-configured`. Exit 1 on any fail or when `quality-tools` is missing ("not set up"), 7 when no slot is free within `slotWait`.
 
 ### `exec`
 
 ```sh
-nos exec <install|dev|deploy-test>
+nos exec <install|dev|deploy-test> [--root <dir>]
 ```
 
-Runs the work root's `project-commands` entry with stdio inherited; the exit code is the command's. `dev` holds a slot lease (`NOS_SLOT`) until the server exits and forwards Ctrl+C. A `null` command → 1, an unknown name → 2, no slot within `slotWait` → 7.
+Runs a `project-commands` entry of work's `nos.config.json` in a shell in the work root, stdio inherited (no JSON), `NOS_HOME` set. The exit code is the command's. `dev` takes a slot lease (`NOS_SLOT=<n>`) and holds it until the server exits; SIGINT/SIGTERM stop the server's process tree (`taskkill /T /F` on Windows, the process group elsewhere, `src/proc.js`), then the lease is released and the exit code is 130 (SIGINT) / 143 (SIGTERM). A `null` command → exit 1, an unknown name → 2, no slot within `slotWait` → 7. A dev lease taken over from a dead process is reported on stderr.
+
+`execCommand(roots, name, { stdio: 'log' })` (for `run start`'s install) writes the output to `<specs>/.runs/logs/<run>/<name>.log` and resolves with `{ code, log }`.
 
 ### Slots
 
-A slot is a lease on a set of ports: `<specs>/.locks/slot-<n>`, `n` in `1..worktrees.slots`. `gate --e2e` and `exec dev` take the smallest free one, poll every 2s up to `worktrees.slotWait` seconds, then exit 7. The project derives ports from `NOS_SLOT` (e.g. dev `5173 + NOS_SLOT`).
+A slot is a lease on a set of ports: the lock `<specs>/.locks/slot-<n>` (`src/slots.js`). `gate --e2e` and `exec dev` take the smallest free `slot-<n>` (n in 1..`worktrees.slots` of main's `nos.config.json`), polling every 2 s up to `worktrees.slotWait` seconds (fractions allowed), then exit 7 with the holders. A lease whose process is gone (holder `pid` not alive, e.g. killed hard) is reclaimed by the next taker [D-10]. The project derives ports from `NOS_SLOT` (e.g. dev `5173 + NOS_SLOT`).
 
 ### `specs commit`
 
 ```sh
-nos specs commit (--run <kind>-<id> | --domain <domain> | --config) -m "<message>"
+nos specs commit (--run <kind>-<id> | --domain <domain> | --config) -m <message> [--root <dir>]
 ```
 
-`git -C <specs> add config.json <domain dir>` and a commit when anything is staged. Never `add -A`: exact because one run owns its domain. Retries a held `index.lock` (5×). Pushes when `specs.remote` is set (a failed push is a warning). `--domain` is for idea, plan and quick step creation outside a run. `--config` commits only `config.json` (e.g. setup's chat node). Prints `{committed, sha, pushed}`.
+Commits the specs repo, scoped to `config.json` + one domain folder: `git -C <specs> add -- config.json <domain>` (adds, changes and deletions inside them; never `add -A`), then `commit --only` those paths, so files another writer staged stay out. Commits only when something is staged.
+
+- `--run <kind>-<id>`: the domain of that run file. `--domain <d>`: a domain outside any run (idea, plan or quick step creation). `--config`: `config.json` only (`domain: null`). Exactly one of the three.
+- A `*.lock` of another writer (`index.lock`, `HEAD.lock`, ref locks): retried 5 times, 200 ms apart.
+- No hooks and no signing in the specs repo (`-c core.hooksPath= -c commit.gpgsign=false`). git never prompts (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`).
+- `specs.remote` set: `git push -u origin HEAD` after a commit, and also without a new commit when `HEAD` is ahead of its upstream (an earlier push failed) or has none. A failed push or one running over 60 s is a warning (stderr + `warning`), the commit stays.
+- Refused when `<specs>` is not the top of its own git repo (a `git -C` would reach the project repo).
 
 Caveat: `--domain` for a domain that a run of another session owns also commits that run's spec edits. Never do it; check `<specs>/.runs` first.
 
 Messages: `step-<id>: <ability>`, `phase-<id>: <ability>`, `<run>: <what>` inside a run, `<ability>: <domain>` or `<ability>: <what>` outside.
 
+```sh
+$ nos specs commit --run quick-7 -m "step-7: develop"
+{
+  "action": "specs-commit",
+  "domain": "domain-2-auth",
+  "committed": true,
+  "sha": "<sha, null when nothing was staged>",
+  "pushed": false,
+  "files": ["D:/repo/.specs/domain-2-auth/quick-steps/quick-steps.json"]
+}
+```
+
 ### `specs find-step`
 
 ```sh
-nos specs find-step <id>
+nos specs find-step <id> [--root <dir>]
 ```
 
-Scans every `domain-*/plan.json` and `quick-steps.json`. Prints `{domain, kind, phase, step, specFile}` (`specFile` absolute). Not found → 1. Used by the `integrate` ability to read the specs behind the `step-<id>:` commits already on main.
+Scans `<specs>/domain-*/plan.json` and `quick-steps/quick-steps.json`. Exit 1 when the id is in neither. An unreadable file is skipped with an entry in `warnings` (present only then; on exit 1 in `details.warnings`).
+
+```sh
+$ nos specs find-step 7
+{
+  "action": "find-step",
+  "id": 7,
+  "domain": "domain-2-auth",
+  "kind": "quick",
+  "phase": null,
+  "step": 7,
+  "slug": "fix-login-typo",
+  "intent": "Fix the typo on the login button",
+  "status": "open",
+  "specFile": "D:/repo/.specs/domain-2-auth/quick-steps/step-7-fix-login-typo.md"
+}
+```
+
+`kind: "plan"` has the phase id in `phase`. Used by the `integrate` ability to read the specs behind the `step-<id>:` commits already on main.
 
 ### `lock`
 
 ```sh
-nos lock take|release|status <name> --token <t> [--break]
+nos lock take <name> --token <t> [--run <kind>-<id>] [--wait <sec>] [--root <dir>]
+nos lock release <name> (--token <t> | --break) [--root <dir>]
+nos lock status [<name>] [--root <dir>]
 ```
 
-Manual access to the locks above. `release` needs the holder's token, or `--break` (the user's decision, e.g. a stale holder after a crash). A held lock → 4 with `{holder, ageSec, pidAlive}`.
+A lock is the folder `<specs>/.locks/<name>`, created by `mkdir` (atomic: exactly one taker wins), with `holder.json` `{ run, token, pid, command, taken }`. Names are lowercase letters, digits and dashes (`merge`, `ids`, `slot-<n>`). The same token re-takes its own lock (refreshes `taken`, `reentrant: true`). Another token → exit 4 with `{ lock, path, holder, ageSec, pidAlive, hint }`. A lock is never broken automatically (only a dead slot lease is reclaimed, see [Slots](#slots)); `--break` is the user's call. `--token` falls back to `NOS_RUN_TOKEN`. `pidAlive` is false for a lock taken by `nos lock take` once that process ended.
+
+```sh
+$ nos lock take merge --token 1a2b3c4d --run quick-7
+{ "action": "lock-take", "lock": "merge", "path": "D:/repo/.specs/.locks/merge",
+  "holder": { "run": "quick-7", "token": "1a2b3c4d", "pid": 4242, "command": "lock take", "taken": "<iso>" },
+  "reentrant": false }
+$ nos lock release merge --token 1a2b3c4d
+{ "action": "lock-release", "lock": "merge", "path": "...", "released": true, "broken": false, "holder": { ... } }
+$ nos lock status merge
+{ "action": "lock-status", "lock": "merge", "path": "...", "held": false, "holder": null, "ageSec": null, "pidAlive": false }
+```
+
+`nos lock status` without a name lists every lock: `{ "action": "lock-status", "locks": [...] }`.
 
 ### `init`
 
@@ -553,12 +627,12 @@ npm run test:watch  # rerun the tests on every change
 | `src/quick-step.js` | `create-quick-step`, `quick-steps.json` access |
 | `src/status.js`  | `set-status` (also `--run`) and `status.xml` parsing |
 | `src/run.js`     | `run start\|sync\|finish\|cleanup\|abandon`     |
-| `src/runs.js`    | Run registry, tokens                             |
-| `src/lock.js`    | `mkdir` locks, `lock` command                    |
-| `src/slots.js`   | Slot leases, `NOS_SLOT`                          |
+| `src/runs.js`    | Run registry `<specs>/.runs`, run tokens         |
+| `src/lock.js`    | mkdir locks in `<specs>/.locks` (`lock`, ids lock) |
+| `src/slots.js`   | Slot leases (`withSlot`), `NOS_SLOT`             |
 | `src/gate.js`    | `gate`                                           |
 | `src/exec.js`    | `exec`                                           |
 | `src/specs-git.js` | `specs commit`, `specs find-step`              |
-| `src/proc.js`    | Process tree kill (Windows `taskkill /T /F`)     |
+| `src/proc.js`    | `killTree` (Windows `taskkill /T /F`, else the process group), `pidAlive`, `sleepSync` |
 | `src/slug.js`    | Slug validation                                  |
 | `src/chat/`     | `nos chat`: session store, server, guard, page, client, Stop hook |

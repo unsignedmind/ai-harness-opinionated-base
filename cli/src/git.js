@@ -11,11 +11,25 @@ export function gitEnv(env = process.env) {
   return clean;
 }
 
-// Runs git and never throws: { code, stdout, stderr }. code -1 when git could not be started.
-export function git(args, { cwd } = {}) {
-  const res = spawnSync('git', args, { cwd, env: gitEnv(), encoding: 'utf8', windowsHide: true });
-  if (res.error) return { code: -1, stdout: '', stderr: res.error.message };
-  return { code: res.status ?? -1, stdout: res.stdout ?? '', stderr: res.stderr ?? '' };
+// git never asks: no terminal prompt, no credential manager dialog (a push without credentials fails instead)
+export const NO_PROMPT_ENV = Object.freeze({ GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' });
+
+// Runs git and never throws: { code, stdout, stderr, timedOut }. code -1 when git could not be started or
+// ran longer than timeout ms (then killed, timedOut true). env: extra variables on top of gitEnv().
+export function git(args, { cwd, timeout, env } = {}) {
+  const res = spawnSync('git', args, {
+    cwd,
+    env: { ...gitEnv(), ...env },
+    encoding: 'utf8',
+    windowsHide: true,
+    ...(timeout && { timeout }),
+  });
+  if (res.error) {
+    const timedOut = res.error.code === 'ETIMEDOUT';
+    const stderr = timedOut ? `git ${args.join(' ')} timed out after ${timeout / 1000}s` : res.error.message;
+    return { code: -1, stdout: res.stdout ?? '', stderr, timedOut };
+  }
+  return { code: res.status ?? -1, stdout: res.stdout ?? '', stderr: res.stderr ?? '', timedOut: false };
 }
 
 // Trimmed stdout of a git command that must succeed, else a NosError (FAILED) with git's message.
