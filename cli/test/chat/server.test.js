@@ -427,9 +427,10 @@ test('runner: a nos run of a tab (onRun) is stored, shown in the tabs, the sessi
   await call('POST', `/api/session/${key}/messages`, { text: 'start quick step 7' });
   assert.equal((await call('GET', `/api/session/${key}`)).body.run, null);
   assert.equal((await call('GET', '/api/sessions')).body.tabs[0].run, null);
+  // the fields of the run file
   const run = {
     kind: 'quick',
-    id: 'quick-7',
+    id: 7,
     domain: 'domain-3-x',
     branch: 'quick-7',
     worktree: 'D:/p/.claude/worktrees/quick-7',

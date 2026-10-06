@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { resolveRoots, slash } from '../roots.js';
+import { PROJECT_CONFIG_FILE, resolveRoots, slash } from '../roots.js';
 
 export const DEFAULT_PORT = 4611;
 // the spec-ui dev server (ui/vite.config.ts), used for the pairing link
@@ -12,13 +12,12 @@ export const SPEC_UI_PORT = 5180;
 export const KEY = /^[a-f0-9]{12}$/;
 
 // The roots of the project around cwd (or of --root, or NOS_SPECS_ROOT): the chat works with roots.main,
-// so a worktree of the project reaches the same chat as main. Throws when nos init never ran there.
+// so a worktree of the project reaches the same chat as main. Throws when main has no nos.config.json (nos
+// init never ran there; a worktree's own copy is not enough), so the server for main never fails to start.
 export function chatRoots({ root, cwd = process.cwd(), env = process.env } = {}) {
   const roots = resolveRoots({ root, cwd, env });
-  if (!roots.configured) {
-    const where =
-      roots.via === 'root' || roots.via === 'env' ? slash(roots.work) : `${slash(path.resolve(cwd))} or above`;
-    throw new Error(`nos is not set up: no nos.config.json in ${where}. Run nos init`);
+  if (!existsSync(path.join(roots.main, PROJECT_CONFIG_FILE))) {
+    throw new Error(`nos is not set up in ${slash(roots.main)} (no ${PROJECT_CONFIG_FILE}): run nos init`);
   }
   return roots;
 }

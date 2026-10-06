@@ -19,6 +19,7 @@ import {
 import { runHook } from './hook.js';
 import { launchBrowser } from './launch.js';
 import { chatConfig, ensureStateDir, files, chatRoots, keyOf, portOf, SPEC_UI_PORT, stateDirOf } from './paths.js';
+import { slash } from '../roots.js';
 import { createRunner } from './runner.js';
 import { createChatServer } from './server.js';
 import { createSessionStore } from './sessions.js';
@@ -161,7 +162,7 @@ async function serve(roots, stateDir, port, { env, stderr }) {
     startedAt: new Date().toISOString(),
   });
   stderr.write(
-    `nos chat: listening on http://127.0.0.1:${bound}/ for ${root}` +
+    `nos chat: listening on http://127.0.0.1:${bound}/ for ${slash(root)}` +
       (runner ? ` (own Claude Code sessions, permission mode ${cfg.permissionMode})\n` : ' (relay)\n'),
   );
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => void chat.stop());
@@ -209,7 +210,7 @@ export async function runChat(argv, io = {}) {
         print({
           server: live ? `http://127.0.0.1:${live.port}/` : null,
           version: live?.version ?? VERSION,
-          root,
+          root: slash(root),
           sessions: createSessionStore({ file: files(stateDir).sessions }).list(),
         });
         return 0;

@@ -2,7 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { agentTracker, argsFor, cleanEnv, createRunner, describeTool, runOf } from '../../src/chat/runner.js';
+import {
+  agentTracker,
+  argsFor,
+  cleanEnv,
+  createRunner,
+  describeTool,
+  isRunCall,
+  runOf,
+} from '../../src/chat/runner.js';
 
 const ID = '3664881e-fbdd-4b6d-942d-14b1ee5ac8be';
 const tick = () => new Promise((r) => setTimeout(r, 5));
@@ -443,22 +451,53 @@ test('runOf: run-start gives the run without the token; cleanup and abandon give
   assert.deepEqual(runOf(`if (x) { y } ${JSON.stringify(odd)} {`), { ...RUN, branch: 'a}{"b' });
 });
 
-test('open: run-start in a tool result reports the run, cleanup clears it; errors and other results do not', async () => {
+test('isRunCall: a shell call of nos run start|cleanup|abandon, by alias or by path', () => {
+  assert.equal(isRunCall('Bash', { command: 'node D:/x/cli/bin/nos.js run start --domain d --quick 7' }), true);
+  assert.equal(isRunCall('Bash', { command: 'nos run cleanup --token t' }), true);
+  assert.equal(isRunCall('PowerShell', { command: 'node "D:/x/nos/cli/bin/nos.js" run abandon --token t' }), true);
+  assert.equal(isRunCall('Bash', { command: 'node D:/x/cli/bin/nos.js run finish --token t' }), false);
+  assert.equal(isRunCall('Bash', { command: 'cat docs/run start.md' }), false);
+  assert.equal(isRunCall('Read', { file_path: 'nos run start' }), false);
+  assert.equal(isRunCall('Bash', {}), false);
+});
+
+test('open: only the results of the session own nos run calls count; cleanup clears; errors, reads, subagents do not', async () => {
   const p = fakeProc();
   const runs = [];
   createRunner({ root: '/proj', spawnFn: p.fn }).open({ sessionId: ID, resume: false, onRun: (r) => runs.push(r) });
-  const toolResult = (content, extra = {}) => ({
-    type: 'user',
-    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content, ...extra }] },
+  const call = (id, name, input, parent = null) => ({
+    type: 'assistant',
+    parent_tool_use_id: parent,
+    message: { content: [{ type: 'tool_use', id, name, input }] },
   });
+  const result = (id, content, extra = {}, parent = null) => ({
+    type: 'user',
+    parent_tool_use_id: parent,
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content, ...extra }] },
+  });
+  const nos = (args) => ({ command: 'node D:/x/cli/bin/nos.js ' + args });
+  const json = JSON.stringify(START, null, 2);
   await p.emit(
     init,
-    toolResult('Tests pass.'),
-    toolResult(JSON.stringify(START, null, 2)),
-    toolResult(JSON.stringify({ action: 'run-start', error: 'held', exit: 4 }), { is_error: true }),
-    toolResult(JSON.stringify({ ...START, run: { ...START.run, id: 'quick-8' } }), { is_error: true }),
-    toolResult([{ type: 'text', text: JSON.stringify({ action: 'run-cleanup', run: 'quick-7' }) }]),
+    // a Read or a cat of a file holding run-start JSON: no run
+    call('t1', 'Read', { file_path: 'D:/x/fixture.json' }),
+    result('t1', json),
+    call('t2', 'Bash', { command: 'cat fixture.json' }),
+    result('t2', json),
+    // a subagent running nos run start: no run
+    call('t3', 'Bash', nos('run start --domain d --quick 7'), 'toolu_agent'),
+    result('t3', json, {}, 'toolu_agent'),
+    // a failed start (held): no run
+    call('t4', 'Bash', nos('run start --domain d --quick 7')),
+    result('t4', JSON.stringify({ action: 'run-start', error: 'held', exit: 4 }), { is_error: true }),
+    // the session's own start
+    call('t5', 'Bash', nos('run start --domain d --quick 7')),
+    result('t5', 'Installing…\n' + json),
+    // its result counts once
+    result('t5', JSON.stringify({ action: 'run-cleanup' })),
     { type: 'user', message: { role: 'user', content: 'a plain user message {"action":"run-start"}' } },
+    call('t6', 'Bash', nos('run cleanup --token t')),
+    result('t6', [{ type: 'text', text: JSON.stringify({ action: 'run-cleanup', run: 'quick-7' }) }]),
   );
   assert.deepEqual(runs, [RUN, null]);
 });

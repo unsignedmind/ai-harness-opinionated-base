@@ -177,7 +177,7 @@ test(
     assert.equal(fromMain.json.key, fromWt.json.key);
     assert.equal(fromMain.json.url, fromWt.json.url);
     const status = await nos([], { cwd: wt });
-    assert.equal(status.json.root, root);
+    assert.equal(status.json.root, root.split(path.sep).join('/'));
     assert.equal(status.json.server, `http://127.0.0.1:${server.port}/`);
     assert.ok(!existsSync(path.join(wt, '.specs')));
   },
@@ -187,7 +187,7 @@ test('commands outside a nos project fail with "run nos init"', async (t) => {
   const dir = makeTempRoot(t);
   const r = await nos([], { cwd: dir });
   assert.equal(r.code, 1);
-  assert.match(r.json.error, /nos is not set up.*Run nos init/);
+  assert.match(r.json.error, /nos is not set up in .*: run nos init/);
 });
 
 test('hook: runner mode (the default) never takes the messages, the queue stays', async (t) => {

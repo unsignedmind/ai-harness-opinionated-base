@@ -4,6 +4,7 @@
 // the hook never takes their messages (not even when the server is down). The session may sit in a
 // worktree of the project (input.cwd): the resolver brings it back to main, whose chat it serves.
 import { liveServer, request } from './client.js';
+import { findWorkRoot } from '../roots.js';
 import { chatConfig, chatRoots, files, realDir, stateDirOf } from './paths.js';
 import { loadState, saveState } from './sessions.js';
 
@@ -19,6 +20,8 @@ export async function runHook(stdinText, { env = process.env } = {}) {
   // blocking twice in a row can wedge a session
   if (!input || input.stop_hook_active === true || typeof input.cwd !== 'string') return null;
 
+  // not a nos project: done without asking git
+  if (!env.NOS_SPECS_ROOT && !findWorkRoot(input.cwd)) return null;
   let roots;
   try {
     roots = chatRoots({ cwd: input.cwd, env });

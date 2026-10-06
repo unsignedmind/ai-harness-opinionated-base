@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createSessionStore } from '../../src/chat/sessions.js';
 import { chatConfig, chatRoots, keyOf, portOf, stateDirOf } from '../../src/chat/paths.js';
@@ -65,8 +65,17 @@ test('chatRoots: a worktree of the project gives main, so the same state dir and
 test('chatRoots: a folder without nos.config.json is refused with "run nos init"', (t) => {
   const dir = makeTempRoot(t);
   mkdirSync(path.join(dir, 'specs'));
-  assert.throws(() => chatRoots({ cwd: dir, env: {} }), /nos is not set up.*Run nos init/);
+  assert.throws(() => chatRoots({ cwd: dir, env: {} }), /nos is not set up in .*: run nos init/);
   assert.throws(() => chatRoots({ root: dir, env: {} }), /nos is not set up/);
+});
+
+test('chatRoots: a worktree with nos.config.json while main has none is refused up front', { skip: !hasGit }, (t) => {
+  const { root } = makeProject(t, { git: true });
+  const wt = path.join(root, '.claude', 'worktrees', 'quick-7');
+  gitOk(['worktree', 'add', '-q', '-b', 'quick-7', wt], root);
+  rmSync(path.join(root, 'nos.config.json'));
+  assert.throws(() => chatRoots({ cwd: wt, env: {} }), /nos is not set up in .*: run nos init/);
+  assert.throws(() => chatRoots({ root: wt, env: {} }), /nos is not set up in .*: run nos init/);
 });
 
 test('portOf and chatConfig read "chat" of <specs>/config.json, else the defaults', (t) => {

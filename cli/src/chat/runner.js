@@ -240,6 +240,16 @@ export function runOf(content) {
   return run;
 }
 
+// A shell call of the tab's own session that runs `nos run start|cleanup|abandon` (nos.js by path or a
+// `nos` alias). Only the results of these calls are parsed for runOf, so a Read or grep of a file holding
+// such JSON never counts. A background shell call (run_in_background) is not covered: its output comes
+// later through another tool.
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
+const RUN_CALL = /\bnos(\.js)?\b[\s\S]*\brun\s+(start|cleanup|abandon)\b/;
+export function isRunCall(name, input) {
+  return SHELL_TOOLS.has(name) && typeof input?.command === 'string' && RUN_CALL.test(input.command);
+}
+
 export function argsFor({ sessionId, resume, mode = 'auto', model, title }) {
   if (!UUID.test(sessionId)) throw new Error('invalid session id');
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'];
@@ -292,6 +302,8 @@ export function createRunner({ root, bin = 'claude', mode = 'auto', model, env =
         detached: process.platform !== 'win32',
       });
       const agents = agentTracker(Date.now, root);
+      // tool_use ids of the session's own `nos run …` shell calls whose result is still to come
+      const runCalls = new Set();
       let stopped = false;
       let closed = false;
       let busy = false;
@@ -330,16 +342,21 @@ export function createRunner({ root, bin = 'claude', mode = 'auto', model, env =
           setBusy(true);
         } else if (j.type === 'assistant' && Array.isArray(j.message?.content)) {
           for (const c of j.message.content) {
-            if (c.type === 'tool_use') onActivity(agents.rel(describeTool(c.name, c.input)));
+            if (c.type === 'tool_use') {
+              onActivity(agents.rel(describeTool(c.name, c.input)));
+              // subagents never start runs, the orchestrating session does
+              if (!j.parent_tool_use_id && c.id && isRunCall(c.name, c.input)) runCalls.add(String(c.id));
+            }
             // a subagent's text is not a reply
             else if (c.type === 'text' && c.text?.trim() && !j.parent_tool_use_id) {
               said = true;
               onText(c.text.trim());
             }
           }
-        } else if (j.type === 'user' && Array.isArray(j.message?.content)) {
+        } else if (j.type === 'user' && !j.parent_tool_use_id && Array.isArray(j.message?.content)) {
           for (const c of j.message.content) {
-            if (c?.type !== 'tool_result' || c.is_error) continue;
+            if (c?.type !== 'tool_result' || !runCalls.delete(String(c.tool_use_id))) continue;
+            if (c.is_error) continue;
             const run = runOf(c.content);
             if (run !== undefined) onRun(run);
           }

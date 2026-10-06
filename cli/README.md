@@ -318,7 +318,8 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 - Roots come from the resolver (`src/chat/paths.js` `chatRoots`: `--root`, `NOS_SPECS_ROOT`, else the walk from the
   current directory). The chat always works with **main**: from a worktree of the project (also the Stop hook's `cwd`)
   every command reaches the chat of the main checkout, same state dir, same session key (sha256 of main's real path).
-  Without `nos.config.json` every command fails with "nos is not set up … Run nos init" (the hook prints nothing).
+  Without `nos.config.json` in main every command fails with "nos is not set up in <main> …: run nos init" (the hook
+  prints nothing). `status` and the server log print main with forward slashes.
 - State: `<specs>/.chat/` (`sessions.json`, `server.json`, `server.log`, `devices.json`, `audit.log`, `tls/`, and a
   `.gitignore` of `*`; `.specs/.gitignore` of `nos init` ignores `.chat/` too). `src/chat/devices.js` and
   `src/chat/paths.js` (with `devices.d.ts` / `paths.d.ts`) are shared with the spec-ui dev server.
@@ -328,9 +329,11 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
   `claude` (path of the executable).
 - A tab's session never inherits `NOS_SPECS_ROOT` or `NOS_RUN_TOKEN` (nor the variables of the Claude Code session
   that started the server).
-- The run of a tab: when a tool result holds the JSON of `nos run start` (`"action": "run-start"`), the tab records
-  `run: { kind, id, domain, branch, worktree }` (never the token) in `sessions.json`; `run-cleanup` / `run-abandon`
-  clear it. Error reports (`{ action, error, … }`) and failed tool calls are ignored. `run` is in `GET /api/sessions`
+- The run of a tab: when the result of the session's own shell call (Bash/PowerShell, not a subagent's) of
+  `nos run start` holds its JSON (`"action": "run-start"`), the tab records `run: { kind, id, domain, branch, worktree }`
+  (never the token) in `sessions.json`; the results of `nos run cleanup` / `nos run abandon` clear it. Other tools
+  (Read, grep, cat), error reports (`{ action, error, … }`) and failed calls are ignored. Not covered: a `nos run`
+  call in a background shell (its output arrives through another tool). `run` is in `GET /api/sessions`
   (`sessions`, `tabs`), `GET /api/session/<key>` and the `sessions` events.
 - Env for tests: `NOS_CHAT_STATE_DIR`, `NOS_CHAT_PORT`, `NOS_CHAT_IDLE_MS` (`0`/`off` disables the 30 min idle exit).
 - Design: `../ui/requirements/Technical design local web chat for Claude Code.md` and
