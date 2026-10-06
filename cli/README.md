@@ -83,10 +83,15 @@ Home guard: when `<main>/.claude/skills/nos` exists and is not this nos, or this
 | `6`  | Another run is active in the domain            |
 | `7`  | Timeout waiting for a slot                     |
 
-For codes 3–7 stdout also gets `{ "action", "error", "exit", "details" }` (details: holder, file lists) and stderr one line. Codes and `NosError` live in `src/exit-codes.js`. `action` is the command's action name (`lock-take`, `gate`, `exec`, ...).
+For codes 3–7 stdout also gets `{ "action", "error", "exit", "details" }` (details: holder, file lists) and stderr one line. So does a 1 of `run finish` whose details the orchestrator needs (gate fail, main busy, main dirty, main on another branch, ff refused twice). Codes and `NosError` live in `src/exit-codes.js`. `action` is the command's action name (`lock-take`, `gate`, `exec`, ...).
 
 | Command | Exit codes |
 | --- | --- |
+| `run start` | 0, 1 (no git, target invalid/merged/discarded, detached main, git failed), 2, 4 run held by another token, 6 another run in the domain |
+| `run sync` | 0, 1 (no token, worktree missing, git failed), 3 rebase conflict / in progress, 4 another token, 5 dirty worktree |
+| `run finish` | 0, 1 (not done, gate fail, main busy/dirty/on another branch, ff refused twice, no token), 3, 4 (another token, or merge lock held), 5, 7 no slot for e2e |
+| `run cleanup` / `run abandon` | 0, 1 (inside the worktree, wrong phase, worktree in use, git failed), 4 another token |
+| `set-status --run` | 0, 1 violation / unknown run, 2 bad run id or status |
 | `specs commit` | 0, 1 (not its own repo, unknown run or domain, git failed), 2 (not exactly one of `--run`/`--domain`/`--config`, no `-m`) |
 | `specs find-step` | 0, 1 not found, 2 bad id |
 | `gate` | 0 pass, 1 a tool failed or timed out (JSON still printed), not set up or interrupted, 7 no slot for e2e |
@@ -116,8 +121,8 @@ How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the
   "phase": "develop | integrate | gate | merge | merged | abandoned" }
 ```
 
-- **Token = holder.** `run start` mints it. Every mutating run command needs `--token <t>` (fallback env `NOS_RUN_TOKEN`). Missing → exit 1 "--token required", another token → exit 4. Every token call updates `seen`. Cooperative guard for solo use, not a security boundary. `src/runs.js` writes run files atomically (tmp + rename).
-- **Locks:** `<specs>/.locks/<name>/holder.json`, created by `mkdir` (atomic). Holder `{run, token, pid, command, taken}`. Reentrant for the same token, so a crashed `finish` resumes. Locks (`merge`, `ids`) and runs are never broken automatically; `--break` is the user's call. Only a slot lease whose process is gone is reclaimed (see [Slots](#slots)) [D-10]. Names: `merge` (finish), `ids` (id counters, CLI internal), `slot-<n>` (gate e2e, exec dev). Lock `ids`: every id reservation (`create-domain`, `create-plan`, `update-plan`, `create-quick-step`) runs its read-modify-write of `<specs>/config.json` under it, waiting up to 10 s (then exit 4, hint `nos lock release ids --break`).
+- **Token = holder.** `run start` mints it. Every mutating run command needs `--token <t>` (fallback env `NOS_RUN_TOKEN`). Missing → exit 1 "--token required", another token → exit 4. Every token call updates `seen`. `sync`, `finish`, `cleanup` and `abandon` act on `--run <kind>-<id>` when given, else on the run whose worktree the current directory is in, else on the run holding the token (so `cleanup` from main needs only the token). Cooperative guard for solo use, not a security boundary. `src/runs.js` writes run files atomically (tmp + rename).
+- **Locks:** `<specs>/.locks/<name>/holder.json`, created by `mkdir` (atomic). Holder `{run, token, pid, command, taken}`. Reentrant for the same token, so a crashed `finish` resumes. Locks (`merge`, `ids`) and runs are never broken automatically; `--break` is the user's call. Only a slot lease whose process is gone is reclaimed (see [Slots](#slots)) [D-10]. Names: `merge` (finish), `runs` (run start, CLI internal), `ids` (id counters, CLI internal), `slot-<n>` (gate e2e, exec dev). Lock `ids`: every id reservation (`create-domain`, `create-plan`, `update-plan`, `create-quick-step`) runs its read-modify-write of `<specs>/config.json` under it, waiting up to 10 s (then exit 4, hint `nos lock release ids --break`).
 
 ### `run start`
 
@@ -125,68 +130,116 @@ How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the
 nos run start --domain <domain> (--plan | --quick <stepId>) [--token <t>] [--take-over]
 ```
 
-1. Needs git. Validates the target: a plan with at least one phase and status not merged/discarded, or an existing quick step.
-2. Run file exists: same token → idempotent resume (recreates a missing worktree). Other token → exit 4 with holder and age. `--take-over` → new token.
-3. Another run in the same domain → exit 6.
-4. Uncommitted specs of this domain (leftovers of a crashed session) → committed as `<run>: leftovers`, reported.
-5. Branch `<kind>-<id>` (reused, or created from the current main branch), `git worktree add <main>/.claude/worktrees/<kind>-<id>`, run file with `base` and `phase: develop`, `branch` written into `plan.json` / the quick step entry.
-6. `project-commands.install` in the worktree. A failure is reported; the run stays.
+Steps 1–6 run under the short lock `runs` (waits up to 10 s, then 4): two sessions starting the same run, or two runs of one domain, at the same moment get one run and one 4 / 6.
+
+1. Needs git. Validates the target: a plan with at least one phase and status not merged/discarded, or an existing quick step of the domain that is not merged/discarded. `--plan` runs `plan-<domain id>`.
+2. Run file exists: same token (or `NOS_RUN_TOKEN`) → idempotent resume (recreates a missing worktree; no install when the worktree was there). No token or another token → exit 4 with `{ run, domain, phase, started, seen, ageSec }`. `--take-over` → new token; a merge lock the old token left (crashed finish) is released, but while the old holder's process still lives (its finish still runs) take-over is refused with 4.
+3. Run file in phase `merged` or `abandoned`: only the token is handled (same token → returned, `--take-over` → new token), no git work and no target check, so a session without the token reaches `run cleanup`.
+4. Another run in the same domain → exit 6 with `{ run, domain, phase, branch, worktree, started, seen, ageSec }`.
+5. Uncommitted specs of this domain (leftovers of a crashed session) → committed as `<run>: leftovers`, reported in `leftovers`.
+6. Branch `<kind>-<id>` (reused, or created from the branch main has checked out; detached → 1), `git -C <main> -c core.longpaths=true worktree add <main>/.claude/worktrees/<kind>-<id>` ("Filename too long" → 1 with a hint), run file with `base` (main's tip, or the merge base for a reused branch) and `phase: develop`, `branch` written into `plan.json` / the quick step entry.
+7. `project-commands.install` of the worktree's `nos.config.json`, run in the worktree, only when the worktree was created now. Output to `<specs>/.runs/logs/<run>/install.log`, never stdout. A failure is reported in `install` (`code`, `log`), the run stays. Not configured → `install: null`.
+
+`enter` (and `roots.work`) is the folder to enter: the worktree plus the project's offset in its repo (monorepo: `<worktree>/<offset>`). The result never has an `error` key (the chat detects a run by `"action": "run-start"`).
 
 ```json
-{ "action": "run-start", "run": "quick-7", "token": "1a2b3c4d",
+{ "action": "run-start",
+  "run": { "kind": "quick", "id": 7, "domain": "domain-2-auth", "branch": "quick-7",
+           "worktree": "D:/repo/.claude/worktrees/quick-7", "base": "<sha>", "mainBranch": "main",
+           "phase": "develop", "started": "<iso>", "seen": "<iso>" },
+  "token": "1a2b3c4d",
   "roots": { "home": "D:/repo/.claude/skills/nos", "work": "D:/repo/.claude/worktrees/quick-7", "main": "D:/repo", "specs": "D:/repo/.specs" },
-  "enter": "D:/repo/.claude/worktrees/quick-7" }
+  "enter": "D:/repo/.claude/worktrees/quick-7",
+  "install": { "code": 0, "log": "D:/repo/.specs/.runs/logs/quick-7/install.log" },
+  "leftovers": null }
 ```
+
+`leftovers` when something was committed: `{ "committed": true, "sha", "files": [<abs>] }`. `warnings: [...]` is added when the worktree folder is not ignored by the project (`git check-ignore`; `nos init` adds `.claude/worktrees/`).
 
 ### `run sync`
 
 ```sh
-nos run sync --token <t>
+nos run sync --token <t> [--run <kind>-<id>]
 ```
 
-Rebases the run branch onto the main branch, in the worktree. Rebase already in progress → 3 with the unmerged files. Dirty worktree → 5 with the files (never autostashed). Conflict → 3 with the conflict list, the rebase is left open for the `integrate` ability. Clean → updates `base` and prints `{ahead, behind, base}`.
+Rebases the run branch onto the main branch, in the worktree (`git -c core.editor=true rebase --no-autostash <mainBranch>`, `GIT_EDITOR=true`).
+
+- Rebase already in progress (a `rebase-merge` / `rebase-apply` folder in the worktree's git dir) → 3 with the unmerged files. `REBASE_HEAD` alone does not count: git leaves it behind after a finished rebase.
+- Dirty worktree (`status --porcelain --untracked-files=all`) → 5 with the files (never autostashed).
+- Conflict → 3, the rebase is left open for the `integrate` ability.
+- Worktree not on its branch → 1. Worktree missing → 1 ("nos run start --token <t> recreates it").
+- Clean → updates `base` and `seen`.
+
+File lists in `details`: `files` (relative to the worktree's top) and `paths` (absolute). 3 also has `rebaseInProgress: true`, `worktree`, `branch`, `mainBranch`.
+
+```json
+{ "action": "run-sync", "run": { "kind": "quick", "id": 7, "...": "..." }, "base": "<main sha>", "ahead": 2, "behind": 0, "rebased": true }
+```
 
 ### `run finish`
 
 ```sh
-nos run finish --token <t>
+nos run finish --token <t> [--run <kind>-<id>]
 ```
 
-Precondition: the plan or quick step has status `done` (else 1). Then, under lock `merge`, recorded in the run file's `phase`:
+Precondition: the plan or quick step has status `done` (else 1, no lock taken); the `merged` transition is checked before main moves. Then, under lock `merge` (`{ run, token, command: "run finish" }`; held by another token → 4 with `{ lock, path, holder, ageSec, pidAlive, hint }`), recorded in the run file's `phase`:
 
 1. `phase=integrate`.
-2. Main busy (`MERGE_HEAD`, `REBASE_HEAD`, `CHERRY_PICK_HEAD`) → release, 1.
-3. Main dirty on the paths the branch touches → release, 1 with the list.
-4. Sync → 3 or 5 → release, same code.
-5. `phase=gate`: the full gate, e2e included when configured. Fail → release, 1, gate JSON in `details`.
-6. `phase=merge`: `git -C <main> merge --ff-only <branch>`. Refused → back to 4 once, then 1.
+2. Main's checkout is on `mainBranch` (else 1 "main checkout is on <x>, expected <mainBranch>"). Main busy (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, one `rev-parse -q --verify` each, or a `rebase-merge` / `rebase-apply` folder in main's git dir) → 1 with `details.busy`.
+3. Main dirty on the paths the branch touches (`git diff --name-only --no-renames <mainBranch>...<branch>`, intersected with main's `status --porcelain --untracked-files=all`) → 1 with `details.files` / `paths`. Main is untouched by every refusal.
+4. Sync as `run sync` → 3 or 5.
+5. `phase=gate`: the full gate in the worktree, e2e included when `quality-tools.e2e` is configured. Fail → 1, `details.gate` = the gate result.
+6. `phase=merge`: `git -C <main> merge --ff-only <branch>` (main's working tree moves along). Refused (main moved, e.g. an architect commit) → steps 1–6 once more, then 1.
 7. `set-status --run <run> merged`, `specs commit "<run>: merged"`, `phase=merged`, release.
 
-A crash resumes: the same token re-takes its own lock and continues at the recorded phase. Main is never pushed.
+Every failure releases the lock and parks the run in `phase=develop` (a failure after the merge keeps `phase=merge`). A crash keeps lock and phase: the same token re-takes its own lock and continues; `phase=merge` with the branch already in main skips to step 7. A finished run (`phase=merged`) returns `{ "action": "run-finish", "run", "merged": true, "already": true }` and releases a merge lock of its token. Main is never pushed.
+
+```json
+{ "action": "run-finish", "run": { "...": "...", "phase": "merged" }, "merged": true, "mainBranch": "main",
+  "head": "<main sha = branch tip>", "resumedFrom": null, "gate": { "action": "gate", "pass": true, "tools": [] },
+  "statuses": { "action": "set-status", "...": "..." }, "specs": { "committed": true, "sha": "<sha>" } }
+```
+
+`resumedFrom`: the phase a resumed finish found (`integrate`, `gate`, `merge`), else null. `gate` is null when step 7 was all that was left.
 
 ### `run cleanup`
 
 ```sh
-nos run cleanup --token <t>
+nos run cleanup --token <t> [--run <kind>-<id>]
 ```
 
-Run from main, never from inside the worktree (refused: "ExitWorktree keep first"). Needs `phase` `merged` or `abandoned`. Removes the worktree, deletes the branch (`-d` merged, `-D` abandoned) and the run file. The `branch` field stays in the specs as history. A Windows lock error hints at a running dev server. Prints `{"action": "run-cleanup", …}`.
+Run from main, never from inside the worktree (refused with 1: "ExitWorktree (keep) first"). Needs `phase` `merged` or `abandoned`. `git -C <main> worktree remove [--force] <wt>` (`--force` for abandoned; for merged only when git refuses for untracked files alone, e.g. gate output; modified tracked files → 5 with the list), `git worktree prune`, `git branch -D` (merged: only when the branch is in `mainBranch`, so it works also when main's checkout is on another branch; else 1), run file deleted; a merge lock of this run's token is released. The `branch` field stays in the specs as history. Each part that is already gone is skipped, so a cleanup that failed half way is simply rerun. A folder still in use (Windows: "Permission denied", "Device or resource busy") → 1 "a process (dev server, terminal, editor) still uses <wt>; stop it and rerun nos run cleanup".
+
+```json
+{ "action": "run-cleanup", "run": { "kind": "quick", "id": 7, "...": "..." }, "removed": { "worktree": true, "branch": true, "runFile": true } }
+```
 
 ### `run abandon`
 
 ```sh
-nos run abandon --token <t>
+nos run abandon --token <t> [--run <kind>-<id>]
 ```
 
-`set-status --run <run> discarded`, `specs commit`, `phase=abandoned`, then the cleanup. Cleanup can be retried. Prints `{"action": "run-abandon", …}`.
+Any phase except `merged`, not from inside the worktree. `phase=merge` with the branch already in `mainBranch` (a finish crashed after the merge) → 1 "already in main: run nos run finish to complete it". `set-status --run <run> discarded`, `specs commit "<run>: discarded"`, `phase=abandoned` (written before the cleanup), then the cleanup (`--force`, `-D`). A failed cleanup is retried with `nos run cleanup`. A rerun on an abandoned run only does the cleanup (`statuses` and `specs` null).
+
+```json
+{ "action": "run-abandon", "run": { "...": "...", "phase": "abandoned" }, "removed": { "worktree": true, "branch": true, "runFile": true },
+  "statuses": { "action": "set-status", "...": "..." }, "specs": { "committed": true, "sha": "<sha>" } }
+```
 
 ### `set-status --run`
 
 ```sh
-nos set-status --run <kind>-<id> merged|discarded
+nos set-status --run <kind>-<id> merged|discarded [--token <t>]
 ```
 
-Flips a whole run in one write per file. Plan merged: plan `done → merged`, steps `done → merged`, phases unchanged. Plan discarded: plan and every step not merged → `discarded`. Quick: the step `done → merged`, or any status except merged → `discarded`. A violation → 1. Plain `set-status --status merged|discarded` is refused: only `run finish` and `run abandon` call it.
+Flips a whole run in one write per file. The domain comes from the run file (else the `domain-<id>-*` folder of a plan run, or the domain whose quick steps hold the step). Plan merged: plan `done → merged`, steps `done → merged`, phases unchanged. Plan discarded: plan and every step not merged → `discarded` (merged steps stay). Quick: the step `done → merged`, or any status except merged → `discarded`. Targets already at the status stay (a rerun changes nothing). A violation → 1 with `details.violations`, nothing written. While the run file exists the holder's `--token` (or `NOS_RUN_TOKEN`) is required (missing 1, another 4); `finish` and `abandon` call it internally. Plain `set-status --status merged|discarded` is refused (1, hint to `--run`): only `run finish` and `run abandon` call it.
+
+```json
+{ "action": "set-status", "run": "quick-7", "domain": "domain-2-auth", "status": "merged",
+  "file": "D:/repo/.specs/domain-2-auth/quick-steps/quick-steps.json",
+  "changes": [{ "target": "step", "id": 7, "slug": "fix-login-typo", "previous": "done", "status": "merged" }] }
+```
 
 ### `gate`
 
@@ -294,12 +347,12 @@ nos lock release <name> (--token <t> | --break) [--root <dir>]
 nos lock status [<name>] [--root <dir>]
 ```
 
-A lock is the folder `<specs>/.locks/<name>`, created by `mkdir` (atomic: exactly one taker wins), with `holder.json` `{ run, token, pid, command, taken }`. Names are lowercase letters, digits and dashes (`merge`, `ids`, `slot-<n>`). The same token re-takes its own lock (refreshes `taken`, `reentrant: true`). Another token → exit 4 with `{ lock, path, holder, ageSec, pidAlive, hint }`. A lock is never broken automatically (only a dead slot lease is reclaimed, see [Slots](#slots)); `--break` is the user's call. `--token` falls back to `NOS_RUN_TOKEN`. `pidAlive` is false for a lock taken by `nos lock take` once that process ended.
+Printed holders (`lock status`, exit-4 details, reclaimed slot leases) never show the `token`; it stays in `holder.json`. A lock is the folder `<specs>/.locks/<name>`, created by `mkdir` (atomic: exactly one taker wins), with `holder.json` `{ run, token, pid, command, taken }`. Names are lowercase letters, digits and dashes (`merge`, `ids`, `slot-<n>`). The same token re-takes its own lock (refreshes `taken`, `reentrant: true`). Another token → exit 4 with `{ lock, path, holder, ageSec, pidAlive, hint }`. A lock is never broken automatically (only a dead slot lease is reclaimed, see [Slots](#slots)); `--break` is the user's call. `--token` falls back to `NOS_RUN_TOKEN`. `pidAlive` is false for a lock taken by `nos lock take` once that process ended.
 
 ```sh
 $ nos lock take merge --token 1a2b3c4d --run quick-7
 { "action": "lock-take", "lock": "merge", "path": "D:/repo/.specs/.locks/merge",
-  "holder": { "run": "quick-7", "token": "1a2b3c4d", "pid": 4242, "command": "lock take", "taken": "<iso>" },
+  "holder": { "run": "quick-7", "pid": 4242, "command": "lock take", "taken": "<iso>" },
   "reentrant": false }
 $ nos lock release merge --token 1a2b3c4d
 { "action": "lock-release", "lock": "merge", "path": "...", "released": true, "broken": false, "holder": { ... } }
@@ -464,6 +517,7 @@ Start from the current `<specs>/<domain>/plan.json`, edit it, and pass it back. 
 - Deleting a step file with content, or a phase folder that contains other files, is refused unless you pass `--force`.
 - `--dry-run` prints the changes, including the ids that would be assigned, without writing anything.
 - Ids of deleted phases and steps are never reused.
+- Statuses survive an update that leaves them out: the plan's `status`, and `status` of kept phases (by slug) and kept steps (by spec-file). A status given in the update wins. `branch` is written by `run start` only: the current value always stays. Every other field follows the update as given.
 
 The output lists `created`, `moved` and `deleted` phases and steps with absolute paths (`path`, `from`, `to`); created and moved steps also carry their new `specFile` (relative). See `nos help update-plan` for an example.
 
