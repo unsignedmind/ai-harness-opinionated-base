@@ -80,6 +80,8 @@ test('open, await, message, reply, pending, end, stop', async (t) => {
   assert.equal(open.code, 0);
   assert.equal(open.json.status, 'open');
   assert.equal(open.json.key, keyOf(root));
+  // the spec-ui port is not known to the CLI: the hint names it as the default only
+  assert.match(open.json.specUi, /default port 5180/);
   assert.ok(existsSync(path.join(stateOf(root), '.gitignore')));
   const port = JSON.parse(readFileSync(files(stateOf(root)).server, 'utf8')).port;
 

@@ -91,7 +91,7 @@ Idempotent: on a fresh project it sets everything up, on a set up one it only ch
   "additional": ["npm run knip"]
 },
 "project-commands": {
-  "install": "npm install",
+  "install": "npm ci",
   "dev": "npm run dev",
   "deploy-test": "npm run deploy:test"
 }
@@ -245,6 +245,7 @@ nos.config.json                          tracked: quality tools, project command
 .claude/worktrees/plan-1/                worktree of a running run (branch plan-1)
 .specs/                                  own git repo, ignored by the project
 ├── config.json                          id counters (managed by nos), chat
+├── .gitignore .gitattributes            local state ignored; LF working copies (nos init)
 ├── .runs/ .locks/ .chat/                running runs, locks, chat state (local, not committed)
 └── domain-1-user-auth/
     ├── idea.md                          the idea
@@ -859,4 +860,4 @@ Run inside `cli/`: `npm test` (node:test) or `npm run test:watch`. Code lives in
 
 ### Migrating a project with tracked `specs/`
 
-Older nos versions kept the specs in a tracked `specs/` folder with `specs/config.json`. The new nos does not detect or convert that layout (a `spec-file` starting with `specs/` fails with "run the migration"). Migrate once by hand, working tree clean, following steps 1–10 in `ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": split the `specs/` history into the `.specs` repo, move `.chat`, split the config into `nos.config.json` and `.specs/config.json`, drop the `specs/` prefix of every `spec-file`, untrack `specs/`, write `.claude/settings.local.json` with absolute paths, and verify with `nos roots`.
+Older nos versions kept the specs in a tracked `specs/` folder with `specs/config.json`. The new nos does not detect or convert that layout (a `spec-file` starting with `specs/` fails with "run the migration"). Migrate once by hand, working tree clean, following the rehearsed steps 1–10 in `ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": split the `specs/` history with `git filter-branch --prune-empty --subdirectory-filter specs` in a bare throw-away clone (not `git subtree split`: it leaks project history when `specs/` was deleted and re-added), write `.specs/.gitattributes` (`* text=auto eol=lf`) before pulling it into the `.specs` repo, move `.chat`, split the config into `nos.config.json` and `.specs/config.json`, drop the `specs/` prefix of every `spec-file` with a JSON-safe script, untrack `specs/`, run `nos init --root <project>` (adds the missing `.gitignore` entries), commit both repos, write `.claude/settings.local.json` with absolute paths, and verify with `nos roots`.

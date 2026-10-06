@@ -28,6 +28,7 @@ description: You set up nos for the project. Creates or checks nos.config.json a
     </step1>
     <step2>Detect the tooling: package manager from the lockfile (npm, pnpm, yarn, bun) and package.json scripts. Other stacks: Makefile, pyproject.toml, go.mod, gradle, Cargo.toml, CI pipeline files</step2>
     <step3>Propose one table: key, proposed command or "not found", current value if any. Map the found commands to the keys with the script call of the detected package manager, e.g. "pnpm run lint". Prefer check variants over write variants, e.g. format:check over format. List candidates for "additional" separately. Add:
+        <do>project-commands install: the lockfile-exact install, which never rewrites the lockfile, so a fresh worktree stays clean: npm with package-lock.json → "npm ci", pnpm → "pnpm install --frozen-lockfile", yarn → "yarn install --frozen-lockfile" (berry: "yarn install --immutable"), bun → "bun install --frozen-lockfile"</do>
         <do>spec-ui docs-folder: the project's documentation folder relative to the repo root, default "docs"</do>
         <do>worktrees slots: 3 when e2e is configured, else 1. slotWait: seconds a gate or dev server waits for a free slot, default 600</do>
         Check only → mark unchanged rows. Ask the user to confirm or adjust

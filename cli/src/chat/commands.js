@@ -238,7 +238,7 @@ export async function runChat(argv, io = {}) {
           status: 'open',
           url,
           key: r.body.key,
-          specUi: `http://localhost:${SPEC_UI_PORT}/ (chat button in the header)`,
+          specUi: `spec-ui (default port ${SPEC_UI_PORT}, e.g. http://localhost:${SPEC_UI_PORT}/): chat button in the header`,
           next_step: 'Run `nos chat await` in the background now.',
         });
         return 0;

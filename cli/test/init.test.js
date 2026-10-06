@@ -37,12 +37,13 @@ test(
     );
     assert.deepEqual(readJson(specs, 'config.json'), { 'id-counters': { domain: 1, phase: 1, step: 1 } });
     assert.equal(read(path.join(specs, '.gitignore')), '.chat/\n.locks/\n.runs/\n');
+    assert.equal(read(path.join(specs, '.gitattributes')), '* text=auto eol=lf\n');
     assert.equal(read(path.join(root, '.gitignore')), '.specs/\n.claude/worktrees/\n');
     assert.deepEqual(result.gitignoreAdded, ['.specs/', '.claude/worktrees/']);
 
     assert.equal(gitOk(['symbolic-ref', '--short', 'HEAD'], specs), 'main');
     assert.equal(gitOk(['log', '--format=%s'], specs), 'nos: init');
-    assert.deepEqual(gitOk(['ls-files'], specs).split('\n').sort(), ['.gitignore', 'config.json']);
+    assert.deepEqual(gitOk(['ls-files'], specs).split('\n').sort(), ['.gitattributes', '.gitignore', 'config.json']);
     assert.equal(result.commit, gitOk(['rev-parse', 'HEAD'], specs));
     assert.equal(gitOk(['rev-parse', 'HEAD'], root), head, 'nothing is committed in the project');
     assert.deepEqual(
@@ -52,6 +53,7 @@ test(
         specs,
         path.join(specs, 'config.json'),
         path.join(specs, '.gitignore'),
+        path.join(specs, '.gitattributes'),
         path.join(specs, '.git'),
       ].sort(),
     );
@@ -63,7 +65,7 @@ test(
 test('init is idempotent: a second run creates, commits and appends nothing', noGit, (t) => {
   const root = gitProject(t);
   initProject(rootsOf(root));
-  const files = ['nos.config.json', '.gitignore', '.specs/config.json', '.specs/.gitignore'];
+  const files = ['nos.config.json', '.gitignore', '.specs/config.json', '.specs/.gitignore', '.specs/.gitattributes'];
   const before = files.map((f) => read(path.join(root, f)));
 
   const again = initProject(rootsOf(root));
@@ -77,6 +79,25 @@ test('init is idempotent: a second run creates, commits and appends nothing', no
     before,
   );
   assert.equal(gitOk(['rev-list', '--count', 'HEAD'], path.join(root, SPECS_DIR)), '1');
+});
+
+test('init leaves .gitattributes alone: an existing file is kept, a .specs with history gets none', noGit, (t) => {
+  const own = gitProject(t);
+  writeFile(own, '.specs/.gitattributes', '* -text\n');
+  initProject(rootsOf(own));
+  assert.equal(read(path.join(own, '.specs', '.gitattributes')), '* -text\n');
+  assert.ok(gitOk(['ls-files'], path.join(own, '.specs')).split('\n').includes('.gitattributes'));
+
+  // a migrated .specs: repo with history, no .gitattributes -> init adds nothing there
+  const migrated = gitProject(t);
+  const specs = path.join(migrated, '.specs');
+  initRepo(specs);
+  writeFile(specs, 'config.json', { 'id-counters': { domain: 2, phase: 1, step: 1 } });
+  gitOk(['add', '-A'], specs);
+  gitOk(['commit', '-m', 'history'], specs);
+  const result = initProject(rootsOf(migrated));
+  assert.equal(existsSync(path.join(specs, '.gitattributes')), false);
+  assert.equal(result.commit, null);
 });
 
 test('init appends only the missing .gitignore entries and keeps an existing nos.config.json', noGit, (t) => {

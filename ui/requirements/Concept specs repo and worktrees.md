@@ -35,6 +35,7 @@ Constraints:
   .claude/worktrees/<kind>-<id>/  project worktree, branch plan-<id> or quick-<id>; no .specs, maybe no .claude
   .specs/                       own git repo, branch main, local (solo)
     .gitignore                  ".chat/", ".locks/", ".runs/"  (dot = local state, no dot = history)
+    .gitattributes              "* text=auto eol=lf": LF working copies on every OS (project's attributes do not reach in)
     config.json                 planning state only: id-counters, chat
     domain-*/ ...
     .runs/<kind>-<id>.json      run registry, one file per running plan or quick step
@@ -159,24 +160,26 @@ Parallel develops collide on ports, not on git. A slot is only needed while a se
 
 ## Setup skill (idempotent, any project)
 No migration logic in nos. Two states:
-1. Fresh: `git init -b main .specs`, write `.specs/.gitignore` (`.chat/`, `.locks/`, `.runs/`) and `.specs/config.json` (id-counters), project `.gitignore` entries `.specs/` and `.claude/worktrees/`, create `nos.config.json` from template, then quality tools + project commands + slots + slot verification.
+1. Fresh: `git init -b main .specs`, write `.specs/.gitignore` (`.chat/`, `.locks/`, `.runs/`), `.specs/.gitattributes` (`* text=auto eol=lf`) and `.specs/config.json` (id-counters), project `.gitignore` entries `.specs/` and `.claude/worktrees/`, create `nos.config.json` from template, then quality tools + project commands + slots + slot verification.
 2. New layout exists: check only, fill a missing config, offer a remote.
 3. Optional remote (backup only): `nos.config.json` → `specs.remote`. Fresh clone setup runs `git clone <remote> .specs`; `.specs/.chat` is recreated by `ensureStateDir`.
 Settings: permissions and hook entries for the chat go to `.claude/settings.local.json`, pointing at `node <NOS_HOME>/cli/bin/nos.js`. `settings.json` is never written. Setup commits `nos.config.json` and `.gitignore` directly on main (listed exception).
 Old layout (`specs/` tracked) is not detected and not handled. Only this project has it, see below.
 
 ## Migration of this project (one-off, last step, by hand)
-Separate plan step, no code. Runs once on moodo-poc after every other step is merged. Commands, working tree clean:
-1. `git subtree split --prefix=specs -b nos-specs-history`
-2. `git init -b main .specs` + `git -C .specs pull --ff-only <project> nos-specs-history`
-3. move `specs/.chat` (incl. tls) to `.specs/.chat`, write `.specs/.gitignore`
-4. `.specs/config.json`: keep `id-counters` and `chat`, remove `quality-tools`, `project-commands`, `spec-ui`
-5. `nos.config.json`: `quality-tools`, `project-commands`, `spec-ui.docs-folder` from the old config, `specs: { dir: ".specs" }`, `worktrees: { slots, slotWait }`
-6. rewrite every `spec-file` in `plan.json` / `quick-steps.json`: drop the `specs/` prefix (one sed over `.specs`)
-7. project: `git rm -r --cached specs`, delete folder, `.gitignore` entries, add `nos.config.json`, commit `nos: move specs to own repo`
-8. `git -C .specs add -A && git -C .specs commit -m "nos: config split"` (`.runs/`, `.locks/`, `.chat/` are ignored by then), delete temp branch `nos-specs-history`
-9. `.claude/settings.local.json`: absolute CLI paths; remove the relative entries from `settings.json`
-10. verify: `nos roots` from main, from nos and from `.specs` print the same specs root, spec-ui shows all domains, chat starts
+Separate plan step, no code. Runs once on moodo-poc after every other step is merged. Rehearsed 2026-10-06 on a sandbox copy. Git Bash, working tree clean, `P` = project, `H` = NOS_HOME, `T` = scratch dir outside the project:
+Preconditions: chat server and spec-ui stopped; `git status --short` empty; `git status --short --ignored specs` lists only `specs/.chat/` (move anything else out); record `git log --oneline -- specs | wc -l` and `git rev-parse main:specs`.
+
+1. split: `git clone --bare --no-local --single-branch -b main $P $T/specs-split.git`, in it `git filter-branch --prune-empty --subdirectory-filter specs -- main`. Not `git subtree split`: it leaks project history (full project trees as parents) when `specs/` was deleted and re-added. Check: commit count and `main^{tree}` = baseline, no commit has `package.json`. Bare, because a non-bare clone of moodo fails its checkout on Windows
+2. `git init -b main .specs`, write `.specs/.gitattributes` (`* text=auto eol=lf`; moodo: plus `slop-to-clean-arch-migration/** -text`) **before** `git -C .specs pull --ff-only $T/specs-split.git main`. The project's `.gitattributes` does not reach into the nested repo; with `core.autocrlf=true` the working copies would come out CRLF. Check `git -C .specs ls-files --eol`
+3. move `specs/.chat` (incl. tls, sessions) to `.specs/.chat`, write `.specs/.gitignore` (`.chat/`, `.locks/`, `.runs/`)
+4. `.specs/config.json`: keep `id-counters` (+ `chat` if present), drop the rest. Steps 4 and 5 are one node script
+5. `nos.config.json` from the template: `specs.dir ".specs"`, `worktrees {slots, slotWait}`, `quality-tools` (template `timeout` kept), `project-commands`, `spec-ui.docs-folder` from the old config. Project formats JSON with prettier → `npx prettier --write nos.config.json` (else `format-check` fails on it)
+6. drop the `specs/` prefix of every `spec-file` in `plan.json` / `quick-steps.json` with a JSON-safe node script (not sed): keeps indentation and EOL, reports stale paths (left as they are, fixed separately). Check: no `"spec-file": "specs/` left, the diff touches only spec-file lines
+7. project: `git rm -r -q --cached specs`, delete folder, `nos init --root $P` (idempotent: appends only missing `.gitignore` entries, via `git check-ignore`; no `.specs` commit since it has a HEAD), `git add .gitignore nos.config.json`, commit `nos: move specs to own repo`
+8. `git -C .specs add -A && git -C .specs commit -m "nos: config split"` (`.gitattributes`, `.gitignore`, config, rewritten plans; `.runs/`, `.locks/`, `.chat/` ignored), delete `$T/specs-split.git`
+9. `.claude/settings.local.json`: permissions only, `Bash(node <H>/cli/bin/nos.js)` and `… *` with absolute paths; no hook (runner mode). Remove the nos entries (relative permissions, Stop hook) from `settings.json`
+10. verify: `nos roots` from `$P`, `$H`, `.specs`, `src` print the same specs root; spec-ui shows all domains, `/__runs` empty; chat lists the migrated sessions; `nos gate`
 Cutover gotcha: the plan that implements this change is itself tracked in `specs/` and runs the old way on main. Its last step is this migration. Mark the step done after the migration with the new CLI on the migrated `.specs`, not before.
 
 ## Portability

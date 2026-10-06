@@ -373,7 +373,7 @@ Sets up the nos layout of a project. Idempotent: only missing parts are created.
 1. Creates `nos.config.json` from `<home>/templates/nos.config.json` if missing.
 2. Creates `.specs/` with `config.json` (id-counters, from `<home>/templates/config.json`) and `.gitignore` (`.chat/`, `.locks/`, `.runs/`).
 3. Git project: appends `.specs/` and `.claude/worktrees/` to the project `.gitignore`, unless a `.gitignore` of the repo already ignores them (`git check-ignore`, so `.claude/*` counts; global excludes and `.git/info/exclude` do not). Appended in the file's line ending (CRLF stays CRLF).
-4. Git available: `git init -b main` in `.specs`, first commit `nos: init` (`.gitignore`, `config.json`), and `git remote add origin <specs.remote>` when `specs.remote` is set and `.specs` has no `origin`. An `origin` with another URL is left and reported as `{url, existing, added: false, mismatch: true}`. A commit failing for a missing git identity says to set `user.name` / `user.email`.
+4. Git available: `git init -b main` in `.specs`. A `.specs` without a commit yet also gets `.gitattributes` (`* text=auto eol=lf`, LF working copies on every OS: the project's `.gitattributes` does not reach into the nested repo, and `core.autocrlf=true` would check out CRLF; an existing file stays untouched) and the first commit `nos: init` (`.gitattributes`, `.gitignore`, `config.json`). A `.specs` with history gets no `.gitattributes`. Then `git remote add origin <specs.remote>` when `specs.remote` is set and `.specs` has no `origin`. An `origin` with another URL is left and reported as `{url, existing, added: false, mismatch: true}`. A commit failing for a missing git identity says to set `user.name` / `user.email`.
 
 Without `nos.config.json` and without `--root` / `NOS_SPECS_ROOT` it runs only from the project root: refused in a subfolder of a git repo and inside the nos folder (e.g. `<project>/.claude/skills/nos`). It commits nothing in the project (the setup ability does that). Existing files are never changed, except appended `.gitignore` entries.
 
@@ -383,7 +383,7 @@ $ nos init
   "action": "init",
   "main": "D:/repo",
   "specs": "D:/repo/.specs",
-  "created": ["D:/repo/nos.config.json", "D:/repo/.specs", "D:/repo/.specs/config.json", "D:/repo/.specs/.gitignore", "D:/repo/.specs/.git"],
+  "created": ["D:/repo/nos.config.json", "D:/repo/.specs", "D:/repo/.specs/config.json", "D:/repo/.specs/.gitignore", "D:/repo/.specs/.git", "D:/repo/.specs/.gitattributes"],
   "existing": [],
   "gitignoreAdded": [".specs/", ".claude/worktrees/"],
   "commit": "<sha of the first .specs commit, null when it existed>",
@@ -637,6 +637,7 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 │   └── worktrees/quick-7/      # one git worktree per run, branch quick-7 / plan-<domain id>
 └── .specs/                     # specs root, its own git repo (branch main)
     ├── .gitignore              # ".chat/", ".locks/", ".runs/"
+    ├── .gitattributes          # "* text=auto eol=lf" (nos init)
     ├── config.json             # "id-counters" (managed by nos), "chat"
     ├── .runs/                  # run registry (quick-7.json), gate logs (logs/)
     ├── .locks/                 # merge, ids, slot-<n>
@@ -655,7 +656,7 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 
 ### Migrating a project with tracked `specs/`
 
-A project with the old tracked `specs/` folder and `specs/...` spec-file values is not handled by the CLI (a legacy spec-file fails with "run the migration"). Migrate it once by hand, working tree clean, with the steps 1–10 in `../ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": history split into `.specs`, config split into `nos.config.json` and `.specs/config.json`, spec-file prefix dropped, `specs/` untracked, `settings.local.json` with absolute paths, verify with `nos roots`.
+A project with the old tracked `specs/` folder and `specs/...` spec-file values is not handled by the CLI (a legacy spec-file fails with "run the migration"). Migrate it once by hand, working tree clean, with the rehearsed steps 1–10 in `../ui/requirements/Concept specs repo and worktrees.md`, section "Migration of this project": history split with `git filter-branch --prune-empty --subdirectory-filter specs` in a bare throw-away clone (not `git subtree split`, which leaks project history when `specs/` was deleted and re-added), `.specs/.gitattributes` before the pull, config split into `nos.config.json` and `.specs/config.json`, spec-file prefix dropped with a JSON-safe script, `specs/` untracked, `nos init --root <project>` for the missing `.gitignore` entries, `settings.local.json` with absolute paths, verify with `nos roots`.
 
 Ids are global across the project. Phase and step counters are shared by all domains.
 

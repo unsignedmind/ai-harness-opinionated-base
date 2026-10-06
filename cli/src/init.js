@@ -8,6 +8,9 @@ import { isInside, PROJECT_CONFIG_FILE, slash } from './roots.js';
 
 // .specs keeps history in git; the dot entries are local state
 export const SPECS_GITIGNORE = Object.freeze(['.chat/', '.locks/', '.runs/']);
+// LF working copies in .specs on every OS: a project's .gitattributes does not reach into the nested repo,
+// and core.autocrlf=true would check the specs out as CRLF
+export const SPECS_GITATTRIBUTES = '* text=auto eol=lf\n';
 // <specs> (when inside the project) and the run worktrees
 function projectIgnores(roots) {
   const specs = slash(path.relative(roots.main, roots.specs));
@@ -88,7 +91,8 @@ function commitSpecs(cwd, message) {
 // Sets up the nos layout of a project; every part is created only when missing, so it can run again.
 //   nos.config.json (from the template), <specs>/ as its own git repo (branch main) with .gitignore and
 //   config.json (id-counters), the project .gitignore entries for <specs> and .claude/worktrees/, the first
-//   <specs> commit "nos: init", and origin = specs.remote when set.
+//   <specs> commit "nos: init" (with .gitattributes "* text=auto eol=lf" when <specs> has no commit yet),
+//   and origin = specs.remote when set.
 // Commits nothing in the project. Refused inside a worktree: the layout belongs to main.
 export function initProject(roots) {
   if (roots.inWorktree) {
@@ -126,6 +130,14 @@ export function initProject(roots) {
     gitignoreAdded = ensureIgnored(path.join(roots.main, '.gitignore'), projectIgnores(roots), roots.main);
   }
 
+  // .gitattributes only for a fresh .specs (no history yet); an existing file is never touched
+  const specsAttributes = path.join(roots.specs, '.gitattributes');
+  const writeAttributes = () => {
+    const made = !existsSync(specsAttributes);
+    if (made) writeFileSync(specsAttributes, SPECS_GITATTRIBUTES);
+    note(made, specsAttributes);
+  };
+
   let commit = null;
   let remote = null;
   if (gitAvailable()) {
@@ -135,7 +147,8 @@ export function initProject(roots) {
     note(madeRepo, specsGit);
 
     if (git(['rev-parse', '--verify', '-q', 'HEAD'], { cwd: roots.specs }).code !== 0) {
-      gitOut(['add', '--', '.gitignore', 'config.json'], { cwd: roots.specs });
+      writeAttributes();
+      gitOut(['add', '--', '.gitattributes', '.gitignore', 'config.json'], { cwd: roots.specs });
       commitSpecs(roots.specs, 'nos: init');
       commit = gitOut(['rev-parse', 'HEAD'], { cwd: roots.specs });
     }
@@ -152,6 +165,8 @@ export function initProject(roots) {
         remote = current === url ? { url, added: false } : { url, existing: current, added: false, mismatch: true };
       }
     }
+  } else if (!specsExisted) {
+    writeAttributes();
   }
 
   return { created, existing, gitignoreAdded, commit, remote };

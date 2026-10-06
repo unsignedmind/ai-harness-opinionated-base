@@ -18,7 +18,7 @@ Project specific commands live in `nos.config.json` at the project root. It is t
   "additional": ["npm run knip"]
 },
 "project-commands": {
-  "install": "npm install",
+  "install": "npm ci",
   "dev": "npm run dev",
   "deploy-test": "npm run deploy:test"
 },
@@ -38,7 +38,7 @@ Project specific commands live in `nos.config.json` at the project root. It is t
 | quality-tools    | e2e          | end-to-end tests in a real browser or app                          |
 | quality-tools    | additional   | list of further checks, e.g. dead code, i18n, bundle size: a command string (named additional-<n>) or { "name", "cmd" } |
 | quality-tools    | timeout      | minutes one tool may run before `nos gate` kills it (status fail, "timedOut": true), default 30 |
-| project-commands | install      | installs dependencies, e.g. in a fresh worktree                    |
+| project-commands | install      | installs dependencies, e.g. in a fresh worktree; with a lockfile the variant that never rewrites it (`npm ci`), so the worktree stays clean |
 | project-commands | dev          | starts the local dev server                                        |
 | project-commands | deploy-test  | deploys to a test environment and prints a url                     |
 | spec-ui          | docs-folder  | docs folder shown in the spec UI (Docs), relative to the repo root |
