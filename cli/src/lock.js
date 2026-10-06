@@ -29,6 +29,13 @@ export function lockPath(roots, name) {
 // A random token for a holder that is not a run (ids, slot leases)
 export const randomToken = () => randomBytes(4).toString('hex');
 
+// A holder as printed: without its token (a token is a run's holder credential; it stays on disk only)
+export const publicHolder = (holder) => {
+  if (!holder || typeof holder !== 'object') return holder;
+  const { token, ...rest } = holder;
+  return rest;
+};
+
 const ageSecOf = (holder) => {
   const taken = Date.parse(holder?.taken ?? '');
   return Number.isNaN(taken) ? null : Math.max(0, Math.round((Date.now() - taken) / 1000));

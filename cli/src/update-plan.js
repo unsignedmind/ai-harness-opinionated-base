@@ -78,9 +78,9 @@ function matchPlan(phases, domain, { phasesBySlug, stepsBySpec }) {
   });
 }
 
-// Fields update-plan does not manage survive an update that leaves them out: top-level fields (branch, status,
-// review-needed, ...) and the fields of kept phases (by slug) and kept steps (by spec-file), e.g. status.
-// "branch" is written by nos run start only: the current value always wins.
+// The statuses (and the plan's branch) survive an update that leaves them out: the orchestrator and nos run
+// own them, not the plan ability. Plan: branch (the current value always wins: run start writes it), status;
+// kept phases (by slug) and kept steps (by spec-file): status. Every other field follows the update as given.
 function keepUnmanaged(parsed, planPath, matched) {
   let current;
   try {
@@ -89,13 +89,10 @@ function keepUnmanaged(parsed, planPath, matched) {
     return;
   }
   if (!current || typeof current !== 'object') return;
-  const fill = (target, source, skip) => {
-    if (!source || typeof source !== 'object') return;
-    for (const [key, value] of Object.entries(source)) {
-      if (!skip.includes(key) && !Object.hasOwn(target, key)) target[key] = value;
-    }
+  const keepStatus = (target, source) => {
+    if (source && Object.hasOwn(source, 'status') && !Object.hasOwn(target, 'status')) target.status = source.status;
   };
-  fill(parsed, current, ['phases', 'labels']);
+  keepStatus(parsed, current);
   if (Object.hasOwn(current, 'branch')) parsed.branch = current.branch;
   const phasesBySlug = new Map(asList(current.phases).map((phase) => [phase?.slug, phase]));
   const stepsBySpec = new Map();
@@ -109,9 +106,9 @@ function keepUnmanaged(parsed, planPath, matched) {
     }
   }
   for (const { phase, existing, steps } of matched) {
-    if (existing) fill(phase, phasesBySlug.get(phase.slug), ['steps']);
+    if (existing) keepStatus(phase, phasesBySlug.get(phase.slug));
     for (const { step, source } of steps) {
-      if (source) fill(step, stepsBySpec.get(source.specFile), ['spec-file']);
+      if (source) keepStatus(step, stepsBySpec.get(source.specFile));
     }
   }
 }

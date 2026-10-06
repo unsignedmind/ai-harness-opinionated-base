@@ -281,7 +281,7 @@ test(
     assert.equal(blocked.json.action, 'run-finish');
     assert.equal(blocked.json.details.lock, 'merge');
     assert.equal(blocked.json.details.holder.run, quick.a.runId);
-    assert.equal(blocked.json.details.holder.token, a.token);
+    assert.equal('token' in blocked.json.details.holder, false, 'never a foreign token');
     assert.equal(readRun(roots, quick.b.runId).phase, 'develop', 'B stays as it was');
 
     const resumed = await nos(['run', 'finish', '--token', a.token], a.enter);

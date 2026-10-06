@@ -5,7 +5,7 @@ import { CONFLICT, DIRTY, DOMAIN_RUNNING, FAILED, HELD, NosError, USAGE } from '
 import { execCommand } from './exec.js';
 import { runGate } from './gate.js';
 import { git } from './git.js';
-import { lockStatus, releaseLock, takeLock } from './lock.js';
+import { lockStatus, publicHolder, randomToken, releaseLock, takeLock } from './lock.js';
 import { asList, PLAN_FILE, resolveDomain } from './plan.js';
 import { projectCommands, qualityTools } from './project-config.js';
 import { quickStepId, quickStepsPath, readQuickSteps } from './quick-step.js';
@@ -30,6 +30,9 @@ import { setRunStatus } from './status.js';
 // merge --ff-only under the lock "merge".
 export const WORKTREES_DIR = Object.freeze(['.claude', 'worktrees']);
 export const MERGE_LOCK = 'merge';
+// run start checks and creates a run under this lock (short: no install, no gate)
+export const RUNS_LOCK = 'runs';
+const RUNS_LOCK_WAIT_MS = 10_000;
 const TERMINAL = Object.freeze(['merged', 'abandoned']);
 // target statuses a run never starts on
 const TERMINAL_STATUSES = Object.freeze(['merged', 'discarded']);
@@ -271,8 +274,16 @@ function addWorktree(mainTop, { wt, branch, mainBranch }) {
   }
   mkdirSync(path.dirname(wt), { recursive: true });
   const reuse = branchExists(mainTop, branch);
-  const args = reuse ? ['worktree', 'add', wt, branch] : ['worktree', 'add', '-b', branch, wt, mainBranch];
-  mustGit(args, mainTop);
+  const add = reuse ? ['worktree', 'add', wt, branch] : ['worktree', 'add', '-b', branch, wt, mainBranch];
+  // Windows: deep node_modules / test paths of a branch exceed MAX_PATH without core.longpaths
+  const res = git(['-c', 'core.longpaths=true', ...add], { cwd: mainTop });
+  if (res.code !== 0) {
+    const message = (res.stderr || res.stdout).trim();
+    const hint = /Filename too long/i.test(message)
+      ? '. Paths are too long for Windows: git config --global core.longpaths true, or a shorter project path'
+      : '';
+    throw new NosError(FAILED, `git worktree add ${slash(wt)} failed: ${message}${hint}`, { worktree: slash(wt) });
+  }
   return { created: true, branchCreated: !reuse };
 }
 
@@ -289,12 +300,33 @@ async function install(roots, run) {
 }
 
 // The merge lock of a crashed finish of this run (taken with token) is released: the holder is declared gone
+// --take-over: the merge lock of the old token is released, unless the old holder's finish still runs (pid
+// alive) -> HELD
+function takeOverMergeLock(roots, run) {
+  const status = lockStatus(roots, MERGE_LOCK);
+  if (status.holder?.token !== run.token) return;
+  if (status.pidAlive) {
+    throw new NosError(
+      HELD,
+      `A finish of the old holder of ${runIdOf(run)} is still running (pid ${status.holder.pid}): wait for it`,
+      {
+        run: runIdOf(run),
+        lock: MERGE_LOCK,
+        holder: publicHolder(status.holder),
+        ageSec: status.ageSec,
+        pidAlive: true,
+      },
+    );
+  }
+  releaseLock(roots, MERGE_LOCK, run.token);
+}
+
 function releaseOwnMergeLock(roots, token) {
   if (lockStatus(roots, MERGE_LOCK).holder?.token !== token) return false;
   return releaseLock(roots, MERGE_LOCK, token).released;
 }
 
-function startResult(roots, run, { install: installed = null, leftovers = null } = {}) {
+function startResult(roots, run, { install: installed = null, leftovers = null, warnings = [] } = {}) {
   const enter = slash(enterOf(roots, run));
   return {
     action: 'run-start',
@@ -304,6 +336,7 @@ function startResult(roots, run, { install: installed = null, leftovers = null }
     enter,
     install: installed,
     leftovers,
+    ...(warnings.length && { warnings }),
   };
 }
 
@@ -319,20 +352,38 @@ export async function startRun(
   const id = plan ? Number(/^domain-(\d+)-/.exec(domain)[1]) : parseStepId(quick);
   const runId = `${kind}-${id}`;
   const given = token || env.NOS_RUN_TOKEN;
-  const now = () => new Date().toISOString();
 
+  // check-and-create under lock runs: two sessions never both start a run of one target or one domain
+  const lockToken = randomToken();
+  takeLock(roots, RUNS_LOCK, { run: runId, token: lockToken, command: 'run start' }, { waitMs: RUNS_LOCK_WAIT_MS });
+  let started;
+  try {
+    started = startLocked(roots, { domain, kind, id, runId, given, takeOver });
+  } finally {
+    releaseLock(roots, RUNS_LOCK, lockToken);
+  }
+  if (started.done) return started.done;
+  const { run, created, leftovers, warnings } = started;
+  const installed = created ? await install(roots, run) : null;
+  return startResult(roots, run, { install: installed, leftovers, warnings });
+}
+
+// The part of run start under lock runs. Returns { done } (merged/abandoned run: token only) or
+// { run, created, leftovers, warnings }.
+function startLocked(roots, { domain, kind, id, runId, given, takeOver }) {
+  const now = () => new Date().toISOString();
   const existing = readRun(roots, runId);
   if (existing) {
     if (existing.domain !== domain) {
       throw new NosError(FAILED, `Run ${runId} belongs to ${existing.domain}, not ${domain}`);
     }
     if (!takeOver && given !== existing.token) throw heldBy(existing);
-    if (takeOver) releaseOwnMergeLock(roots, existing.token);
+    if (takeOver) takeOverMergeLock(roots, existing);
     // merged or abandoned: only the token (a session without it reaches run cleanup), no git work
     if (TERMINAL.includes(existing.phase)) {
       const run = { ...existing, token: takeOver ? mintToken() : existing.token, seen: now() };
       writeRun(roots, run);
-      return startResult(roots, run);
+      return { done: startResult(roots, run) };
     }
   }
 
@@ -369,6 +420,12 @@ export async function startRun(
   if (!mainBranch) throw new NosError(FAILED, `${slash(mainTop)} has a detached HEAD: check out the main branch first`);
   const branch = existing?.branch ?? runId;
   const wt = existing?.worktree ? path.resolve(existing.worktree) : worktreeOf(roots, runId);
+  const warnings = [];
+  if (!ok(['check-ignore', '-q', '--', wt], mainTop)) {
+    warnings.push(
+      `${slash(wt)} is not ignored by the project's .gitignore: add ".claude/worktrees/" (nos init does it)`,
+    );
+  }
   const added = addWorktree(mainTop, { wt, branch, mainBranch });
 
   let run;
@@ -395,8 +452,7 @@ export async function startRun(
   }
   writeRun(roots, run);
   writeBranch(target, branch);
-  const installed = added.created ? await install(roots, run) : null;
-  return startResult(roots, run, { install: installed, leftovers });
+  return { run, created: added.created, leftovers, warnings };
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -554,6 +610,7 @@ export async function finishRun(roots, { gate: gateOptions = {}, ...options } = 
   const runId = runIdOf(run);
   if (run.phase === 'abandoned') throw new NosError(FAILED, `Run ${runId} is abandoned: nothing to finish`);
   if (run.phase === 'merged') {
+    releaseOwnMergeLock(roots, run.token);
     return { action: 'run-finish', run: publicRun(run), merged: true, already: true };
   }
   const target = targetOf(roots, run);
@@ -641,7 +698,32 @@ function busyError(wt, message) {
   );
 }
 
-// Removes worktree, branch (-d merged, -D abandoned) and run file. Each part is skipped when already gone, so a
+// git worktree remove. Merged: untracked files (gate output, build artefacts) are no reason to keep it -> --force,
+// but modified tracked files are -> DIRTY with the list. Abandoned: always --force.
+function removeWorktree(mainTop, run, wt, force) {
+  const remove = (withForce) => git(['worktree', 'remove', ...(withForce ? ['--force'] : []), wt], { cwd: mainTop });
+  let res = remove(force);
+  let message = (res.stderr || res.stdout).trim();
+  if (res.code !== 0 && /contains modified or untracked files/i.test(message)) {
+    const tracked = git(['status', '--porcelain', '-z', '--untracked-files=no'], { cwd: wt });
+    const modified = zList(tracked.stdout).map((entry) => entry.slice(3));
+    if (tracked.code === 0 && !modified.length) {
+      res = remove(true);
+      message = (res.stderr || res.stdout).trim();
+    } else {
+      throw new NosError(DIRTY, `The worktree of ${runIdOf(run)} has modified files: commit or revert them first`, {
+        run: runIdOf(run),
+        worktree: slash(wt),
+        ...fileList(wt, modified),
+      });
+    }
+  }
+  if (res.code === 0) return;
+  if (FOLDER_BUSY.test(message)) throw busyError(wt, message);
+  throw new NosError(FAILED, `git worktree remove ${slash(wt)} failed: ${message}`, { worktree: slash(wt) });
+}
+
+// Removes worktree, branch (-D: merged into mainBranch, or abandoned) and run file. Each part is skipped when already gone, so a
 // cleanup that failed half way is simply rerun. Returns { worktree, branch, runFile } (true = removed now).
 function removeRun(roots, run) {
   const mainTop = mainTopOf(roots);
@@ -650,12 +732,7 @@ function removeRun(roots, run) {
   releaseOwnMergeLock(roots, run.token);
   let worktree = false;
   if (registeredWorktree(mainTop, wt)) {
-    const res = git(['worktree', 'remove', ...(force ? ['--force'] : []), wt], { cwd: mainTop });
-    if (res.code !== 0) {
-      const message = (res.stderr || res.stdout).trim();
-      if (FOLDER_BUSY.test(message)) throw busyError(wt, message);
-      throw new NosError(FAILED, `git worktree remove ${slash(wt)} failed: ${message}`, { worktree: slash(wt) });
-    }
+    removeWorktree(mainTop, run, wt, force);
     worktree = true;
   } else if (existsSync(wt)) {
     // left behind by a removal that failed half way: git no longer knows it
@@ -669,7 +746,17 @@ function removeRun(roots, run) {
   git(['worktree', 'prune'], { cwd: mainTop });
   let branch = false;
   if (branchExists(mainTop, run.branch)) {
-    mustGit(['branch', force ? '-D' : '-d', run.branch], mainTop);
+    // merged: the branch is in mainBranch, so -D is safe also when main's checkout moved to another branch
+    // (-d checks against HEAD). Not in mainBranch (someone reset it) -> refused, the user decides
+    if (!force && !isAncestor(mainTop, run.branch, run.mainBranch)) {
+      throw new NosError(
+        FAILED,
+        `Branch ${run.branch} is not in ${run.mainBranch} although ${runIdOf(run)} is merged: ` +
+          `check ${run.mainBranch}, then git branch -D ${run.branch} by hand`,
+        { run: runIdOf(run), branch: run.branch, mainBranch: run.mainBranch },
+      );
+    }
+    mustGit(['branch', '-D', run.branch], mainTop);
     branch = true;
   }
   deleteRun(roots, runIdOf(run));
@@ -695,6 +782,10 @@ export function abandonRun(roots, { cwd = process.cwd(), ...options } = {}) {
   let run = resolveRun(roots, options);
   const runId = runIdOf(run);
   if (run.phase === 'merged') throw new NosError(FAILED, `Run ${runId} is merged: nos run cleanup removes it`);
+  // a finish crashed after the ff merge: the code is in main, discarding the specs would lie
+  if (run.phase === 'merge' && isAncestor(mainTopOf(roots), run.branch, run.mainBranch)) {
+    throw new NosError(FAILED, `Run ${runId} is already in ${run.mainBranch}: run nos run finish to complete it`);
+  }
   refuseInside(cwd, run);
   let statuses = null;
   let specs = null;

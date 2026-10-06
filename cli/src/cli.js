@@ -7,11 +7,12 @@ import { EXIT, NosError } from './exit-codes.js';
 import { execCommand } from './exec.js';
 import { runGate } from './gate.js';
 import { initProject } from './init.js';
-import { listLocks, lockStatus, releaseLock, takeLock } from './lock.js';
+import { listLocks, lockStatus, publicHolder, releaseLock, takeLock } from './lock.js';
 import { createPlan } from './plan.js';
 import { createQuickStep } from './quick-step.js';
 import { homeGuard, NOS_HOME, resolveRoots, slash } from './roots.js';
 import { abandonRun, cleanupRun, finishRun, startRun, syncRun } from './run.js';
+import { readRun, requireToken } from './runs.js';
 import { commitSpecs, domainOfTarget, findStep } from './specs-git.js';
 import { setRunStatus, setStatus } from './status.js';
 import { updatePlan } from './update-plan.js';
@@ -282,7 +283,7 @@ Example:
   }`;
 
 const SET_STATUS_HELP = `Usage: nos set-status --domain <domain-<id>-<slug>> [--phase <id>] [--step <id>] --status <status> [--root <dir>]
-       nos set-status --run <kind>-<id> merged|discarded [--root <dir>]
+       nos set-status --run <kind>-<id> merged|discarded [--token <t>] [--root <dir>]
 
 Change a status in <specs>/<domain>/plan.json or of a quick step.
 
@@ -305,6 +306,7 @@ run abandon call it; the domain comes from the run file <specs>/.runs/<kind>-<id
   quick merged      the quick step done -> merged
   quick discarded   the quick step (anything except merged) -> discarded
 Targets already at the status stay. A violation (e.g. a step not done for merged) -> exit 1, nothing written.
+While the run file exists, --token (or NOS_RUN_TOKEN) of its holder is required (missing 1, another 4).
 
 Options:
   --domain <name>    Domain folder name, e.g. domain-1-user-auth      (required)
@@ -495,7 +497,7 @@ broken automatically: --break is the user's call. --token falls back to NOS_RUN_
 Example:
   nos lock take merge --token 1a2b3c4d --run quick-7
   { "action": "lock-take", "lock": "merge", "path": "D:/repo/.specs/.locks/merge",
-    "holder": { "run": "quick-7", "token": "1a2b3c4d", "pid": 4242, "command": "lock take", "taken": "<iso>" },
+    "holder": { "run": "quick-7", "pid": 4242, "command": "lock take", "taken": "<iso>" },
     "reentrant": false }
   nos lock release merge --token 1a2b3c4d
   { "action": "lock-release", "lock": "merge", "path": "...", "released": true, "broken": false, "holder": {...} }
@@ -658,6 +660,7 @@ const COMMANDS = {
       step: { type: 'string' },
       status: { type: 'string' },
       run: { type: 'string' },
+      token: { type: 'string' },
       root: { type: 'string' },
     },
     required: [],
@@ -671,6 +674,9 @@ const COMMANDS = {
         const status = given ?? values.status;
         if (!status)
           throw new UsageError('Missing input: merged or discarded. Please provide it and retry', 'set-status');
+        // a running run belongs to its holder; a cleaned up run (no run file) is anyone's history
+        const file = readRun(roots, values.run);
+        if (file) requireToken(file, values.token, io.env);
         return setRunStatus(roots, { run: values.run, status });
       }
       if (given !== undefined) throw new UsageError(`Unexpected argument "${given}"`, 'set-status');
@@ -816,6 +822,10 @@ const COMMANDS = {
   },
 };
 
+// JSON.stringify replacer of every printed result: a lock holder never shows its token (lock status, exit 4
+// details, reclaimed slot leases). Only run start prints a token: the one it minted for the caller
+const printable = (key, value) => (key === 'holder' ? publicHolder(value) : value);
+
 // A result may carry its own exit code (gate: JSON printed, exit 1 on a failed tool)
 const EXIT_CODE = Symbol('exit code');
 
@@ -899,7 +909,7 @@ export async function run(argv, io = {}) {
     const result = await command.execute(values, { cwd, env, readStdin, stderr }, roots, positionals);
     // raw: the command printed its own output (exec: the child's stdio) and resolved with its exit code
     if (command.raw) return result;
-    stdout.write(JSON.stringify(result, null, 2) + '\n');
+    stdout.write(JSON.stringify(result, printable, 2) + '\n');
     return result[EXIT_CODE] ?? EXIT.OK;
   } catch (err) {
     return reportError(action, err, { stdout, stderr });
@@ -928,7 +938,7 @@ export function reportError(action, err, { stdout, stderr }) {
   // report: a 1 whose details the orchestrator needs (run finish: gate result, main busy / dirty lists)
   if ((err.code >= EXIT.CONFLICT && err.code <= EXIT.SLOT_TIMEOUT) || err.report) {
     const report = { action, error: err.message, exit: err.code, details: err.details };
-    stdout.write(JSON.stringify(report, null, 2) + '\n');
+    stdout.write(JSON.stringify(report, printable, 2) + '\n');
     return err.code;
   }
   return err.code === EXIT.USAGE ? EXIT.USAGE : EXIT.FAILED;

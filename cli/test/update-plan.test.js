@@ -205,7 +205,7 @@ test('refuses a legacy spec-file with the specs/ prefix: run the migration', (t)
   assert.deepEqual(tree(), before);
 });
 
-test('keeps fields it does not manage: branch always, status and others when the update leaves them out', (t) => {
+test('keeps branch always and statuses left out of the update; other fields follow the update', (t) => {
   const { roots, domain, current } = setup(t);
   const plan = current();
   plan.branch = 'plan-1';
@@ -216,7 +216,7 @@ test('keeps fields it does not manage: branch always, status and others when the
   plan.phases[0].steps[0].owner = 'x';
   writeFile(roots.specs, `${domain}/plan.json`, plan);
 
-  // an extend that rebuilt the plan: no branch / status / review-needed, a kept step without status, a new step
+  // an extend that rebuilt the plan: no branch / status / review-needed, a kept step without status and owner, a new step
   const update = {
     name: 'Auth v2',
     branch: 'other',
@@ -235,12 +235,12 @@ test('keeps fields it does not manage: branch always, status and others when the
   assert.equal(saved.branch, 'plan-1', 'branch is written by run start only');
   assert.equal(saved.name, 'Auth v2', 'a given field wins');
   assert.equal(saved.status, 'in-progress');
-  assert.equal(saved['review-needed'], true);
+  assert.equal(Object.hasOwn(saved, 'review-needed'), false, 'not a status: follows the update');
   assert.equal(saved.phases[0].status, 'implemented');
   assert.equal(saved.phases[0].name, 'Data model');
   assert.equal(saved.phases[0].steps[0].status, 'done');
-  assert.equal(saved.phases[0].steps[0].owner, 'x');
-  assert.equal(saved.phases[0].steps[0].intent, 'user-table');
+  assert.equal(Object.hasOwn(saved.phases[0].steps[0], 'owner'), false);
+  assert.equal(Object.hasOwn(saved.phases[0].steps[0], 'intent'), false);
   assert.equal(saved.phases[1].steps[1].slug, 'logout');
   assert.equal(saved.phases[1].steps[1].status, 'open');
 });

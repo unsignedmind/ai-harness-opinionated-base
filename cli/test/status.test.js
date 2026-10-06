@@ -360,3 +360,21 @@ test('nos set-status --run <run> merged|discarded via the CLI', async (t) => {
   assert.equal(violation.code, 1);
   assert.match(violation.err, /step 1 is merged/);
 });
+
+test('nos set-status --run needs the holder token while the run file exists', async (t) => {
+  const { root, roots } = makeProject(t);
+  const { folder: domain } = createDomain(roots, { idea: '# A', slug: 'a' });
+  createQuickStep(roots, { domain, step: { slug: 'fix', intent: 'fix' } });
+  setStatus(roots, { domain, step: '1', status: 'done' });
+  writeRun(roots, { kind: 'quick', id: 1, domain, token: 'aaaa1111', phase: 'develop' });
+
+  const missing = await invokeCli(['set-status', '--run', 'quick-1', 'merged'], { cwd: root });
+  assert.equal(missing.code, 1);
+  assert.match(missing.err, /--token required/);
+  const other = await invokeCli(['set-status', '--run', 'quick-1', 'merged', '--token', 'bbbb2222'], { cwd: root });
+  assert.equal(other.code, 4);
+  assert.doesNotMatch(other.out, /aaaa1111/);
+  const env = await invokeCli(['set-status', '--run', 'quick-1', 'merged'], { cwd: root, env: { NOS_RUN_TOKEN: 'aaaa1111' } });
+  assert.equal(env.code, 0, env.err);
+  assert.equal(env.json.changes[0].status, 'merged');
+});
