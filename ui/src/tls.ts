@@ -1,5 +1,5 @@
 // HTTPS for `npm run dev-to-lan`: a self-signed certificate created once and kept in
-// specs/.chat/tls (never committed), so a phone accepts it once and messages and cookies are not
+// <specs>/.chat/tls (never committed), so a phone accepts it once and messages and cookies are not
 // readable on the Wi-Fi. A new one is made only when this machine gets an address it does not cover.
 import { X509Certificate } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

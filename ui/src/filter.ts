@@ -1,7 +1,7 @@
 // Board and Backlog filters. Within one kind values combine with OR, across kinds with AND.
 // The state lives in the hash query (`#board?labels=ui&status=open`) so a view is bookmarkable.
 import type { Model, Phase, Step } from './model';
-import { STATUS_ORDER, type StatusKey } from './status';
+import { HIDDEN_BY_DEFAULT, STATUS_ORDER, type StatusKey } from './status';
 
 export type Level = 'steps' | 'phases';
 export type SortKey = 'id' | 'title' | 'where' | 'status' | 'ac';
@@ -48,12 +48,13 @@ const haystack = (it: Item) =>
     .join(' ')
     .toLowerCase();
 
+// no status chosen: every status except HIDDEN_BY_DEFAULT (discarded)
 export function applyFilters(items: Item[], f: Filters): Item[] {
   const q = f.q.trim().toLowerCase();
   return items.filter(
     (it) =>
       (!f.labels.length || it.labels.some((l) => f.labels.includes(l))) &&
-      (!f.statuses.length || f.statuses.includes(it.status.key)) &&
+      (f.statuses.length ? f.statuses.includes(it.status.key) : !HIDDEN_BY_DEFAULT.includes(it.status.key)) &&
       (!f.ideas.length || f.ideas.includes(it.idea.slug)) &&
       (!q || haystack(it).includes(q)),
   );

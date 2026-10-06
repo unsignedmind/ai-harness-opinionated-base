@@ -26,6 +26,10 @@
   --done-bg: #d9f2e1;
   --on-hold: #8a6d00;
   --on-hold-bg: #fff4c7;
+  --merged: #0b5a4a;
+  --merged-bg: #c9eee4;
+  --discarded: #7a7a74;
+  --discarded-bg: #eeeeea;
   --other: #a12b2b;
   --other-bg: #fadcdc;
   color-scheme: light dark;
@@ -58,6 +62,10 @@
     --done-bg: #12321d;
     --on-hold: #f2cf5b;
     --on-hold-bg: #3a3110;
+    --merged: #6fe0c4;
+    --merged-bg: #0d2f28;
+    --discarded: #8f8f89;
+    --discarded-bg: #232323;
     --other: #ff8a8a;
     --other-bg: #3f1616;
   }
@@ -301,6 +309,17 @@ main {
   color: var(--done);
   background: var(--done-bg);
 }
+.pill.merged,
+.chip.st-merged[aria-pressed='true'] {
+  color: var(--merged);
+  background: var(--merged-bg);
+}
+.pill.discarded,
+.chip.st-discarded[aria-pressed='true'] {
+  color: var(--discarded);
+  background: var(--discarded-bg);
+  text-decoration: line-through;
+}
 .pill.on-hold,
 .chip.st-on-hold[aria-pressed='true'] {
   color: var(--on-hold);
@@ -338,11 +357,77 @@ main {
 .dot.done {
   background: var(--done);
 }
+.dot.merged {
+  background: var(--merged);
+}
+.dot.discarded {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--discarded);
+}
 .dot.on-hold {
   background: var(--on-hold);
 }
 .dot.other {
   background: var(--other);
+}
+
+/* runs: branch and run badges (src/views/parts.ts) */
+.branch,
+.run {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.run {
+  border-color: var(--in-progress);
+  color: var(--in-progress);
+}
+.run .ab {
+  font-variant-numeric: tabular-nums;
+}
+.run .dirty {
+  color: var(--on-hold);
+}
+.run .err {
+  color: var(--other);
+}
+.dot.running,
+.tail-run .dot.running {
+  background: var(--in-progress);
+  box-shadow: 0 0 0 2px var(--in-progress-bg);
+  animation: run-pulse 1.6s ease-in-out infinite;
+}
+@keyframes run-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot.running {
+    animation: none;
+  }
+}
+.node .tail-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--in-progress);
+}
+.tree .node.sel .tail-run {
+  color: inherit;
+}
+.chat-tab .run-tag {
+  margin-left: 4px;
+  font-size: 10.5px;
+  color: var(--in-progress);
 }
 
 /* filters */

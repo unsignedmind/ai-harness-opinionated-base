@@ -1,5 +1,5 @@
 // Who may use the spec-ui dev server. This machine always (loopback socket and loopback Host). Any
-// other device only once it is paired (cli/src/chat/devices.js, specs/.chat/devices.json):
+// other device only once it is paired (cli/src/chat/devices.js, <specs>/.chat/devices.json):
 //   1. `nos chat pair`, the dev-server banner or "Pair a device" in the chat panel gives a one-time
 //      link `/?pair=<code>` (10 min, single use)
 //   2. opening it uses the code up; the device waits on /__pair with a 4-digit number

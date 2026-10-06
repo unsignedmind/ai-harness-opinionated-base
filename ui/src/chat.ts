@@ -837,6 +837,7 @@ const emptyTab = (key: string): ChatTab => ({
   activity: null,
   claudeSession: null,
   agents: [],
+  run: null,
 });
 
 function safeLocalStorage(): Storage | null {

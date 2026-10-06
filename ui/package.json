@@ -2,7 +2,7 @@
   "name": "nos-spec-ui",
   "private": true,
   "version": "0.1.0",
-  "description": "Read-only viewer for the specs/ folder of the nos harness",
+  "description": "Read-only viewer for the .specs/ folder of the nos harness",
   "type": "module",
   "scripts": {
     "dev": "vite",

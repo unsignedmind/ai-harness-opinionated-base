@@ -7,6 +7,9 @@ import { renderBacklog } from '../src/views/backlog';
 import { renderBoard } from '../src/views/board';
 import { renderExplore, type ExploreUi } from '../src/views/explore';
 import { SUGGEST_MAX, filterBar, suggestions } from '../src/views/filterbar';
+import { branchBadge, pill, runBadge } from '../src/views/parts';
+import type { Run } from '../src/runs';
+import { normStatus } from '../src/status';
 import { fixtureFiles, quickFixtureFiles } from './fixtures';
 
 const model = () => buildModel(fixtureFiles());
@@ -189,11 +192,11 @@ test('a planned domain is not found on the ideas page and vice versa', () => {
 
 test('cross-cutting domains are grouped in tree and overview', () => {
   const files = fixtureFiles();
-  files['specs/domain-3-logging/domain.json'] = JSON.stringify({
+  files['domain-3-logging/domain.json'] = JSON.stringify({
     name: 'Logging',
     'cross-cutting': true,
   });
-  files['specs/domain-3-logging/plan.json'] = JSON.stringify({ name: 'Log' });
+  files['domain-3-logging/plan.json'] = JSON.stringify({ name: 'Log' });
   const root = mount(renderExplore(buildModel(files), parseRoute('#domains'), ui()));
   const tree = [...root.querySelectorAll('.tree > *')].map((n) =>
     n.classList.contains('tree-group') ? 'group' : (n as HTMLElement).dataset.href,
@@ -267,7 +270,7 @@ test('step detail shows meta, progress and the rendered spec', () => {
   expect(d.querySelector('h1')?.textContent).toContain('Extract tokens');
   expect(d.textContent).toContain('AC 2/3');
   expect(d.textContent).toContain('Tasks 2/3');
-  expect(d.textContent).toContain('specs/domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md');
+  expect(d.textContent).toContain('domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md');
   expect(d.querySelectorAll('.md .check.done').length).toBeGreaterThan(0);
 });
 
@@ -284,7 +287,7 @@ test('unknown path shows a not-found note with a way back', () => {
 
 test('invalid plan.json shows its error on the idea', () => {
   const files = fixtureFiles();
-  files['specs/domain-2-dark-mode/plan.json'] = '{';
+  files['domain-2-dark-mode/plan.json'] = '{';
   const root = mount(renderExplore(buildModel(files), parseRoute('#domains/dark-mode'), ui()));
   expect(root.querySelector('.error')?.textContent).toMatch(/plan\.json/);
 });
@@ -332,4 +335,118 @@ test('board and backlog include quick steps', () => {
   const m = buildModel(quickFixtureFiles());
   expect(mount(renderBoard(m, f())).querySelectorAll('.kcard .quick')).toHaveLength(2);
   expect(mount(renderBacklog(m, f())).querySelectorAll('td .quick')).toHaveLength(2);
+});
+
+// ── runs and branches ──
+
+const run = (over: Partial<Run> = {}): Run => ({
+  kind: 'quick',
+  id: 4,
+  domain: 'domain-2-dark-mode',
+  branch: 'quick-4',
+  phase: 'develop',
+  seen: '2026-10-06T10:00:00Z',
+  ageSec: 125,
+  worktree: 'D:/p/.claude/worktrees/quick-4',
+  ahead: 3,
+  behind: 1,
+  dirty: true,
+  ...over,
+});
+
+test('runBadge: running dot, run id, phase, ahead/behind, dirty, escaped error', () => {
+  const root = mount(runBadge(run({ error: '<img src=x>' })));
+  const b = root.querySelector('.run')!;
+  expect(b.querySelector('.dot.running')).not.toBeNull();
+  expect(b.textContent).toContain('quick-4 develop');
+  expect(b.querySelector('.ab')?.textContent).toBe('↑3 ↓1');
+  expect(b.querySelector('.dirty')).not.toBeNull();
+  expect(b.querySelector('.err')?.getAttribute('title')).toBe('<img src=x>');
+  expect(root.querySelector('img')).toBeNull();
+  expect(b.getAttribute('title')).toContain('last seen 2m ago');
+  expect(runBadge(null)).toBe('');
+  const unknown = mount(runBadge(run({ ahead: null, behind: null, dirty: null })));
+  expect(unknown.querySelector('.ab, .dirty')).toBeNull();
+});
+
+test('branchBadge escapes, nothing without a branch', () => {
+  expect(mount(branchBadge('plan-<2>')).querySelector('.branch')?.textContent).toBe('⎇ plan-<2>');
+  expect(branchBadge(null)).toBe('');
+});
+
+const runModel = () => {
+  const files = quickFixtureFiles();
+  files['domain-2-dark-mode/plan.json'] = JSON.stringify({
+    ...JSON.parse(files['domain-2-dark-mode/plan.json']),
+    branch: 'plan-2',
+  });
+  const quick = JSON.parse(files['domain-2-dark-mode/quick-steps/quick-steps.json']);
+  quick[0].branch = 'quick-4';
+  files['domain-2-dark-mode/quick-steps/quick-steps.json'] = JSON.stringify(quick);
+  return buildModel(files, [run(), run({ kind: 'plan', id: 2, branch: 'plan-2', phase: 'gate', dirty: false })]);
+};
+
+test('tree: a running dot on the domain, the quick steps node and the running quick step', () => {
+  const root = mount(renderExplore(runModel(), parseRoute('#domains/dark-mode/quick-steps'), ui()));
+  const node = (href: string) => root.querySelector(`.tree .node[data-href="${href}"]`)!;
+  expect(node('#domains/dark-mode').querySelector('.tail-run .dot.running')).not.toBeNull();
+  expect(node('#domains/dark-mode/quick-steps').querySelector('.tail-run .dot.running')).not.toBeNull();
+  expect(node('#domains/dark-mode/quick-steps/fix-contrast').querySelector('.tail-run .dot.running')).not.toBeNull();
+});
+
+test('idea and step detail show branch, run, main distance, seen age; no merge button', () => {
+  const idea = mount(renderExplore(runModel(), parseRoute('#domains/dark-mode'), ui()));
+  const meta = idea.querySelector('dl.meta')!.textContent!;
+  expect(meta).toContain('⎇ plan-2');
+  expect(meta).toContain('plan-2 gate');
+  expect(meta).toContain('3 ahead, 1 behind main');
+  expect(meta).toContain('2m ago');
+  expect(meta).toContain('.specs/domain-2-dark-mode/');
+  expect(idea.querySelector('[data-action="merge"]')).toBeNull();
+  expect(idea.querySelector('button')?.textContent ?? '').not.toMatch(/merge/i);
+
+  const step = mount(renderExplore(runModel(), parseRoute('#domains/dark-mode/quick-steps/fix-contrast'), ui()));
+  const sm = step.querySelector('dl.meta')!.textContent!;
+  expect(sm).toContain('⎇ quick-4');
+  expect(sm).toContain('quick-4 develop');
+  expect(sm).toContain('uncommitted changes');
+  expect(sm).toContain('.specs/domain-2-dark-mode/quick-steps/step-4-fix-contrast.md');
+});
+
+test('kanban cards carry a running dot for the quick run and the unfinished plan steps', () => {
+  const root = mount(renderBoard(runModel(), f()));
+  const card = (href: string) => root.querySelector(`.kcard[data-href="${href}"]`)!;
+  expect(card('#domains/dark-mode/quick-steps/fix-contrast').querySelector('.dot.running')).not.toBeNull();
+  // extract-tokens is done: no dot; media-query is still worked on in the plan run
+  expect(card('#domains/dark-mode/tokens/extract-tokens').querySelector('.dot.running')).toBeNull();
+  expect(card('#domains/dark-mode/switch/media-query').querySelector('.dot.running')).not.toBeNull();
+});
+
+test('merged and discarded render as plain pills without the ⚠ flag', () => {
+  for (const key of ['merged', 'discarded'] as const) {
+    const root = mount(pill(normStatus(key)));
+    const p = root.querySelector('.pill')!;
+    expect(p.className).toBe(`pill ${key}`);
+    expect(p.textContent).toBe(key);
+    expect(p.getAttribute('title')).toBeNull();
+  }
+  const files = quickFixtureFiles();
+  const plan = JSON.parse(files['domain-2-dark-mode/plan.json']);
+  plan.status = 'merged';
+  plan.phases[0].steps[0].status = 'merged';
+  plan.phases[1].steps[0].status = 'discarded';
+  files['domain-2-dark-mode/plan.json'] = JSON.stringify(plan);
+  const m = buildModel(files);
+  const detail = mount(renderExplore(m, parseRoute('#domains/dark-mode'), ui()));
+  expect(detail.querySelector('h1 .pill.merged')?.textContent).toBe('merged');
+  expect(detail.textContent).not.toContain('⚠');
+  const step = mount(renderExplore(m, parseRoute('#domains/dark-mode/tokens/extract-tokens'), ui()));
+  expect(step.querySelector('h1 .pill')?.textContent).toBe('merged');
+  // the board: merged has its column, discarded is hidden unless asked for
+  const board = mount(renderBoard(m, f()));
+  expect(board.querySelector('.col[data-status="merged"] .kcard')).not.toBeNull();
+  expect(board.querySelector('.col[data-status="discarded"]')).toBeNull();
+  const asked = mount(renderBoard(m, f({ statuses: ['discarded'] })));
+  expect(asked.querySelector('.col[data-status="discarded"] .kcard')).not.toBeNull();
+  expect(asked.querySelector('.col[data-status="discarded"] .pill.flagged')).toBeNull();
 });

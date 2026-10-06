@@ -2,6 +2,7 @@
 import type { Item } from '../filter';
 import { esc } from '../markdown';
 import type { Progress } from '../model';
+import { age, runId, type Run } from '../runs';
 import { STATUS_ORDER, statusLabel, type Status, type StatusKey } from '../status';
 
 export const pill = (st: Status) =>
@@ -40,6 +41,27 @@ export const hvnBadge = (on: boolean) =>
 
 export const quickBadge = (on: boolean) =>
   on ? '<span class="quick" title="quick step: a single step outside the plan">⚡ quick</span>' : '';
+
+// the branch a plan or quick step runs (or ran) in
+export const branchBadge = (branch: string | null | undefined) =>
+  branch ? `<span class="branch mono" title="branch ${esc(branch)}">⎇ ${esc(branch)}</span>` : '';
+
+// a run in progress: pulsing dot, run id and phase, ahead/behind main, dirty worktree, git trouble
+export function runBadge(run: Run | null | undefined): string {
+  if (!run) return '';
+  const ab =
+    run.ahead == null || run.behind == null
+      ? ''
+      : `<span class="ab" title="${run.ahead} ahead of, ${run.behind} behind main">↑${run.ahead} ↓${run.behind}</span>`;
+  const dirty = run.dirty ? '<span class="dirty" title="uncommitted changes in the worktree">● dirty</span>' : '';
+  const err = run.error ? `<span class="err" title="${esc(run.error)}">⚠</span>` : '';
+  const title = `run ${runId(run)}, phase ${run.phase || '?'}, last seen ${age(run.ageSec)} ago${run.worktree ? `, worktree ${run.worktree}` : ''}`;
+  return `<span class="run" title="${esc(title)}">${runDot(run)}<span class="mono">${esc(runId(run))}</span> ${esc(run.phase || '?')}${ab}${dirty}${err}</span>`;
+}
+
+// the running indicator alone (tree, cards)
+export const runDot = (run: Run | null | undefined) =>
+  run ? `<span class="dot running" title="running: ${esc(runId(run))} ${esc(run.phase || '')}"></span>` : '';
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 

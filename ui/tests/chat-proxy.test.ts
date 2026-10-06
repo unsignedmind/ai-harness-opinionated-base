@@ -11,13 +11,15 @@ import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 
 import { createAccess, DEVICE_COOKIE, isLocal, PENDING_COOKIE, type Access } from '../src/access';
-import { stateDirOf } from '../../cli/src/chat/paths.js';
-import { chatHandler, keyOf } from '../src/chat-proxy';
+import { keyOf, stateDirOf } from '../../cli/src/chat/paths.js';
+import { chatHandler } from '../src/chat-proxy';
 import { loadTls } from '../src/tls';
 
 // tests run inside ui/, the CLI sits next to it
 const CLI = resolve('../cli/bin/nos.js');
 let root = '';
+// the roots of the temp project as the dev server has them (main = the project, its specs root .specs)
+const roots = () => ({ main: root, specs: join(root, '.specs') });
 let state = '';
 let access: Access;
 let server: http.Server;
@@ -26,7 +28,8 @@ let changes = 0;
 
 function handler(req: http.IncomingMessage, res: http.ServerResponse) {
   if (access.handle(req, res)) return;
-  if (req.url?.startsWith('/__chat/')) return void chatHandler(root, { cli: CLI, stateDir: state, access })(req, res);
+  if (req.url?.startsWith('/__chat/'))
+    return void chatHandler(roots(), { cli: CLI, stateDir: state, access })(req, res);
   res.end(req.url === '/__specs' ? '{"specs":true}' : '<!doctype html>specs');
 }
 
@@ -210,6 +213,26 @@ test('chat: open starts the project chat server; messages go through and into th
     key: keyOf(root),
   });
   expect(readFileSync(join(state, '.gitignore'), 'utf8')).toBe('*\n');
+  // the chat's state lives in the specs root; a handler built from the roots alone finds the server there
+  expect(state).toBe(join(root, '.specs', '.chat'));
+  const own = await new Promise<{ code: number; body: string }>((done) => {
+    const res = {
+      statusCode: 200,
+      setHeader() {},
+      end(body = '') {
+        done({ code: res.statusCode, body });
+      },
+    };
+    const req = {
+      url: '/__chat/state',
+      method: 'GET',
+      headers: { host: 'localhost' },
+      socket: { remoteAddress: '127.0.0.1' },
+    };
+    void chatHandler(roots(), { cli: CLI })(req as never, res as never);
+  });
+  expect(own.code).toBe(200);
+  expect(JSON.parse(own.body)).toMatchObject({ key: keyOf(root), server: true });
 
   const p = await pairDevice();
   const sent = await call('POST', '/__chat/messages', { ...LAN, cookie: p.cookie }, { text: 'hello from the couch' });

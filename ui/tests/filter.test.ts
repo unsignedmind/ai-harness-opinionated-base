@@ -17,11 +17,11 @@ import { fixtureFiles } from './fixtures';
 
 const model = () => {
   const files = fixtureFiles();
-  files['specs/domain-3-sync/domain.json'] = JSON.stringify({
+  files['domain-3-sync/domain.json'] = JSON.stringify({
     name: 'Sync',
     labels: ['backend'],
   });
-  files['specs/domain-3-sync/plan.json'] = JSON.stringify({
+  files['domain-3-sync/plan.json'] = JSON.stringify({
     name: 'Sync',
     status: 'open',
     phases: [
@@ -55,6 +55,22 @@ test('no filters keep every step', () => {
     'toggle-button',
     'endpoint',
   ]);
+});
+
+test('discarded steps are hidden unless the status filter asks for them; merged stay', () => {
+  const m = model();
+  const [s1, s2] = m.steps;
+  s1.status = { key: 'discarded', label: 'discarded', flagged: false };
+  s2.status = { key: 'merged', label: 'merged', flagged: false };
+  const items = itemsAt(m, 'steps');
+  expect(slugs(applyFilters(items, f()))).toStrictEqual(['media-query', 'toggle-button', 'endpoint']);
+  expect(slugs(applyFilters(items, f({ statuses: ['discarded'] })))).toStrictEqual(['extract-tokens']);
+  expect(slugs(applyFilters(items, f({ statuses: ['discarded', 'merged'] })))).toStrictEqual([
+    'extract-tokens',
+    'media-query',
+  ]);
+  // the status chips still count them, so discarded can be picked
+  expect(counts(items).statuses.discarded).toBe(1);
 });
 
 test('itemsAt phases lists phases', () => {

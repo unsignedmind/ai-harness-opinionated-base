@@ -46,7 +46,16 @@ export type ChatTab = {
   claudeSession: string | null;
   // subagents of the tab's last run (cli/src/chat/runner.js agentTracker)
   agents?: SubAgent[];
+  // the nos run the tab's session works in (nos run start … nos run cleanup), null in main
+  run?: TabRun | null;
 };
+
+// cli/src/chat/runner.js runOf: what a tab knows about its run
+export type TabRun = { kind: string; id: number; domain?: string; branch?: string; worktree?: string };
+
+// "quick-7", "" without a run
+export const tabRunLabel = (t: Pick<ChatTab, 'run'>) =>
+  t.run && t.run.kind && t.run.id != null ? `${t.run.kind}-${t.run.id}` : '';
 
 export type SubAgent = {
   id: string;
@@ -120,8 +129,10 @@ export function renderTabs(tabs: ChatTab[], active: string | null, unread: Recor
         const on = t.key === active;
         const n = on ? 0 : (unread[t.key] ?? 0);
         const hint = t.claudeSession ? ` — in a terminal: claude --resume ${t.claudeSession}` : '';
+        const run = tabRunLabel(t);
+        const where = run ? ` — run ${run}${t.run?.branch ? ` on branch ${t.run.branch}` : ''}` : '';
         const key = esc(t.key);
-        return `<span role="tab" class="chat-tab" data-key="${key}" data-presence="${esc(t.presence)}" aria-selected="${on}"><button type="button" class="chat-tab-name" data-chat="tab" data-key="${key}" title="${esc(t.title + hint)}"><span class="dot" aria-hidden="true"></span><span class="lbl">${esc(t.title)}</span>${n ? `<span class="badge">${n}</span>` : ''}</button><button type="button" class="chat-tab-x" data-chat="close-tab" data-key="${key}" aria-label="Close ${esc(t.title)}">&#10005;</button></span>`;
+        return `<span role="tab" class="chat-tab" data-key="${key}" data-presence="${esc(t.presence)}" aria-selected="${on}"><button type="button" class="chat-tab-name" data-chat="tab" data-key="${key}" title="${esc(t.title + where + hint)}"><span class="dot" aria-hidden="true"></span><span class="lbl">${esc(t.title)}</span>${run ? `<span class="run-tag mono">${esc(run)}</span>` : ''}${n ? `<span class="badge">${n}</span>` : ''}</button><button type="button" class="chat-tab-x" data-chat="close-tab" data-key="${key}" aria-label="Close ${esc(t.title)}">&#10005;</button></span>`;
       })
       .join('') +
     '<button type="button" class="chat-new" data-chat="new" title="New chat: its own Claude Code session" aria-label="New chat">+</button>'
@@ -202,22 +213,26 @@ ${
 }`;
 }
 
+// the specs root as Claude sees it from main (spec paths in the model are relative to it)
+export const SPECS_PREFIX = '.specs/';
+
 // what the user looks at, as a spec path Claude can open
 export function contextOf(model: Model, r: Route): ChatContext | null {
   if (r.view !== 'domains' && r.view !== 'ideas') return null;
   const idea = r.idea ? model.ideas.find((i) => i.slug === r.idea) : undefined;
   if (!idea) return null;
-  const base = `specs/${idea.folder}/`;
+  const base = `${SPECS_PREFIX}${idea.folder}/`;
+  const spec = (s: { specPath: string }) => (s.specPath ? SPECS_PREFIX + s.specPath : '');
   if (r.phase === QUICK_SEGMENT) {
     const s = r.step ? idea.quickSteps.find((q) => q.slug === r.step) : undefined;
     return s
-      ? { label: `${itemId(s)} ${s.title}`, path: s.specPath || `${base}quick-steps/` }
+      ? { label: `${itemId(s)} ${s.title}`, path: spec(s) || `${base}quick-steps/` }
       : { label: `${idea.title} · quick steps`, path: `${base}quick-steps/` };
   }
   const phase = r.phase ? idea.phases.find((p) => p.slug === r.phase) : undefined;
   if (phase) {
     const s = r.step ? phase.steps.find((x) => x.slug === r.step) : undefined;
-    if (s) return { label: `${itemId(s)} ${s.title}`, path: s.specPath || base };
+    if (s) return { label: `${itemId(s)} ${s.title}`, path: spec(s) || base };
     return { label: `${itemId(phase)} ${phase.name}`, path: `${base}phases/phase-${phase.number}-${phase.slug}/` };
   }
   return { label: idea.title, path: base };

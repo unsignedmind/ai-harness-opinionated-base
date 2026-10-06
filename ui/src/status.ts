@@ -1,6 +1,7 @@
 // Statuses from `.claude/skills/nos/templates/status.xml`. Plans use open/in-progress/on-hold/done,
-// phases their lifecycle, steps the same plus in-specification/specified. Anything else is sorted
-// into `other` and flagged.
+// phases their lifecycle, steps the same plus in-specification/specified. Plans and steps also get
+// merged (their branch is on main) and discarded (the run was abandoned); phases never do. Anything
+// else is sorted into `other` and flagged.
 export const STATUS_ORDER = [
   'open',
   'in-specification',
@@ -10,6 +11,8 @@ export const STATUS_ORDER = [
   'in-review',
   'reviewed',
   'done',
+  'merged',
+  'discarded',
   'on-hold',
   'other',
 ] as const;
@@ -26,12 +29,17 @@ export const PHASE_BOARD_STATUSES: readonly StatusKey[] = [
   'done',
 ];
 
+// phases are never merged: a merged plan shows via the plan
 export const STEP_BOARD_STATUSES: readonly StatusKey[] = [
   'open',
   'in-specification',
   'specified',
   ...PHASE_BOARD_STATUSES.slice(1),
+  'merged',
 ];
+
+// left out of Board and Backlog unless the status filter asks for them
+export const HIDDEN_BY_DEFAULT: readonly StatusKey[] = ['discarded'];
 
 const LABELS: Record<StatusKey, string> = {
   open: 'open',
@@ -42,6 +50,8 @@ const LABELS: Record<StatusKey, string> = {
   'in-review': 'in review',
   reviewed: 'reviewed',
   done: 'done',
+  merged: 'merged',
+  discarded: 'discarded',
   'on-hold': 'on hold',
   other: 'other',
 };

@@ -1,4 +1,6 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// @vitest-environment node
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -10,16 +12,21 @@ const CLI = resolve('../cli/bin/nos.js');
 let root = '';
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
+const nos = (args: string[], input?: string) =>
+  JSON.parse(execFileSync(process.execPath, [CLI, ...args, '--root', root], { encoding: 'utf8', input }));
+
+// a project as nos init leaves it (nos.config.json, .specs/ as its own repo) with one unplanned domain
 const setup = () => {
   root = mkdtempSync(join(tmpdir(), 'nos-promote-'));
-  // the CLI resolves the specs root from nos.config.json (default .specs); this fixture keeps specs/ until P6
-  writeFileSync(join(root, 'nos.config.json'), JSON.stringify({ specs: { dir: 'specs' } }));
-  mkdirSync(join(root, 'specs/domain-1-dark-mode'), { recursive: true });
-  writeFileSync(join(root, 'specs/domain-1-dark-mode/idea.md'), '# Idea: Dark mode\n');
-  writeFileSync(join(root, 'specs/domain-1-dark-mode/domain.json'), JSON.stringify({ name: 'Dark mode theme' }));
+  nos(['init']);
+  const domain = nos(
+    ['create-domain', '--idea', '-', '--slug', 'dark-mode', '--name', 'Dark mode theme'],
+    '# Idea: Dark mode\n',
+  );
+  expect(domain.folder).toBe('domain-1-dark-mode');
 };
 
-// runs the handler like the dev server middleware does
+// runs the handler like the dev server middleware does (it passes --root <main>)
 const call = (method: string, url: string) =>
   new Promise<{ status: number; body: string }>((done) => {
     const res = {
@@ -32,12 +39,12 @@ const call = (method: string, url: string) =>
     promoteHandler(root, CLI)({ method, url } as never, res);
   });
 
-test('POST /__promote runs nos create-plan --hollow, the idea gets an empty open plan', async () => {
+test('POST /__promote runs nos create-plan --hollow in main, the idea gets an empty open plan in .specs', async () => {
   setup();
   const ok = await call('POST', '/__promote?domain=domain-1-dark-mode');
   expect(ok.status).toBe(200);
   expect(JSON.parse(ok.body)).toMatchObject({ action: 'create-plan', hollow: true, phases: [] });
-  expect(JSON.parse(readFileSync(join(root, 'specs/domain-1-dark-mode/plan.json'), 'utf8'))).toStrictEqual({
+  expect(JSON.parse(readFileSync(join(root, '.specs/domain-1-dark-mode/plan.json'), 'utf8'))).toStrictEqual({
     name: 'Dark mode theme',
     status: 'open',
     phases: [],

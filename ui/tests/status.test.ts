@@ -1,6 +1,13 @@
 import { test, expect } from 'vitest';
 
-import { normStatus, STATUS_ORDER, STEP_BOARD_STATUSES, PHASE_BOARD_STATUSES, statusLabel } from '../src/status';
+import {
+  HIDDEN_BY_DEFAULT,
+  normStatus,
+  STATUS_ORDER,
+  STEP_BOARD_STATUSES,
+  PHASE_BOARD_STATUSES,
+  statusLabel,
+} from '../src/status';
 
 test('every nos status maps to its own key without a flag', () => {
   for (const s of [
@@ -12,6 +19,8 @@ test('every nos status maps to its own key without a flag', () => {
     'in-review',
     'reviewed',
     'done',
+    'merged',
+    'discarded',
     'on-hold',
   ]) {
     expect(normStatus(s)).toStrictEqual({ key: s, label: s, flagged: false });
@@ -57,12 +66,14 @@ test('status order follows the nos lifecycle, off-spec buckets last', () => {
     'in-review',
     'reviewed',
     'done',
+    'merged',
+    'discarded',
     'on-hold',
     'other',
   ]);
 });
 
-test('step boards always show the step lifecycle columns', () => {
+test('step boards always show the step lifecycle columns, merged included', () => {
   expect(STEP_BOARD_STATUSES).toStrictEqual([
     'open',
     'in-specification',
@@ -72,10 +83,17 @@ test('step boards always show the step lifecycle columns', () => {
     'in-review',
     'reviewed',
     'done',
+    'merged',
   ]);
 });
 
-test('phase boards always show the phase lifecycle columns, no specification', () => {
+test('discarded is hidden by default, merged and discarded have labels', () => {
+  expect(HIDDEN_BY_DEFAULT).toStrictEqual(['discarded']);
+  expect(statusLabel('merged')).toBe('merged');
+  expect(statusLabel('discarded')).toBe('discarded');
+});
+
+test('phase boards always show the phase lifecycle columns, no specification, never merged', () => {
   expect(PHASE_BOARD_STATUSES).toStrictEqual(['open', 'in-progress', 'implemented', 'in-review', 'reviewed', 'done']);
 });
 

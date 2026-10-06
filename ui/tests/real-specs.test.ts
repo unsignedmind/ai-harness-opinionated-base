@@ -1,31 +1,39 @@
+// @vitest-environment node
 import { resolve } from 'node:path';
-import { test, expect } from 'vitest';
+import { describe, expect, test } from 'vitest';
 
-import { readDocs, readSpecsFolder } from '../src/folder';
+import { locateSpecs, readDocs, readSpecsFolder } from '../src/folder';
 import { buildModel } from '../src/model';
-import { nodeDir } from '../src/serve-specs';
+import { nodeDir, specsSetup } from '../src/serve-specs';
 
-// Reads the real specs/ the same way the dev server does, so a plan.json the viewer cannot parse
-// fails here first. specs/ sits at the repo root, five levels above this folder.
-const readSpecs = () => readSpecsFolder(nodeDir(resolve(import.meta.dirname, '../../../../../specs')));
+// Reads the real specs root of the project this nos sits in the same way the dev server does, so a
+// plan.json the viewer cannot parse fails here first. The project comes from the resolver (the walk
+// from the ui folder to nos.config.json, or NOS_SPECS_ROOT). Skipped when nos is not set up there
+// (a nos checkout of its own, or a project before nos init).
+const setup = specsSetup({ cwd: resolve(import.meta.dirname, '..'), env: process.env });
+const roots = setup.roots;
 
-test('every idea in specs/ parses without error', async () => {
-  const model = buildModel(await readSpecs());
-  expect(model.ideas.length).toBeGreaterThan(0);
-  for (const idea of model.ideas) expect(idea.error).toBeNull();
-});
+describe.skipIf(!roots)('the real specs of the project', () => {
+  const readSpecs = () => readSpecsFolder(nodeDir(roots!.specs));
 
-test('every step names a known status and its spec file exists', async () => {
-  const files = await readSpecs();
-  for (const s of buildModel(files).steps) {
-    expect(s.status.flagged, `${s.idea.folder}/${s.slug}`).toBe(false);
-    if (s.specPath) expect(files[s.specPath], s.specPath).toBeDefined();
-  }
-});
+  test('every idea parses without error', async () => {
+    const model = buildModel(await readSpecs());
+    expect(model.ideas.length).toBeGreaterThan(0);
+    for (const idea of model.ideas) expect(idea.error).toBeNull();
+  });
 
-test('the docs folder named in specs/config.json loads', async () => {
-  const repo = resolve(import.meta.dirname, '../../../../..');
-  const docs = await readDocs(nodeDir(resolve(repo, 'specs')), nodeDir(repo));
-  expect(docs.error).toBeUndefined();
-  expect(Object.keys(docs.files).length).toBeGreaterThan(0);
+  test('every step names a known status and its spec file exists', async () => {
+    const files = await readSpecs();
+    for (const s of buildModel(files).steps) {
+      expect(s.status.flagged, `${s.idea.folder}/${s.slug}`).toBe(false);
+      if (s.specPath) expect(files[s.specPath], s.specPath).toBeDefined();
+    }
+  });
+
+  test('the docs folder named in nos.config.json loads', async () => {
+    const { specs, root } = await locateSpecs(nodeDir(roots!.main));
+    const docs = await readDocs(specs, root);
+    expect(docs.error).toBeUndefined();
+    expect(Object.keys(docs.files).length).toBeGreaterThan(0);
+  });
 });
