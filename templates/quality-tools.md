@@ -36,7 +36,8 @@ Project specific commands live in `nos.config.json` at the project root. It is t
 | quality-tools    | format-check | formatter check, never the write variant                           |
 | quality-tools    | typecheck    | type checker                                                       |
 | quality-tools    | e2e          | end-to-end tests in a real browser or app                          |
-| quality-tools    | additional   | list of further checks, e.g. dead code, i18n, bundle size          |
+| quality-tools    | additional   | list of further checks, e.g. dead code, i18n, bundle size: a command string (named additional-<n>) or { "name", "cmd" } |
+| quality-tools    | timeout      | minutes one tool may run before `nos gate` kills it (status fail, "timedOut": true), default 30 |
 | project-commands | install      | installs dependencies, e.g. in a fresh worktree                    |
 | project-commands | dev          | starts the local dev server                                        |
 | project-commands | deploy-test  | deploys to a test environment and prints a url                     |
@@ -59,7 +60,7 @@ Exception while developing: a single unit or integration test file may run direc
 3. Output:
    ```json
    { "action": "gate", "pass": false,
-     "tools": [{ "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "tail": "<last 60 lines>", "log": "<abs path>" },
+     "tools": [{ "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "timedOut": false, "tail": "<last 60 lines>", "log": "<abs path>" },
                { "name": "e2e", "cmd": null, "status": "not-configured" }] }
    ```
    `status` is `pass`, `fail` or `not-configured`. Read `tail` first, the full output is in `log` (`<specs>/.runs/logs/<run|main>/<tool>.log`).

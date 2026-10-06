@@ -348,7 +348,7 @@ sync/finish/cleanup/abandon act on --run, else the run of the worktree you sit i
 start    Validates the target (a plan with phases, or a quick step; not merged/discarded). Run file of
          this run: same token -> resume (recreates a missing worktree); another token -> 4; --take-over ->
          new token (also for a merged/abandoned run: then only the token, so cleanup can run; a merge lock
-         of the old token is released). Another run in the domain -> 6. Uncommitted specs of the domain ->
+         of the old token is released, while its finish still runs -> 4). Another run in the domain -> 6. Uncommitted specs of the domain ->
          committed "<run>: leftovers". Branch <kind>-<id> (reused, else from main's current branch),
          git worktree add, run file (base, phase develop), "branch" in plan.json / the quick step.
          project-commands.install in a new worktree, output to <specs>/.runs/logs/<run>/install.log
@@ -362,14 +362,15 @@ finish   The plan / quick step must be done. Under lock merge (another token -> 
          git merge --ff-only (refused -> sync + gate once more, then 1), set-status --run merged,
          specs commit "<run>: merged", phase merged. A failure releases the lock, phase develop.
          A crash keeps lock and phase: the same token resumes.
-cleanup  Not from inside the worktree. Phase merged or abandoned. git worktree remove, branch -d (merged)
-         / -D (abandoned), run file deleted. Parts already gone are skipped (rerun after a failure).
+cleanup  Not from inside the worktree. Phase merged or abandoned. git worktree remove (merged: modified
+         tracked files -> 5 with the list; untracked files are removed), branch -D (merged: only when the
+         branch is in mainBranch), run file deleted. Parts already gone are skipped (rerun after a failure).
 abandon  Not for a merged run, not from inside the worktree. set-status --run discarded, specs commit
          "<run>: discarded", phase abandoned, then the cleanup with --force / -D.
 
-Exit: 0 ok, 1 failed (finish: gate fail, main busy/dirty print { action, error, exit, details }),
-2 usage, 3 rebase conflict, 4 held by another token (run or merge lock), 5 dirty worktree,
-6 another run in the domain, 7 no slot for the e2e gate.
+Exit: 0 ok, 1 failed (finish: gate fail, main busy/dirty/on another branch, ff refused twice print
+{ action, error, exit, details }), 2 usage, 3 rebase conflict, 4 held by another token (run or merge
+lock), 5 dirty worktree (sync, finish, cleanup), 6 another run in the domain, 7 no slot for the e2e gate.
 
 Example:
   nos run start --domain domain-2-auth --quick 7

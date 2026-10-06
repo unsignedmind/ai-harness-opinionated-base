@@ -48,7 +48,7 @@ General rules:
 
 ### Roots
 
-The CLI resolves four folders once per invocation (`src/roots.js`, shared with chat and spec-ui via `roots.d.ts`):
+The CLI resolves four folders once per invocation (`src/roots.js`, shared with chat and spec-ui via `roots.d.ts`; the spec-ui also imports `src/runs.js` and `src/git.js` via `runs.d.ts` / `git.d.ts` for `/__runs`):
 
 | Root    | Resolution |
 | ------- | ---------- |
@@ -87,11 +87,11 @@ For codes 3–7 stdout also gets `{ "action", "error", "exit", "details" }` (det
 
 | Command | Exit codes |
 | --- | --- |
-| `run start` | 0, 1 (no git, target invalid/merged/discarded, detached main, git failed), 2, 4 run held by another token, 6 another run in the domain |
+| `run start` | 0, 1 (no git, target invalid/merged/discarded, detached main, git failed), 2, 4 run held by another token (also `--take-over` while the old holder's finish still runs, or lock `runs` held 10 s), 6 another run in the domain |
 | `run sync` | 0, 1 (no token, worktree missing, git failed), 3 rebase conflict / in progress, 4 another token, 5 dirty worktree |
 | `run finish` | 0, 1 (not done, gate fail, main busy/dirty/on another branch, ff refused twice, no token), 3, 4 (another token, or merge lock held), 5, 7 no slot for e2e |
-| `run cleanup` / `run abandon` | 0, 1 (inside the worktree, wrong phase, worktree in use, git failed), 4 another token |
-| `set-status --run` | 0, 1 violation / unknown run, 2 bad run id or status |
+| `run cleanup` / `run abandon` | 0, 1 (inside the worktree, wrong phase, worktree in use, git failed, no token), 4 another token, 5 modified tracked files in a merged run's worktree (cleanup) |
+| `set-status --run` | 0, 1 violation / unknown run / no token while the run file exists, 2 bad run id or status, 4 another token |
 | `specs commit` | 0, 1 (not its own repo, unknown run or domain, git failed), 2 (not exactly one of `--run`/`--domain`/`--config`, no `-m`) |
 | `specs find-step` | 0, 1 not found, 2 bad id |
 | `gate` | 0 pass, 1 a tool failed or timed out (JSON still printed), not set up or interrupted, 7 no slot for e2e |
@@ -99,7 +99,7 @@ For codes 3–7 stdout also gets `{ "action", "error", "exit", "details" }` (det
 | `lock take` / `lock release` | 0, 4 held by another token, 2 no token / bad name |
 | any command reserving ids | 4 when lock `ids` stays held 10s (hint `nos lock release ids --break`) |
 
-How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the same command again (contradicting specs → the user decides which intent wins). 4 from `run start` → report holder and age, the user decides (`--take-over` or stop); 4 from `run finish` (merge lock) → wait 60s and retry, up to 10×. 6 → report the other run, the user decides. 5 → commit the step's own leftover files (`git add -- <files>`, never `-A`) with the current step prefix, or park. 1 from `run finish` with a gate fail → `FIX` reruns develop. 7 and other 1 → park and report.
+How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the same command again (contradicting specs → the user decides which intent wins). 4 for the run token → report holder and age, the user decides (`--take-over` or stop); 4 for the merge lock (`details.lock`) → wait 60s and retry, up to 10×. 6 → report the other run, the user decides. 5 → commit the step's own leftover files (`git add -- <files>`, never `-A`) with the current step prefix, or park (from `run cleanup`: park, the user reverts or deletes the files). 1 from `run finish` with a gate fail → `FIX` reruns develop; main busy/dirty/on another branch or ff refused twice → park, GO repeats finish. 7 and other 1 → park and report.
 
 ### Process model
 
@@ -593,6 +593,7 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 | `nos chat typing [--state thinking\|typing\|idle]` | Presence shown in the page |
 | `nos chat pending` | Sessions with undelivered messages, read from disk |
 | `nos chat end` / `nos chat stop` | End the chat as the agent / shut the server down |
+| `nos chat restart` | Shut the server down (running Claude Code runs stop) and start a fresh one |
 | `nos chat pair` | One-time pairing link for a phone (10 min, single use; approve the device on the PC) |
 | `nos chat devices [--approve id] [--deny id] [--revoke id] [--revoke-all]` | Paired devices |
 | `nos chat server [--port n]` | Run the server in the foreground |
@@ -671,7 +672,7 @@ npm run test:watch  # rerun the tests on every change
 | `src/cli.js`     | Argument parsing, help text, JSON output         |
 | `src/roots.js`   | Roots resolver, home guard, `SPECS_DIR`, spec-file checks (`roots.d.ts` for TypeScript) |
 | `src/exit-codes.js` | Exit codes and `NosError`                     |
-| `src/git.js`     | `git(args, {cwd})`, `gitOut`, `gitAvailable`     |
+| `src/git.js`     | `git(args, {cwd})`, `gitOut`, `gitAvailable`, `gitEnv` (`git.d.ts` for TypeScript) |
 | `src/project-config.js` | `nos.config.json` reader with defaults    |
 | `src/init.js`    | `init`                                           |
 | `src/config.js`  | `<specs>/config.json` setup, id reservation, template paths |
@@ -681,7 +682,7 @@ npm run test:watch  # rerun the tests on every change
 | `src/quick-step.js` | `create-quick-step`, `quick-steps.json` access |
 | `src/status.js`  | `set-status` (also `--run`) and `status.xml` parsing |
 | `src/run.js`     | `run start\|sync\|finish\|cleanup\|abandon`     |
-| `src/runs.js`    | Run registry `<specs>/.runs`, run tokens         |
+| `src/runs.js`    | Run registry `<specs>/.runs`, run tokens (`runs.d.ts` for TypeScript) |
 | `src/lock.js`    | mkdir locks in `<specs>/.locks` (`lock`, ids lock) |
 | `src/slots.js`   | Slot leases (`withSlot`), `NOS_SLOT`             |
 | `src/gate.js`    | `gate`                                           |

@@ -119,7 +119,7 @@ Exit codes: 0 ok, 1 failed, 2 usage, 3 rebase conflict, 4 run held by another ho
 ### Merge protocol (ff-only under a lock, inside `nos run finish`)
 Git protects the ref, not the workflow: two merges seconds apart → the second is no fast-forward and must rebase and rerun the gate. The gate is the slow part, so the whole integrate phase serializes:
 1. Take `.specs/.locks/merge`. Held by another token → park, report the holder. Own token → continue (resume).
-2. Main busy precheck: `git -C <main> rev-parse -q --verify MERGE_HEAD REBASE_HEAD CHERRY_PICK_HEAD`, any hit → release, park, report "main busy".
+2. Main busy precheck: `git -C <main> rev-parse -q --verify` of MERGE_HEAD, CHERRY_PICK_HEAD, REVERT_HEAD (one call each), or a `rebase-merge` / `rebase-apply` folder in main's git dir (not REBASE_HEAD: git leaves it behind after a finished rebase), any hit → release, park, report "main busy".
 3. Main clean precheck: `git -C <main> status --porcelain` on the paths the branch touches. Dirty → release, park, report.
 4. Worktree clean check, then rebase branch onto main. Conflict → release, ability "integrate", repeat finish.
 5. Gate in the worktree. Fail → release, park, report.

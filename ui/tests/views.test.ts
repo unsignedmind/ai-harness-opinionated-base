@@ -339,13 +339,15 @@ test('board and backlog include quick steps', () => {
 
 // ── runs and branches ──
 
+// one timestamp for every run(): two calls in one test must not differ by a millisecond (runsKey compares seen)
+const SEEN = new Date(Date.now() - 125_000).toISOString();
 const run = (over: Partial<Run> = {}): Run => ({
   kind: 'quick',
   id: 4,
   domain: 'domain-2-dark-mode',
   branch: 'quick-4',
   phase: 'develop',
-  seen: new Date(Date.now() - 125_000).toISOString(),
+  seen: SEEN,
   ageSec: 125,
   worktree: 'D:/p/.claude/worktrees/quick-4',
   ahead: 3,

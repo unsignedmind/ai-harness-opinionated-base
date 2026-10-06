@@ -116,7 +116,8 @@ B - Create a plan from an idea [PLAN]
 C - Run or continue a plan or quick step [RUN]
 D - Quick step: one small change straight to specify, develop, review [QUICK]
 E - Improve project quality and docs: architecture docs, guardrails, tests [ARCHITECT]
-F - Set up or update nos for this project: specs folder, config, quality tools [SETUP]
+F - Set up or update nos for this project: nos.config.json, .specs repo, quality tools, slots [SETUP]
+G - Continue in the browser or on the phone: open the local chat (its own Claude Code sessions, one per tab) [CHAT]
 ```
 
 Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
@@ -224,10 +225,10 @@ A resumed session (`claude --resume`, a restarted chat) is back in the run's wor
 | --- | --- | --- |
 | 3 | rebase conflict | integrate, then the same command again. Contradicting specs: you decide which intent wins (`DECIDE`), pause or abandon |
 | 4 | held by another session (run token or merge lock) | run: shows holder and age, you decide: take over or stop. Merge lock: waits and retries, then stops |
-| 5 | dirty worktree | commits the step's own leftover files (never `git add -A`), or stops and asks you to ignore or delete the rest |
+| 5 | dirty worktree | commits the step's own leftover files (never `git add -A`), or stops and asks you to ignore or delete the rest. At cleanup (modified files in a merged worktree): stops, you revert or delete them |
 | 6 | another run in the domain | shows it, you decide |
 | 7 | no free slot in time | stops |
-| 1 | failed (gate, main busy or dirty) | stops and reports. Gate fail at integration: `FIX` runs develop for the last step with the failures |
+| 1 | failed (gate, main busy, dirty or on another branch, ff merge refused twice) | stops and reports; GO repeats the integration once you fixed main. Gate fail at integration: `FIX` runs develop for the last step with the failures |
 
 ### Controlling human validation
 
@@ -542,7 +543,7 @@ Used in ACs, the Task List and review findings:
 | --- | --- |
 | `<rules>` | Invocation and roots. Runs, token, specs commits after every ability, code commit prefixes. Every ability runs in a new subagent. Statuses change only via `nos set-status`. Questions from subagents are relayed to you and the answers sent back to the same subagent. Reports use simple language. Every question uses the `A - text [KEY]` format |
 | `<exitCodes>` | What to do on each nos exit code: 3 integrate (blocked → DECIDE), 4 take over or stop (merge lock: wait and retry), 6 switch, wait or stop, 5 commit the step's leftover files or park, 7 and 1 park |
-| `<start>` | The IDEA / PLAN / RUN / QUICK / ARCHITECT / SETUP menu |
+| `<start>` | `nos roots`, the setup check, resume of a run when the session sits in its worktree, and the IDEA / PLAN / RUN / QUICK / ARCHITECT / SETUP / CHAT menu |
 | `<option name="idea">` | Runs idea, then offers PLAN |
 | `<option name="architect">` | Runs architect. Tech debt handed over → offers an idea for all bugs or one per bug |
 | `<option name="plan">` | Picks a domain without a plan, runs plan (create), then offers RUN |
