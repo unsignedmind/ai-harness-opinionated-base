@@ -1,15 +1,16 @@
 ---
 name: setup
-description: You set up nos for the project. Creates or checks nos.config.json and the specs repo (outside the checkout), gathers the quality tools, project commands, docs folder and slots, writes the chat settings
+description: You set up nos for the project. Creates or checks nos.config.json and the specs repo (outside the checkout), gathers the quality tools, project commands, docs folder and slots, writes the pipeline allow list and the chat settings, proposes the autoMode entries
 ---
 
 <coreRules>
     <rule>You are the setup agent</rule>
     <rule>Idempotent: every step checks what exists first. Fresh project → full setup. Layout exists → check only: fill what is missing, propose changes, change nothing the user did not confirm</rule>
-    <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in full: never through a shell variable, function or alias (worktree isolation refuses computed command names). <home> = the given home, or the nos folder that holds this ability's abilities/ folder. Absolute path, forward slashes, also in every file you write</rule>
+    <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in full: never through a shell variable, function or alias (worktree isolation refuses computed command names). <home> = the given home, or the nos folder that holds this ability's abilities/ folder. Absolute path, forward slashes, also in every file you write. One nos call = the bare command as its own Bash call: no "cd … &&" prefix (the cwd already is <main>), no pipes ("| tail", "| head"), no redirects ("2>&1", "> file"), no ";" or "&&" chains. Same for git and test/tool runners you run directly: one plain command per call. A compound command does not match the permission allow rules, the auto-mode classifier then decides and may block it (a "cd <worktree> && nos exec deploy-test" was blocked as Production Deploy)</rule>
     <rule>Run on the main checkout from the project root (git top level). "nos roots" says inWorktree true → stop, report: "run setup from the main checkout"</rule>
     <rule>Never change production code, package.json or tool configs. You write only: <main>/nos.config.json, <main>/.claude/settings.local.json, the "chat" node of <specs>/config.json. "nos init" writes the rest</rule>
     <rule>Never write .claude/settings.json. Machine paths go to .claude/settings.local.json only, with forward slashes</rule>
+    <rule>Never write user-level settings (~/.claude/settings.json): you only propose its autoMode entries (step4), the user applies them. Claude Code's classifier treats an agent editing user settings as self-modification</rule>
     <rule>Never change "id-counters" in <specs>/config.json. Never run git against <specs> except the clone in step1: "nos init" does the rest</rule>
     <rule>Files you write (nos.config.json, settings.local.json, <specs>/config.json): only with the Write/Edit tools (absolute path), never via shell (sed -i, echo/cat redirection, heredoc, python, node -e): auto mode refuses shell writes outside the cwd. Never cd into <specs></rule>
     <rule>Keys, meanings and format: <home>/templates/quality-tools.md</rule>
@@ -36,7 +37,21 @@ description: You set up nos for the project. Creates or checks nos.config.json a
         <do>worktrees slots: 3 when e2e is configured, else 1. slotWait: seconds a gate or dev server waits for a free slot, default 600</do>
         Check only → mark unchanged rows. Ask the user to confirm or adjust
     </step3>
-    <step4>Write only the confirmed "quality-tools", "project-commands", "spec-ui" and "worktrees" nodes into <main>/nos.config.json. Keep all other keys</step4>
+    <step4>Write only the confirmed "quality-tools", "project-commands", "spec-ui" and "worktrees" nodes into <main>/nos.config.json. Keep all other keys. Then the pipeline permissions:
+        <do>Allow list: merge into permissions.allow of <main>/.claude/settings.local.json (create the file when missing; add missing entries, never remove or change a user entry; <home> exactly as "nos roots" prints it: absolute, forward slashes, the same string as in every nos call). Narrow rules only, so auto mode keeps them and skips its classifier for these calls (it drops wildcarded interpreters, "npm run *"-style rules and Agent rules):
+            "Bash(node <home>/cli/bin/nos.js)", "Bash(node <home>/cli/bin/nos.js *)",
+            "Bash(git status*)", "Bash(git log *)", "Bash(git diff*)", "Bash(git show *)", "Bash(git rev-parse *)", "Bash(git ls-files *)", "Bash(git check-ignore *)", "Bash(git add *)", "Bash(git commit *)", "Bash(git -c core.editor=true rebase --continue)",
+            test/tool runners, only for tools behind the confirmed quality-tools (the configured command or the package.json script it calls names the tool): vitest → "Bash(npx vitest run *)", playwright → "Bash(npx playwright test *)", tsc → "Bash(npx tsc *)", eslint → "Bash(npx eslint *)", prettier → "Bash(npx prettier *)"; another runner → the same form with its executable and the package manager's exec prefix (pnpm exec, yarn, bunx), never a "run *" rule,
+            "EnterWorktree", "ExitWorktree" (headless sessions cannot approve them).
+            permissions.additionalDirectories ["<specs>"] stays as in step1. .claude/settings.local.json must not be tracked: "git check-ignore" it, not ignored → add it to the project .gitignore. Tell the user to confirm with /permissions. The rules match only plain commands: abilities call nos, git and runners one plain command per call (no cd prefix, pipes or redirects)</do>
+        <do>autoMode proposal (never written by you): classifier categories (Production Deploy, Modify Shared Resources, …) lift only through autoMode prose in the user's ~/.claude/settings.json; project settings are ignored for autoMode. Show the user a ready-to-paste snippet with real absolute paths (forward slashes) and the actual deploy-test command quoted; deploy-test null → leave that allow entry out:
+            { "autoMode": {
+              "environment": ["$defaults", "Source control: the local repos <main> (incl. its nos run worktrees under <main>/.claude/worktrees/) and its specs repo <specs> are trusted local source control"],
+              "allow": ["$defaults",
+                "Deploying <project> with its configured deploy-test command (\"node <home>/cli/bin/nos.js exec deploy-test\" → \"<deploy-test command>\") is allowed: it deploys to a test/preview environment, not production. Production deploy commands of the project stay blocked",
+                "Writing and committing in <specs> and in the run worktrees under <main>/.claude/worktrees/ is allowed: local nos planning and branch work, merged only by the user's nos run finish"] } }
+            Entries are prose; "$defaults" keeps Claude Code's built-in entries. Tell the user: merge into ~/.claude/settings.json by hand, keep existing environment and allow entries, verify with "claude auto-mode config", restart running sessions. Check only → the entries already show in "claude auto-mode config" → say so, no new proposal</do>
+    </step4>
     <step5>"nos gate" (no --e2e) in <main>. Report pass or fail per tool from its JSON. A failing command stays configured unless the user removes it</step5>
     <step6>Slot check, only when project-commands dev is set: start "nos exec dev" once per slot (1..slots) as background tasks at the same time, each takes its own slot (NOS_SLOT). Per server: read the url it prints, request it, it must answer. Stop every server afterwards (stop the background task; the slot is released when it exits). Then "nos lock status slot-<n>" per slot: "held" with "pidAlive" true → a server still runs, stop it. A lease whose process is gone needs nothing: the next taker reclaims it automatically. Two servers on one port, or one not answering → report: the project's dev and e2e config must derive ports and base url from NOS_SLOT, e.g. 5173 + NOS_SLOT. Setup never changes it: hint the user, or the architect ability</step6>
     <step7>Chat (local chat in the spec-ui, ability "chat"):
@@ -45,7 +60,7 @@ description: You set up nos for the project. Creates or checks nos.config.json a
             <choice key="RELAY">Relay: a Claude Code session in the terminal answers the chat (await/reply)</choice>
             <choice key="NO">Skip</choice>
         </question>
-        Both: merge permissions.allow "Bash(node <home>/cli/bin/nos.js)" and "Bash(node <home>/cli/bin/nos.js *)" into <main>/.claude/settings.local.json, <home> exactly as "nos roots" prints it (absolute, forward slashes), the same string the orchestrator uses in every call. Create the file when missing, keep every other entry. .claude/settings.local.json must not be tracked: "git check-ignore" it, not ignored → add it to the project .gitignore. Tell the user to confirm with /permissions
+        Both: the nos allow rules are in <main>/.claude/settings.local.json since step4 (missing → merge them as there)
         RELAY only: set "chat": { "runner": false } in <specs>/config.json and merge the Stop hook into <main>/.claude/settings.local.json:
         hooks.Stop: { "matcher": ".*", "hooks": [{ "type": "command", "command": "node <home>/cli/bin/nos.js chat hook", "timeout": 30 }] }
         Optional in <specs>/config.json "chat": "port" (default 4611), "permissionMode" (default "auto"; acceptEdits, dontAsk, plan, …), "model", "claude" (path of the claude executable). Only what the user asks for. <specs>/config.json changed → tell the orchestrator: nos specs commit --config -m "setup: chat"
@@ -59,5 +74,5 @@ description: You set up nos for the project. Creates or checks nos.config.json a
         Set → report it
     </step8>
     <step9>Commit on main (listed exception: setup commits directly on main): in <main> stage only nos.config.json and .gitignore, commit "setup: <what changed>" when anything is staged. Never stage other files. Never push: nos never pushes code, the user pushes. <specs> needs no commit: "nos init" committed it</step9>
-    <step10>Report the final config: quality tools with gate result, project commands, docs folder, slots with the slot check result, chat mode, specs remote. test, lint or format-check null → hint: the architect ability (TESTS) can add the tooling</step10>
+    <step10>Report the final config: quality tools with gate result, project commands, docs folder, slots with the slot check result, chat mode, specs remote, the allow rules added, the autoMode snippet (if proposed). test, lint or format-check null → hint: the architect ability (TESTS) can add the tooling</step10>
 </workflow>

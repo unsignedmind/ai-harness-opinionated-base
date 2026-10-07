@@ -51,7 +51,7 @@ Project specific commands live in `nos.config.json` at the project root. It is t
 
 Run project commands only through `nos gate` and `nos exec`. Never run a configured command (or `npm test`, `npm run dev`, …) directly: only `nos` reads the right `nos.config.json`, takes a slot for e2e and dev servers, sets `NOS_SLOT` and keeps the logs.
 
-Exception while developing: a single unit or integration test file may run directly with the project's test runner (e.g. `npx vitest run src/cart/total.test.ts`), because it opens no ports. e2e, dev servers and the full configured commands only via `nos gate` / `nos exec`.
+Exception while developing: a single unit or integration test file may run directly with the project's test runner (e.g. `npx vitest run src/cart/total.test.ts`), because it opens no ports. One plain command per call: no `cd … &&` prefix, no pipe (`| tail`), no redirect (`2>&1`), so the allow rule setup wrote (e.g. `Bash(npx vitest run *)`) matches. e2e, dev servers and the full configured commands only via `nos gate` / `nos exec`.
 
 ## Quality check: `nos gate [--e2e]`
 

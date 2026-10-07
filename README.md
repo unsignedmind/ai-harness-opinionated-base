@@ -74,10 +74,12 @@ Idempotent: on a fresh project it sets everything up, on a set up one it only ch
 1. Runs `nos init`: creates `nos.config.json` (`specs.dir` `null` = the default `../<project>.specs`), `<specs>/` next to the checkout as its own git repo (first commit `nos: init`, `config.json` with the back-pointer `project`) and the `.gitignore` entry `.claude/worktrees/`. Existing files and id counters stay untouched. Adds the specs root to `permissions.additionalDirectories` in `.claude/settings.local.json`.
 2. Detects the tooling: package manager, `package.json` scripts, Makefile, pyproject, go.mod, …
 3. Proposes the commands per key, the docs folder for the viewer and the slots (3 when e2e is configured, else 1), and asks you to confirm or adjust.
-4. Writes `quality-tools`, `project-commands`, `spec-ui` and `worktrees` into `nos.config.json`.
+4. Writes `quality-tools`, `project-commands`, `spec-ui` and `worktrees` into `nos.config.json`. Then the pipeline permissions, in two parts:
+   - Allow list in `.claude/settings.local.json` (merged, your entries stay): `node <home>/cli/bin/nos.js` (with and without args), plain git (`status`, `log`, `diff`, `show`, `rev-parse`, `ls-files`, `check-ignore`, `add`, `commit`, `-c core.editor=true rebase --continue`), the test/tool runners behind your quality tools (e.g. `npx vitest run *`, `npx eslint *`) and the tools `EnterWorktree`/`ExitWorktree`. Why: narrow rules stay active in auto mode and skip the classifier, so runs and headless chat sessions are not blocked or prompted. They match only plain commands, so abilities call nos, git and runners one plain command per call (no `cd … &&`, pipes or redirects).
+   - `autoMode` proposal for `~/.claude/settings.json` (you paste it, setup never writes user settings): `environment` names the project repo, its run worktrees and the specs repo as trusted local source control; `allow` says your `deploy-test` command is a test/preview deploy, not production (production stays blocked), and that writing and committing in the specs repo and run worktrees is local work. Why: classifier categories like Production Deploy can only be lifted there; project files are ignored for `autoMode`. Keep `"$defaults"` and your existing entries, check with `claude auto-mode config`, restart sessions.
 5. Runs the quality tools once with `nos gate` and reports pass or fail.
 6. Slot check: starts the dev server once per slot (`nos exec dev`) and checks that each answers on its own port.
-7. Chat: permissions and (relay) the Stop hook go into `.claude/settings.local.json` with absolute paths. `settings.json` is never written.
+7. Chat: (relay) the Stop hook goes into `.claude/settings.local.json` with absolute paths. `settings.json` is never written.
 8. Offers a git remote as backup for `<specs>` (`specs.remote`).
 9. Commits `nos.config.json` and `.gitignore` on main with `setup: …` (setup is a listed exception to "main moves only by merges").
 
@@ -405,7 +407,7 @@ The status change of the resumed step is skipped because it already happened. Th
 
 ### abilities/setup.md: setup 🔧
 
-Not part of the run cycle. Started from the menu (SETUP), or offered at start when `nos.config.json` is missing or has no `quality-tools`. Runs `nos init`, detects the project's tooling, lets you confirm the commands and slots, writes `nos.config.json`, runs the gate once, verifies the slots, writes `additionalDirectories` (the specs root) and the chat settings to `.claude/settings.local.json` and offers a remote for `<specs>`. Never touches the id counters or `settings.json`.
+Not part of the run cycle. Started from the menu (SETUP), or offered at start when `nos.config.json` is missing or has no `quality-tools`. Runs `nos init`, detects the project's tooling, lets you confirm the commands and slots, writes `nos.config.json`, runs the gate once, verifies the slots, writes `additionalDirectories` (the specs root), the pipeline allow list and the chat settings to `.claude/settings.local.json`, proposes `autoMode` entries for your user settings and offers a remote for `<specs>`. Never touches the id counters, `settings.json` or `~/.claude/settings.json`.
 
 ### abilities/idea.md: idea 💡
 
