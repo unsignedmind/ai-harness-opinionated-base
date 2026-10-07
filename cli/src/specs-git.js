@@ -116,6 +116,10 @@ export function commitSpecs(roots, { domain = null, poc = null, message, pushTim
   assertSpecsRepo(roots);
   const known = (p) => existsSync(path.join(roots.specs, p)) || specsGit(roots, ['ls-files', '--', p]).stdout.trim();
   if (domain && !known(domain)) throw new NosError(FAILED, `Domain ${domain} does not exist in ${slash(roots.specs)}`);
+  // a POC result that is neither on disk nor tracked: nothing the subagent wrote, nothing to commit
+  if (poc && !known(resultRel(poc))) {
+    throw new NosError(FAILED, `No POC result ${slash(path.join(roots.specs, resultRel(poc)))}`);
+  }
   const paths = (poc ? [resultRel(poc)] : [CONFIG_FILE, ...(domain ? [domain] : [])]).filter(known);
   const result = {
     action: 'specs-commit',

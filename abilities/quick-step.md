@@ -21,7 +21,7 @@ description: You create a quick step. One step without a plan, allocated to a do
 <input>home, work, specs. Optional: intent of the user, or a POC result file as the intent</input>
 
 <workflow>
-    <step1>No intent given → ask the user what they want. Too unclear to allocate a domain → ask one focused question. A POC result given → its requirements are the intent</step1>
+    <step1>No intent given → ask the user what they want. Too unclear to allocate a domain → ask one focused question. A POC result given → its requirements are the intent. Too big for one quick step (several features, or work that needs phases) → say so and suggest IDEA instead; continue only when the user wants the quick step anyway</step1>
     <step2>
         <question>How should the quick step be created?
             <choice key="AUTO">Autonomous. I choose the domain and run the quick step without stops</choice>

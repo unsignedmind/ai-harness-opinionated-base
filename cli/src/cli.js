@@ -382,8 +382,9 @@ start    Validates the target (a plan with phases, or a quick step; not merged/d
          git worktree add, run file (base, phase develop), "branch" in plan.json / the quick step.
          project-commands.install in a new worktree, output to <specs>/.runs/logs/<run>/install.log
          (a failure is reported in "install", the run stays).
-         --poc <slug> (lowercase kebab-case, else 2; not with --domain/--plan/--quick): no target, no
-         domain check, no leftovers commit, no "branch" written; token, take-over, worktree and install as above.
+         --poc <slug> (lowercase kebab-case, at most 40 characters, else 2; not with --domain/--plan/--quick):
+         no target, no domain check, no leftovers commit, no "branch" written; token, take-over, worktree and
+         install as above. A new POC whose result pocs/poc-<slug>-result.md exists -> 1 (choose another slug).
 sync     Rebase in progress -> 3. Dirty worktree -> 5 (never autostashed). git rebase <mainBranch> in the
          worktree; conflict -> 3 with the files, the rebase is left open. Clean -> updates base.
 finish   POC -> 1 (never merged: abandon it). The plan / quick step must be done. Under lock merge (another token -> 4): phase integrate,
@@ -440,7 +441,8 @@ specs commit
   running over 60s is a warning (stderr and "warning" in the result), the commit stays.
     --run <kind>-<id>  the domain of that run file (<specs>/.runs/<kind>-<id>.json)
                        poc-<slug>: only pocs/poc-<slug>-result.md, no config.json ("domain" null, "poc":
-                       "poc-<slug>" in the result); needs no run file (a result outlives its run)
+                       "poc-<slug>" in the result); needs no run file (a result outlives its run).
+                       A result neither on disk nor tracked -> 1 "No POC result <file>"
     --domain <domain>  a domain outside any run (idea, plan or quick step creation)
     --config           config.json only (e.g. setup changed the chat node); "domain" is null
     -m, --message <m>  commit message, e.g. "step-7: develop"                (required)
@@ -480,13 +482,16 @@ const POC_HELP = `Usage: nos poc results [--root <dir>]
 
 A POC (nos run start --poc <slug>) ends with a result file <specs>/pocs/poc-<slug>-result.md (template
 templates/poc-result.md): front matter "poc", "created", "processed" (no | quick <step id> | idea <domain> |
-dropped), then requirements and technical details. The idea and quick step flows offer the unprocessed ones.
+dropped), then requirements and technical details. The idea and quick step flows offer the committed,
+unprocessed ones. A leading BOM, a "# comment" after a value and quotes around a value are ignored.
 
 results    Lists every pocs/poc-<slug>-result.md, sorted by name: slug, run id, title (the "# POC result: <title>"
-           heading), processed ("no" when the field is missing), runExists (<specs>/.runs/poc-<slug>.json is
-           there), file. An unreadable file is skipped with an entry in "warnings".
-processed  Sets "processed" in the front matter of that result (replaces the line, or adds it), keeps the rest
-           and the line endings. No result file or no front matter -> 1, a bad slug or --as -> 2.
+           heading), processed ("no" when the field is missing), state ("committed": tracked and clean in the
+           specs repo, "draft": untracked or changed, null: the specs root is no git repo; one git status for
+           all), runExists (<specs>/.runs/poc-<slug>.json is there), file. An unreadable file is skipped with an
+           entry in "warnings".
+processed  Sets "processed" in the front matter of that result (replaces the line, or adds it; no front matter
+           -> one is prepended), keeps the rest and the line endings. No result file -> 1, a bad slug or --as -> 2.
            Commit it afterwards: nos specs commit --run poc-<slug> -m "poc-<slug>: processed".
 
 Example:
@@ -494,7 +499,7 @@ Example:
   {
     "action": "poc-results",
     "results": [{ "slug": "dark-mode", "run": "poc-dark-mode", "title": "Dark mode toggle", "processed": "no",
-                  "runExists": true, "file": "D:/repo.specs/pocs/poc-dark-mode-result.md" }]
+                  "state": "committed", "runExists": true, "file": "D:/repo.specs/pocs/poc-dark-mode-result.md" }]
   }
   nos poc processed dark-mode --as "quick 12"
   {

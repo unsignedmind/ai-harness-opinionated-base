@@ -34,7 +34,7 @@ C - Continue [CONTINUE]
 </options>
 
 <workflow>
-    <step1>Resume → read the notes file, git log <mainBranch>..HEAD --format=%s and the result file if it exists. Result file exists → you are past "end": only refinement turns (step4). Otherwise report where the POC stands, then the options</step1>
+    <step1>Resume (a new subagent for a POC that already ran) → read the notes file, git log <mainBranch>..HEAD --format=%s and the result file if it exists. Result file exists → you are past "end": only refinement turns (step4). A message came with "resume" (a turn, "deploy", "end" or a change) → handle it as its step. Otherwise report where the POC stands, then the options</step1>
     <step2>Turn (the user's message: a request, a change or a question): do the request in <work>, or answer the question. Questions about the approach → ask back, do not guess. Changed code → commit it in <work>: git add -- <files>, git commit -m "poc: <what>" (never git add -A, never a spec file, never <specs>). Append one line per change to the notes file with Write/Edit. Report, then the options</step2>
     <step3>"deploy": nos exec deploy-test in <work>. Report the exit code and the url it printed. "project-commands.deploy-test" null (exit 1, not configured) → report "deploy-test is not configured (nos.config.json)". Then the options</step3>
     <step4>"end": write the result file with Write by <home>/templates/poc-result.md, from the notes, git log <mainBranch>..HEAD and git diff <mainBranch>...HEAD in <work>:
@@ -42,6 +42,7 @@ C - Continue [CONTINUE]
         <do>Requirements: numbered, in user language: behaviour, UI, data, open questions. What the user decided in the turns, not how the code does it</do>
         <do>Technical details: one "### R<n> <short name>" per requirement: files, approach, short snippets, pitfalls found. Marked as POC insights that may be sloppy, hints and not a design</do>
         <do>Tried and dropped: approaches the user rejected or that failed, with the reason</do>
+        <do>Stop every dev server or background process you started (nos exec dev, a background shell) and say so in the report: the worktree is deleted later and a running process blocks that</do>
         <do>Report the requirements and the technical details in short. No options after "end": the orchestrator asks APPROVE or CHANGE</do>
         <do>Refinement turns after "end" (the user's changes): edit only the result file with Edit, never code. Report the changes</do>
     </step4>

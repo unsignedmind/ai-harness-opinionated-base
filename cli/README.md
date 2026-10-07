@@ -138,7 +138,7 @@ nos run start --domain <domain> (--plan | --quick <stepId>) [--token <t>] [--tak
 nos run start --poc <slug> [--token <t>] [--take-over]
 ```
 
-`--poc <slug>` (lowercase kebab-case, else exit 2; not combined with `--domain`, `--plan`, `--quick`) starts a POC `poc-<slug>`: a throwaway branch to brainstorm in code. It skips everything tied to a target: no domain check (step 4: POCs run next to each other and next to any run), no target validation, no leftovers commit (step 5), no `branch` written (step 6). Token, take-over, branch + worktree and install work as below. The output has the same shape, with `"kind": "poc"`, `"id": "<slug>"`, `"domain": null`, `"leftovers": null`.
+`--poc <slug>` (lowercase kebab-case, at most 40 characters, else exit 2; a new POC whose result `pocs/poc-<slug>-result.md` exists → 1 "choose another slug"; not combined with `--domain`, `--plan`, `--quick`) starts a POC `poc-<slug>`: a throwaway branch to brainstorm in code. It skips everything tied to a target: no domain check (step 4: POCs run next to each other and next to any run), no target validation, no leftovers commit (step 5), no `branch` written (step 6). Token, take-over, branch + worktree and install work as below. The output has the same shape, with `"kind": "poc"`, `"id": "<slug>"`, `"domain": null`, `"leftovers": null`.
 
 Steps 1–6 run under the short lock `runs` (waits up to 10 s, then 4): two sessions starting the same run, or two runs of one domain, at the same moment get one run and one 4 / 6.
 
@@ -306,7 +306,7 @@ nos specs commit (--run <kind>-<id> | --domain <domain> | --config) -m <message>
 Commits the specs repo, scoped to `config.json` + one domain folder: `git -C <specs> add -- config.json <domain>` (adds, changes and deletions inside them; never `add -A`), then `commit --only` those paths, so files another writer staged stay out. Commits only when something is staged.
 
 - `--run <kind>-<id>`: the domain of that run file. `--domain <d>`: a domain outside any run (idea, plan or quick step creation). `--config`: `config.json` only (`domain: null`). Exactly one of the three.
-- `--run poc-<slug>`: only `pocs/poc-<slug>-result.md` (no `config.json`), `"domain": null` and `"poc": "poc-<slug>"` in the result. Needs no run file: a result outlives its run (`poc-<slug>: processed` after a manual cleanup).
+- `--run poc-<slug>`: only `pocs/poc-<slug>-result.md` (no `config.json`), `"domain": null` and `"poc": "poc-<slug>"` in the result. Needs no run file: a result outlives its run (`poc-<slug>: processed` after a manual cleanup). A result neither on disk nor tracked → 1 "No POC result <file>".
 - A `*.lock` of another writer (`index.lock`, `HEAD.lock`, ref locks): retried 5 times, 200 ms apart.
 - No hooks and no signing in the specs repo (`-c core.hooksPath= -c commit.gpgsign=false`). git never prompts (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`).
 - `specs.remote` set: `git push -u origin HEAD` after a commit, and also without a new commit when `HEAD` is ahead of its upstream (an earlier push failed) or has none. A failed push or one running over 60 s is a warning (stderr + `warning`), the commit stays.
@@ -335,16 +335,16 @@ nos poc results [--root <dir>]
 nos poc processed <slug> --as <dropped|"quick <stepId>"|"idea <domain>"|no> [--root <dir>]
 ```
 
-A POC (`run start --poc`) ends with `<specs>/pocs/poc-<slug>-result.md` (template `templates/poc-result.md`), versioned in the specs repo. Its front matter: `poc: poc-<slug>`, `created`, `processed: no | quick <step id> | idea <domain> | dropped` (a `# comment` after the value is ignored).
+A POC (`run start --poc`) ends with `<specs>/pocs/poc-<slug>-result.md` (template `templates/poc-result.md`), versioned in the specs repo. Its front matter: `poc: poc-<slug>`, `created`, `processed: no | quick <step id> | idea <domain> | dropped` (a leading BOM, a `# comment` after the value and quotes around it are ignored).
 
-- `results`: every `pocs/poc-<slug>-result.md`, sorted by name: `slug`, `run`, `title` (the `# POC result: <title>` heading), `processed` (`no` when missing), `runExists` (`<specs>/.runs/poc-<slug>.json`), `file`. An unreadable file → an entry in `warnings`.
-- `processed`: sets `processed` in the front matter (replaces the line or adds it), the rest and the line endings stay. No file or no front matter → 1, a bad slug or `--as` → 2. The orchestrator commits it: `nos specs commit --run poc-<slug> -m "poc-<slug>: processed"`.
+- `results`: every `pocs/poc-<slug>-result.md`, sorted by name: `slug`, `run`, `title` (the `# POC result: <title>` heading), `processed` (`no` when missing), `state`, `runExists` (`<specs>/.runs/poc-<slug>.json`), `file`. An unreadable file → an entry in `warnings`. `state` comes from one `git status --porcelain --untracked-files=all -- pocs` in the specs repo: `committed` (tracked and clean), `draft` (untracked, modified or staged), `null` (the specs root is not its own git repo).
+- `processed`: sets `processed` in the front matter (replaces the line or adds it; a file without front matter gets `---`/`processed: <v>`/`---` prepended), the rest and the line endings stay, a BOM is dropped. No file → 1, a bad slug or `--as` → 2. The orchestrator commits it: `nos specs commit --run poc-<slug> -m "poc-<slug>: processed"`.
 
 ```sh
 $ nos poc results
 { "action": "poc-results",
   "results": [{ "slug": "dark-mode", "run": "poc-dark-mode", "title": "Dark mode toggle", "processed": "no",
-                "runExists": true, "file": "D:/repo.specs/pocs/poc-dark-mode-result.md" }] }
+                "state": "committed", "runExists": true, "file": "D:/repo.specs/pocs/poc-dark-mode-result.md" }] }
 $ nos poc processed dark-mode --as "quick 12"
 { "action": "poc-processed", "slug": "dark-mode", "run": "poc-dark-mode",
   "file": "D:/repo.specs/pocs/poc-dark-mode-result.md", "previous": "no", "processed": "quick 12" }

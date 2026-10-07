@@ -166,11 +166,11 @@ Outside the typical path. Brainstorm in code before you write an idea: try somet
    B - End the POC [END]
    C - Continue [CONTINUE]
    ```
-   `DEPLOY` runs `nos exec deploy-test` and shows the url. Any free text (a question, a change) is the next turn. `pause` leaves the worktree, the POC stays.
+   `DEPLOY` runs `nos exec deploy-test` and shows the url. Any free text (a question, a change) is the next turn. nos also offers `PAUSE` (leave the worktree, the POC stays) and `ABANDON` (drop it); the single word `pause`, `abandon` or `drop` works too.
 4. `END`: the prototyper writes `<specs>/pocs/poc-<slug>-result.md` (`templates/poc-result.md`): numbered requirements in your words, technical details per requirement (marked as POC insights that may be sloppy) and what was tried and dropped. You `APPROVE` it or `CHANGE` it; approved, it is committed in the specs repo.
 5. Hand-over: `QUICK` (a quick step from the result), `IDEA` (an idea from it), `LATER` (keep result, worktree and branch; IDEA and QUICK offer the result later) or `DROP`. QUICK, IDEA and DROP mark the result `processed` (`nos poc processed`) and delete worktree, branch, run file and notes (`nos run abandon`). The result file stays as history.
 
-IDEA and QUICK ask `USE <slug>` / `NO` whenever unprocessed POC results exist. The idea or quick step treats the requirements as the intent and the technical details as hints, never as decisions, and links the result file.
+IDEA and QUICK ask `USE <slug>` / `NO` whenever approved (committed), unprocessed POC results exist; a draft not yet approved is resumed via POC. Lessons from a POC are asked as guardrail proposals only after leaving its worktree, so they land on main. The idea or quick step treats the requirements as the intent and the technical details as hints, never as decisions, and links the result file.
 
 ### Project quality and docs (ARCHITECT)
 

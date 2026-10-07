@@ -2,9 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { logDirOf } from '../src/gate.js';
+import { createPlan } from '../src/plan.js';
+import { listResults, markProcessed } from '../src/poc.js';
 import { resolveRoots, slash } from '../src/roots.js';
-import { listRuns, notesPath, parseRunId, readRun, runIdOf, runOfWorktree } from '../src/runs.js';
-import { gitOk, writeFile } from './helpers.js';
+import { listRuns, notesPath, parseRunId, readRun, runIdOf, runOfWorktree, writeRun } from '../src/runs.js';
+import { gitOk, makeRoots, writeFile } from './helpers.js';
 import {
   branchExists,
   commitIn,
@@ -89,18 +92,61 @@ test(
     assert.equal(sync.json.ahead, 1);
     assert.equal(sync.json.behind, 0);
     assert.ok(existsSync(path.join(wt, 'src', 'main.txt')));
+
+    // gate and exec logs of the worktree go to logs/poc-<slug>
+    assert.equal(
+      slash(logDirOf(roots, 'poc-dark-mode', { create: false }).logDir),
+      slash(path.dirname(out.install.log)),
+    );
+    const gate = await nos(['gate'], wt);
+    assert.equal(gate.code, 0, gate.err);
+    assert.equal(gate.json.tools[0].log, slash(path.join(roots.specs, '.runs', 'logs', 'poc-dark-mode', 'test.log')));
   },
 );
 
 test(
-  'two POCs at once next to a quick run of a domain; same token resumes, another 4, --take-over',
+  'poc abandon crashed after phase abandoned: start gives only the token, cleanup completes it',
   noGit,
   async (t) => {
-    const { root, roots, quick } = setup(t, { slugs: ['a'] });
+    const { root, roots } = setup(t, { slugs: ['a'] });
+    const out = await startPoc(root, 'dark-mode');
+    writeFileSync(notesPath(roots, 'poc-dark-mode'), '- note\n');
+    writeRun(roots, { ...readRun(roots, 'poc-dark-mode'), phase: 'abandoned' });
+
+    const held = await nos(['run', 'start', '--poc', 'dark-mode'], root);
+    assert.equal(held.code, 4);
+    const taken = await startPoc(root, 'dark-mode', ['--take-over']);
+    assert.notEqual(taken.token, out.token);
+    assert.equal(taken.run.phase, 'abandoned');
+    assert.equal(taken.install, null);
+    assert.ok(existsSync(out.enter), 'no git work: the worktree is still there');
+
+    const cleanup = await nos(['run', 'cleanup', '--token', taken.token], root);
+    assert.equal(cleanup.code, 0, cleanup.err);
+    assert.deepEqual(cleanup.json.removed, { worktree: true, branch: true, runFile: true, notes: true });
+    assert.equal(existsSync(out.enter), false);
+    assert.equal(branchExists(root, 'poc-dark-mode'), false);
+  },
+);
+
+test(
+  'two POCs at once next to a quick run and a plan run; same token resumes, another 4, --take-over',
+  noGit,
+  async (t) => {
+    const { root, roots, quick } = setup(t, { slugs: ['a', 'b'] });
+    createPlan(roots, {
+      domain: quick.b.domain,
+      plan: { name: 'B', status: 'open', phases: [{ slug: 'p', steps: [{ slug: 's' }] }] },
+    });
     const a = await startPoc(root, 'one');
     const b = await startPoc(root, 'two');
     const q = await start(root, quick.a);
-    assert.deepEqual(listRuns(roots).map(runIdOf).sort(), ['poc-one', 'poc-two', quick.a.runId].sort());
+    const plan = await nos(['run', 'start', '--domain', quick.b.domain, '--plan'], root);
+    assert.equal(plan.code, 0, plan.err);
+    assert.deepEqual(
+      listRuns(roots).map(runIdOf).sort(),
+      ['poc-one', 'poc-two', quick.a.runId, plan.json.run.branch].sort(),
+    );
     assert.notEqual(a.token, b.token);
     assert.equal(q.run.domain, quick.a.domain);
 
@@ -181,6 +227,13 @@ test('specs commit --run poc-<slug>: only the result file, also without a run fi
   const orphan = await nos(['specs', 'commit', '--run', 'poc-other', '-m', 'poc-other: processed'], root);
   assert.equal(orphan.code, 0, orphan.err);
   assert.deepEqual(lastSpecsFiles(roots), ['pocs/poc-other-result.md']);
+
+  // no result on disk and none tracked: 1, nothing committed
+  const before = head(roots.specs);
+  const none = await nos(['specs', 'commit', '--run', 'poc-none', '-m', 'poc-none: result'], root);
+  assert.equal(none.code, 1);
+  assert.match(none.err, /No POC result .*pocs\/poc-none-result\.md/);
+  assert.equal(head(roots.specs), before);
 });
 
 test('poc results / poc processed: round trip, line endings kept, bad input refused', noGit, async (t) => {
@@ -201,6 +254,7 @@ test('poc results / poc processed: round trip, line endings kept, bad input refu
       run: 'poc-dark-mode',
       title: 'Dark mode toggle',
       processed: 'no',
+      state: 'draft',
       runExists: true,
       file: slash(path.join(roots.specs, 'pocs', 'poc-dark-mode-result.md')),
     },
@@ -209,10 +263,16 @@ test('poc results / poc processed: round trip, line endings kept, bad input refu
       run: 'poc-old',
       title: 'Dark mode toggle',
       processed: 'dropped',
+      state: 'draft',
       runExists: false,
       file: slash(path.join(roots.specs, 'pocs', 'poc-old-result.md')),
     },
   ]);
+
+  // committed: tracked and clean; changed again: draft
+  assert.equal((await nos(['specs', 'commit', '--run', 'poc-dark-mode', '-m', 'r'], root)).code, 0);
+  const states = async () => (await nos(['poc', 'results'], root)).json.results.map((r) => r.state);
+  assert.deepEqual(await states(), ['committed', 'draft']);
 
   const marked = await nos(['poc', 'processed', 'dark-mode', '--as', 'quick 12'], root);
   assert.equal(marked.code, 0, marked.err);
@@ -241,6 +301,7 @@ test('poc results / poc processed: round trip, line endings kept, bad input refu
     after.json.results.map((r) => r.processed),
     ['quick 12', 'idea domain-3-dark-mode'],
   );
+  assert.deepEqual(await states(), ['draft', 'draft'], 'marked, not yet committed');
 
   for (const as of ['quick', 'quick x', 'idea foo', 'later', '']) {
     const bad = await nos(['poc', 'processed', 'dark-mode', '--as', as], root);
@@ -252,9 +313,46 @@ test('poc results / poc processed: round trip, line endings kept, bad input refu
   assert.equal((await nos(['poc', 'unknown'], root)).code, 2);
 });
 
+test('front matter: a BOM and quoted values are read; a file without front matter gets one', (t) => {
+  const roots = makeRoots(t);
+  writeFile(
+    roots.specs,
+    'pocs/poc-bom-result.md',
+    '﻿' + RESULT('bom').replace('processed: no', 'processed: "quick 7"'),
+  );
+  writeFile(roots.specs, 'pocs/poc-bare-result.md', '# POC result: Bare\r\n\r\n## Requirements\r\n');
+  const { results } = listResults(roots);
+  assert.deepEqual(
+    results.map((r) => [r.slug, r.title, r.processed, r.state]),
+    [
+      ['bare', 'Bare', 'no', null],
+      ['bom', 'Dark mode toggle', 'quick 7', null],
+    ],
+  );
+
+  const bom = markProcessed(roots, { slug: 'bom', as: 'dropped' });
+  assert.equal(bom.previous, 'quick 7');
+  const bomText = read(path.join(roots.specs, 'pocs', 'poc-bom-result.md'));
+  assert.match(bomText, /^---\npoc: poc-bom\n.*\nprocessed: dropped\n---\n# POC result/);
+
+  const bare = markProcessed(roots, { slug: 'bare', as: 'idea domain-2-x' });
+  assert.equal(bare.previous, null);
+  assert.equal(
+    read(path.join(roots.specs, 'pocs', 'poc-bare-result.md')),
+    '---\r\nprocessed: idea domain-2-x\r\n---\r\n# POC result: Bare\r\n\r\n## Requirements\r\n',
+  );
+  assert.equal(listResults(roots).results[0].processed, 'idea domain-2-x');
+});
+
 test('run start --poc: a bad slug or a mix with --domain/--plan/--quick is a usage error', noGit, async (t) => {
   const { root, roots, quick } = setup(t, { slugs: ['a'] });
+  // a slug whose result already exists is history: 1
+  writeFile(roots.specs, 'pocs/poc-taken-result.md', RESULT('taken'));
+  const taken = await nos(['run', 'start', '--poc', 'taken'], root);
+  assert.equal(taken.code, 1);
+  assert.match(taken.err, /result for poc-taken exists/);
   for (const args of [
+    ['--poc', 'a'.repeat(41)],
     ['--poc', 'Dark_Mode'],
     ['--poc', ''],
     ['--poc', 'x', '--domain', quick.a.domain],

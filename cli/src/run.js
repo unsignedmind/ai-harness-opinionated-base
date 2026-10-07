@@ -7,6 +7,7 @@ import { runGate } from './gate.js';
 import { git } from './git.js';
 import { lockStatus, publicHolder, randomToken, releaseLock, takeLock } from './lock.js';
 import { asList, PLAN_FILE, resolveDomain } from './plan.js';
+import { pocSlug, resultPath } from './poc.js';
 import { projectCommands, qualityTools } from './project-config.js';
 import { quickStepId, quickStepsPath, readQuickSteps } from './quick-step.js';
 import { isInside, resolveRoots, slash, worktreeProjectDir } from './roots.js';
@@ -22,7 +23,6 @@ import {
   touchSeen,
   writeRun,
 } from './runs.js';
-import { assertSlug } from './slug.js';
 import { commitSpecs } from './specs-git.js';
 import { setRunStatus } from './status.js';
 
@@ -345,15 +345,6 @@ function startResult(roots, run, { install: installed = null, leftovers = null, 
   };
 }
 
-// --poc <slug>: lowercase kebab-case, else a usage error
-function parsePocSlug(value) {
-  try {
-    return assertSlug(value, '--poc');
-  } catch (err) {
-    throw new NosError(USAGE, err.message);
-  }
-}
-
 // nos run start --domain <d> (--plan | --quick <id>) [--token t] [--take-over]
 // nos run start --poc <slug> [--token t] [--take-over]: no domain, no target, no statuses
 export async function startRun(
@@ -368,7 +359,8 @@ export async function startRun(
       throw new NosError(USAGE, 'run start --poc takes no --domain, --plan or --quick');
     }
     kind = 'poc';
-    id = parsePocSlug(poc);
+    // lowercase kebab-case, at most 40 characters, else a usage error
+    id = pocSlug(poc, '--poc');
     domain = null;
   } else {
     if (Boolean(plan) === (quick != null)) {
@@ -428,6 +420,10 @@ function startLocked(roots, { domain, kind, id, runId, given, takeOver }) {
       writeRun(roots, run);
       return { done: startResult(roots, run) };
     }
+  }
+  // a new POC never reuses the slug of an earlier one: its result is history
+  if (!existing && kind === 'poc' && existsSync(resultPath(roots, id))) {
+    throw new NosError(FAILED, `A result for ${runId} exists (${slash(resultPath(roots, id))}): choose another slug`);
   }
 
   // one run per domain; a POC has none and runs next to anything

@@ -108,56 +108,60 @@
             <choice key="NEW">Create a new quick step</choice>
         </question>
     </step1>
-    <step2>NEW or no quick step open → no POC result passed in → block "poc-results" first. Run ability "quick-step" with the intent if the user already gave one (a POC result: the result file path is the intent). It asks the user for the intent first. Relay all its questions to the user and the answers back</step2>
+    <step2>NEW or no quick step open → no POC result passed in → block "poc-results" first. Run ability "quick-step" with the intent if the user already gave one (a POC result: the result file path is the intent). It asks the user for the intent first. Relay all its questions to the user and the answers back. It finds a POC result too big for a quick step and the user picks IDEA → option "idea" with the same POC result instead</step2>
     <step3>nos specs commit --domain <domain> -m "quick-step: step-<id>" (domain has a run file in <specs>/.runs → skip it, that run's next specs commit picks it up). Came from a POC result → option "poc" step6 with that POC and "quick <step id>". Report the domain (new or existing) and the quick step. Pending guardrail proposals → block "proposals" first. Mode = the returned pipeline mode</step3>
     <step4>Option "run" step2 with the domain, the quick step and the mode</step4>
 </option>
 
 <option name="poc">
     <rule>A POC: a throwaway branch poc-<slug> and worktree where the user steers the ability "poc" turn by turn. No mode question, no statuses, no set-status, no specs commit after a turn, never nos run finish. It ends with the result file <specs>/pocs/poc-<slug>-result.md (template <home>/templates/poc-result.md), which seeds a quick step or an idea. Worktree and branch are deleted (nos run abandon) only once the result is processed (quick step, idea) or the POC is dropped. Notes of the subagent: <specs>/.runs/poc-<slug>.md (deleted with the run)</rule>
+    <rule>Guardrail proposals are never applied inside a POC worktree: its branch is never merged. Every block "proposals" of this option runs after ExitWorktree action=keep and nos roots, on main</rule>
+    <rule>Subagent gone (SendMessage fails, or a new session without a live "poc" subagent) → run a new "poc" subagent with home, work, specs, run id, mainBranch, "resume" and the message it should have got (turn text, "deploy", "end" or the change)</rule>
     <step1>Inside a worktree → ExitWorktree action=keep, nos roots. POC runs in <specs>/.runs/poc-*.json →
         <question>Continue a POC or start a new one?
-            <choice key="slug">One choice per POC run: slug, phase, age; "result ready" when "nos poc results" lists its result with processed no; "cleanup pending" when its phase is abandoned → step7 with it</choice>
+            <choice key="slug">One choice per POC run: slug, phase, age, and by "nos poc results": "result ready" (its result committed, processed no), "result draft" (result not committed yet), "processed, cleanup pending" (processed not no), "cleanup pending" when its phase is abandoned → step7 with it</choice>
             <choice key="NEW">Start a new POC</choice>
         </question>
         No POC run → step2
     </step1>
-    <step2>NEW: ask for a short name. Make a slug from it (lowercase kebab-case, a-z 0-9, single dashes; a result pocs/poc-<slug>-result.md or run file poc-<slug>.json already exists → another slug). nos run start --poc <slug>. Exit 4 → exit code table. Keep "token" from the output. Install failure or "warnings" in the output → report them, continue. Cwd not <main> → cd <main> (absolute path, its own call). EnterWorktree path=<run.worktree>. Denied → cd <main>, retry once. Denied again → stop, report run id, token and the denial. "enter" differs from run.worktree → work in <enter>. nos roots. Read the orchestrator guardrails (rule "Guardrails"). Read the run file <specs>/.runs/poc-<slug>.json: mainBranch</step2>
-    <step3>Turns: no first message yet → ask "What do you want to try?". Run ability "poc" with home, work, specs, run id, mainBranch and the user's message. Keep its subagent alive. Each report ends with the turn result and the options: show both, as this question
+    <step2>NEW: ask for a short name. Make a slug from it (lowercase kebab-case, a-z 0-9, single dashes, at most 40 characters; a result pocs/poc-<slug>-result.md or run file poc-<slug>.json already exists → another slug; nos run start refuses an existing result with exit 1 too). nos run start --poc <slug>. Exit 4 → exit code table. Keep "token" from the output. Install failure or "warnings" in the output → report them, continue. Cwd not <main> → cd <main> (absolute path, its own call). EnterWorktree path=<run.worktree>. Denied → cd <main>, retry once. Denied again → stop, report run id, token and the denial. "enter" differs from run.worktree → work in <enter>. nos roots. Read the orchestrator guardrails (rule "Guardrails"). Read the run file <specs>/.runs/poc-<slug>.json: mainBranch</step2>
+    <step3>Turns: no first message yet → ask "What do you want to try?". Run ability "poc" with home, work, specs, run id, mainBranch and the user's message. Keep its subagent alive. Show the turn result of each report, then this question (drop the subagent's own option lines)
         <question>How do you want to continue?
             <choice key="DEPLOY">Deploy to test → SendMessage "deploy" to the subagent. It runs nos exec deploy-test and reports the url. Show the report, ask this question again</choice>
             <choice key="END">End the POC → step4</choice>
             <choice key="CONTINUE">Continue → ask for the next request</choice>
+            <choice key="PAUSE">Pause → ExitWorktree action=keep, nos roots. Pending guardrail proposals → block "proposals". Report run id and token. End. The run, its worktree and branch stay, POC offers it</choice>
+            <choice key="ABANDON">Drop the POC: worktree and branch are deleted → ask YES/NO to confirm. YES → step6 with "dropped" (no result file → only the abandon part)</choice>
         </question>
-        <do>Any other answer (a question, a change request) counts as CONTINUE: forward it verbatim via SendMessage as the next turn, show the report, ask this question again</do>
-        <do>"pause" → PAUSE: pending guardrail proposals → block "proposals" first. ExitWorktree action=keep, nos roots. Report run id and token. End. The run, its worktree and branch stay, POC offers it</do>
-        <do>"abandon" or "drop" → ask YES/NO to confirm. YES → step6 with "dropped" (no result file → only the abandon part)</do>
+        <do>Reading the answer, in this order: a letter or key of the question, or exactly one word "pause", "abandon" or "drop" (case-insensitive, "drop" = ABANDON) → that choice. Anything else (a question, a change request, a longer text) counts as CONTINUE: forward it verbatim via SendMessage as the next turn, show the turn result, ask this question again</do>
     </step3>
-    <step4>End: SendMessage "end" to the subagent. It writes <specs>/pocs/poc-<slug>-result.md. Show its requirements and technical details
+    <step4>End: SendMessage "end" to the subagent. It writes <specs>/pocs/poc-<slug>-result.md and stops what it started (dev server). Show its requirements and technical details
         <question>Is this the result of the POC?
-            <choice key="APPROVE">Approve → nos specs commit --run poc-<slug> -m "poc-<slug>: result". Step5</choice>
+            <choice key="APPROVE">Approve → nos specs commit --run poc-<slug> -m "poc-<slug>: result". Exit 1 "No POC result" → SendMessage "end" again (the file is missing), repeat this question. Step5</choice>
             <choice key="CHANGE">Change it → ask what to change, SendMessage it to the subagent (it edits only the result file). Show the changes, ask this question again</choice>
+            <choice key="PAUSE">Pause → as PAUSE of step3. The draft stays, POC lists it as "result draft"</choice>
+            <choice key="ABANDON">Drop the POC → ask YES/NO to confirm. YES → step6 with "dropped" (the draft is kept as history)</choice>
         </question>
-        <do>Any other answer counts as CHANGE with that text</do>
+        <do>Same reading order as step3: a letter, key or one-word "pause", "abandon", "drop" → that choice; any other answer counts as CHANGE with that text</do>
     </step4>
-    <step5>Hand-over. Pending guardrail proposals → block "proposals" first
+    <step5>Hand-over
         <question>What should happen with the result?
-            <choice key="QUICK">Start a quick step from it → ExitWorktree action=keep, nos roots. Option "quick" from step2 with the result file as the intent (POC result passed in). Its step3 continues with step6 here ("quick <step id>"), then option "quick" step4</choice>
-            <choice key="IDEA">Document an idea from it → ExitWorktree action=keep, nos roots. Option "idea" with the result file as the starting context (POC result passed in). Its step2 continues with step6 here ("idea <domain>"), then the rest of option "idea" step2</choice>
-            <choice key="LATER">Keep it for later → ExitWorktree action=keep, nos roots. The result stays unprocessed, worktree and branch stay. POC lists it as "result ready", IDEA and QUICK offer it. Report run id and token. End</choice>
+            <choice key="QUICK">Start a quick step from it → ExitWorktree action=keep, nos roots. Option "quick" from step2 with the result file as the intent (POC result passed in). Its step3 continues with step6 here ("quick <step id>"), then option "quick" step3 and step4 (its report asks pending guardrail proposals, on main)</choice>
+            <choice key="IDEA">Document an idea from it → ExitWorktree action=keep, nos roots. Option "idea" with the result file as the starting context (POC result passed in). Its step2 continues with step6 here ("idea <domain>"), then the rest of option "idea" step2 (its report asks pending guardrail proposals, on main)</choice>
+            <choice key="LATER">Keep it for later → ExitWorktree action=keep, nos roots. Pending guardrail proposals → block "proposals". The result stays unprocessed, worktree and branch stay. POC lists it as "result ready", IDEA and QUICK offer it. Report run id and token. End</choice>
             <choice key="DROP">Drop the POC → step6 with "dropped"</choice>
         </question>
     </step5>
-    <step6>Processed (from step5, step3 ABANDON, block "poc-results"), with the POC slug and "<as>" (quick <step id> | idea <domain> | dropped):
+    <step6>Processed, with the POC slug and "<as>" (quick <step id> | idea <domain> | dropped). Called from step3, step4 or step5 (DROP, ABANDON), from option "quick" or "idea" (QUICK, IDEA, block "poc-results"), or from step7:
         <do>Inside a worktree → ExitWorktree action=keep</do>
-        <do>Result file exists → nos poc processed <slug> --as "<as>". nos specs commit --run poc-<slug> -m "poc-<slug>: processed" (dropped: kept as history)</do>
-        <do>Run file <specs>/.runs/poc-<slug>.json exists → nos run abandon --token <token> --run poc-<slug> (no token → TAKEOVER question of exit code 4 first, to get one). It deletes worktree, branch, run file and notes. Its cleanup part fails (exit 1, e.g. a dev server holds the folder) → report it, repeat "nos run cleanup --token <token> --run poc-<slug>" after the user stopped it. No run file (cleaned up by hand) → nothing to abandon</do>
-        <do>nos roots. Report: result <as>, worktree and branch removed. Then back where step6 was called from</do>
+        <do>Result file exists and processed is no → nos poc processed <slug> --as "<as>". nos specs commit --run poc-<slug> -m "poc-<slug>: processed" (dropped: kept as history)</do>
+        <do>Run file <specs>/.runs/poc-<slug>.json exists → a dev server or background task the "poc" subagent started still runs → stop it (TaskStop). Phase abandoned → nos run cleanup --token <token> --run poc-<slug>. Otherwise → nos run abandon --token <token> --run poc-<slug>. No token → TAKEOVER question of exit code 4 first, to get one (phase abandoned: only the token; worktree folder gone and phase not abandoned: the take-over recreates it, abandon deletes it again). It deletes worktree, branch, run file and notes. Its cleanup part fails (exit 1, e.g. a dev server holds the folder) → report it, repeat "nos run cleanup --token <token> --run poc-<slug>" after the user stopped it. No run file (cleaned up by hand) → nothing to abandon</do>
+        <do>nos roots. Called from step3, step4, step5 or step7 → pending guardrail proposals → block "proposals" (now on main). Report: result <as>, worktree and branch removed. End. Called from option "quick" or "idea" → continue there (its report asks the proposals)</do>
     </step6>
     <step7>Resume a POC (chosen in step1, or a session that starts inside its worktree):
-        <do>Phase abandoned (cleanup pending) → ExitWorktree action=keep when inside. nos run cleanup --token <token> --run poc-<slug> (no token → TAKEOVER first). nos roots. Report. End</do>
+        <do>Phase abandoned, or its result processed (not no) → step6 with the processed value (only the cleanup or abandon part: the result is already marked). End</do>
         <do>Inside its worktree and this session holds its token → no run start. Otherwise → nos run start --poc <slug>, with --token <token> when this session holds one. Exit 4 → exit code table. Not inside yet → cd <main>, EnterWorktree as in step2. Always: nos roots, the orchestrator guardrails, the run file (mainBranch)</do>
-        <do>Result file with processed no exists → show it, step4 question (APPROVE after an earlier approval commits nothing new, then step5). Otherwise → step3; no live "poc" subagent of this session → run a new one with "resume" (it reads its notes and the result file)</do>
+        <do>"nos poc results" lists its result: state committed and processed no → step5. State draft (or null) → show it, step4 question. No result → step3 (no live "poc" subagent → a new one with "resume" and the user's next message)</do>
     </step7>
 </option>
 
@@ -328,16 +332,17 @@
 </cycle>
 
 <poc-results>
-    <rule>Asked by option "idea" step1 and option "quick" step2 when no POC result was passed in. nos poc results → the results with processed no. None → skip</rule>
+    <rule>Asked by option "idea" step1 and option "quick" step2 when no POC result was passed in. nos poc results → the results with state committed and processed no (a draft is not approved yet: POC resumes it). None → skip</rule>
     <question>A proof of concept left a result. Use one as the input?
-        <choice key="USE <slug>">One choice per unprocessed result: title, slug, "POC still open" when runExists → the result file path is the input of the ability (POC result passed in)</choice>
+        <choice key="USE <slug>">One choice per such result: title, slug, "POC still open" when runExists → the result file path is the input of the ability (POC result passed in)</choice>
         <choice key="NO">Start without a POC result</choice>
     </question>
-    <do>USE → after the ability created the idea or the quick step and its specs commit: option "poc" step6 with that slug and "idea <domain>" or "quick <step id>" (marks it processed, commits it, abandons its run when the run file exists; no token → TAKEOVER first). Then continue the option</do>
+    <do>USE → after the ability created the idea or the quick step and its specs commit: option "poc" step6 with that slug and "idea <domain>" or "quick <step id>" (marks it processed, commits it, removes its run when the run file exists: phase abandoned → nos run cleanup, else nos run abandon; no token → TAKEOVER first). Then continue the option</do>
 </poc-results>
 
 <proposals>
     <rule>Asked by rule "Lessons → guardrail proposals", before any other question of that park, report or session end. Its own message: wait for the answer, then the next question. No pending proposal → skip</rule>
+    <rule>Never inside a POC worktree: its branch is never merged. Leave it first (ExitWorktree action=keep, nos roots), then ask on main</rule>
     <question>Lessons from this work, proposed as guardrails. Which should the architect add?
         <choice key="P<n>">One choice per proposal, numbered P1, P2…: section, wording, reason, why it does not block valid work. Several letters or keys accept several</choice>
         <choice key="ALL">Accept all</choice>
