@@ -6,7 +6,7 @@
 // createCondenser turns transcript lines into a short list of items (user prompts, texts, tool
 // calls paired with their results, subagent launches, notices); tailTranscript follows a file and
 // hands over new and changed items.
-import { closeSync, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, watch } from 'node:fs';
+import { closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync, watch } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describeTool } from './runner.js';
@@ -19,21 +19,33 @@ export const claudeDir = (env = process.env) => (env.CLAUDE_CONFIG_DIR ? path.re
 // how Claude Code names a project's folder: every character but letters and digits becomes '-'
 export const projectSlug = (root) => String(root).replace(/[^a-zA-Z0-9]/g, '-');
 
-// the main transcript of a session, or null; looks in the other project folders when the slug misses
+// -1: not there (or not readable)
+const mtime = (f) => {
+  try {
+    return statSync(f, { throwIfNoEntry: false })?.mtimeMs ?? -1;
+  } catch {
+    return -1;
+  }
+};
+
+// the main transcript of a session, or null: the newest copy in any project folder (a move Claude
+// Code could not finish leaves the old one behind), the slug's own on a tie or when there is none
 export function transcriptFile(root, sessionId, env = process.env) {
   if (!UUID.test(String(sessionId))) return null;
   const projects = path.join(claudeDir(env), 'projects');
   const own = path.join(projects, projectSlug(root), `${sessionId}.jsonl`);
-  if (existsSync(own)) return own;
+  let best = own;
+  let bestAt = mtime(own);
   try {
     for (const d of readdirSync(projects)) {
       const f = path.join(projects, d, `${sessionId}.jsonl`);
-      if (existsSync(f)) return f;
+      const at = f === own ? -1 : mtime(f);
+      if (at > bestAt) [best, bestAt] = [f, at];
     }
   } catch {
     // no projects folder yet
   }
-  return own;
+  return best;
 }
 
 // a subagent's transcript, by its agentId or by the tool_use id that started it (from .meta.json)
@@ -190,15 +202,16 @@ export function createCondenser({ rel = (t) => t } = {}) {
 // then with each change. Waits for a file that does not exist yet. Returns close().
 // Claude Code moves a session's transcript (with its subagents folder) to another project folder
 // when the session changes its cwd (EnterWorktree, ExitWorktree): with `locate` (() => the path the
-// transcript has now), a poll that misses the file asks it, and when it is elsewhere the tail
-// switches to it and starts over with an initial list, as a reconnect would.
+// transcript has now) the tail asks it every 4th poll while the file is missing and every `locateMs`
+// while it is there, and switches when it is elsewhere (or a newer copy is: a move that failed
+// halfway leaves the old file) and starts over with an initial list, as a reconnect would.
 // No fs.watch on Windows: it holds a handle on the file's folder, so Claude Code could not move the
 // session folder a watched subagent transcript is in (EPERM); a shorter poll instead.
 const WATCH = process.platform !== 'win32';
 export function tailTranscript(
   file,
   onItems,
-  { limit = 400, rel, pollMs = WATCH ? 1000 : 500, locate, watch: useWatch = WATCH } = {},
+  { limit = 400, rel, pollMs = WATCH ? 1000 : 500, locate, locateMs = 5000, watch: useWatch = WATCH } = {},
 ) {
   let condenser = createCondenser({ rel });
   let offset = 0;
@@ -206,16 +219,21 @@ export function tailTranscript(
   let started = false;
   let closed = false;
   let watcher = null;
+  let ticks = 0;
+  const every = Math.max(1, Math.round(locateMs / pollMs));
 
   const moved = () => {
-    if (!locate || existsSync(file)) return;
+    if (!locate) return;
+    ticks++;
+    const at = mtime(file);
+    if (ticks % (at < 0 ? 4 : every)) return;
     let next;
     try {
       next = locate();
     } catch {
       return;
     }
-    if (!next || next === file || !existsSync(next)) return;
+    if (!next || next === file || mtime(next) <= at) return;
     // a watch on the old path is stale: drop it, read() watches the new one
     try {
       watcher?.close();

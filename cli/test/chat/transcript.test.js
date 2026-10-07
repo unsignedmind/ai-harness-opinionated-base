@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { agentFile, createCondenser, MAX_FIELD, projectSlug, tailTranscript, transcriptFile } from '../../src/chat/transcript.js';
 import { makeTempRoot } from '../helpers.js';
@@ -138,90 +138,184 @@ test('tail: a file that is not there yet starts empty, its steps come when it is
   assert.deepEqual(got[1].items.map((i) => i.text), ['Develop step 67']);
 });
 
-test('tail: a transcript Claude Code moves to another project folder (Enter/ExitWorktree) is followed, its steps come again as an initial list', async (t) => {
+const WT = 'D:/proj/.claude/worktrees/quick-68';
+const jsonl = (j) => JSON.stringify(j) + '\n';
+// a fake claude dir with the main project's and a worktree's project folder
+function claudeHome(t) {
   const home = makeTempRoot(t);
-  const env = { CLAUDE_CONFIG_DIR: home };
   const projects = path.join(home, 'projects');
   const main = path.join(projects, projectSlug('D:/proj'), `${SID}.jsonl`);
-  const wt = path.join(projects, projectSlug('D:/proj/.claude/worktrees/quick-68'), `${SID}.jsonl`);
+  const wt = path.join(projects, projectSlug(WT), `${SID}.jsonl`);
   mkdirSync(path.dirname(main), { recursive: true });
   mkdirSync(path.dirname(wt), { recursive: true });
-  const line = (j) => JSON.stringify(j) + '\n';
-  writeFileSync(main, line(L.prompt));
+  return { env: { CLAUDE_CONFIG_DIR: home }, main, wt };
+}
+const age = (f, s) => utimesSync(f, new Date(Date.now() - s * 1000), new Date(Date.now() - s * 1000));
+
+test('paths: the newest copy of a session transcript wins, the own folder on a tie', (t) => {
+  const { env, main, wt } = claudeHome(t);
+  writeFileSync(main, '');
+  writeFileSync(wt, '');
+  age(main, 10);
+  assert.equal(transcriptFile('D:/proj', SID, env), wt);
+  age(wt, 20);
+  assert.equal(transcriptFile('D:/proj', SID, env), main);
+  const at = new Date(Date.now() - 5000);
+  utimesSync(main, at, at);
+  utimesSync(wt, at, at);
+  assert.equal(transcriptFile('D:/proj', SID, env), main);
+});
+
+for (const watch of [false, true])
+  test(`tail (watch: ${watch}): a transcript Claude Code moves to another project folder (Enter/ExitWorktree) is followed, its steps come again as an initial list`, async (t) => {
+    const { env, main, wt } = claudeHome(t);
+    writeFileSync(main, jsonl(L.prompt));
+    const got = [];
+    const tail = tailTranscript(main, (items, info) => got.push({ items, info }), {
+      pollMs: 20,
+      watch,
+      locate: () => transcriptFile('D:/proj', SID, env),
+    });
+    t.after(() => tail.close());
+    appendFileSync(main, jsonl(L.bash));
+    await sleep(80);
+    assert.deepEqual(
+      got.map((g) => g.info.initial),
+      [true, false],
+    );
+
+    // EnterWorktree: the file moves to the worktree's folder, then grows there
+    renameSync(main, wt);
+    appendFileSync(wt, jsonl(L.bashOk));
+    await sleep(200);
+    const entered = got.slice(2);
+    assert.equal(entered.length, 1);
+    assert.deepEqual(entered[0].info, { initial: true, truncated: false });
+    assert.deepEqual(
+      entered[0].items.map((i) => [i.id, i.state ?? null]),
+      [
+        ['u1', null],
+        ['tb', 'ok'],
+      ],
+    );
+    appendFileSync(wt, jsonl(L.text));
+    await sleep(80);
+    assert.deepEqual(
+      got.at(-1).items.map((i) => i.id),
+      ['a4-0'],
+    );
+    assert.equal(got.at(-1).info.initial, false);
+
+    // ExitWorktree: back to the main folder
+    const n = got.length;
+    renameSync(wt, main);
+    appendFileSync(main, jsonl(L.notify));
+    await sleep(200);
+    assert.equal(got.length, n + 1);
+    assert.equal(got.at(-1).info.initial, true);
+    assert.deepEqual(
+      got.at(-1).items.map((i) => i.id),
+      ['u1', 'tb', 'a4-0', 'u7'],
+    );
+  });
+
+test('tail: a copy newer than the followed file (a move that failed halfway, copy then delete) is switched to once', async (t) => {
+  const { env, main, wt } = claudeHome(t);
+  writeFileSync(main, jsonl(L.prompt));
+  age(main, 10);
   const got = [];
   const tail = tailTranscript(main, (items, info) => got.push({ items, info }), {
     pollMs: 20,
+    locateMs: 40,
     locate: () => transcriptFile('D:/proj', SID, env),
   });
   t.after(() => tail.close());
-  appendFileSync(main, line(L.bash));
-  await sleep(80);
+  // the copy appears while the old file is still there; later the old one goes
+  writeFileSync(wt, jsonl(L.prompt) + jsonl(L.text));
+  await sleep(200);
   assert.deepEqual(
-    got.map((g) => g.info.initial),
-    [true, false],
-  );
-
-  // EnterWorktree: the file moves to the worktree's folder, then grows there
-  renameSync(main, wt);
-  appendFileSync(wt, line(L.bashOk));
-  await sleep(120);
-  const entered = got.slice(2);
-  assert.equal(entered.length, 1);
-  assert.deepEqual(entered[0].info, { initial: true, truncated: false });
-  assert.deepEqual(
-    entered[0].items.map((i) => [i.id, i.state ?? null]),
+    got.map((g) => [g.info.initial, g.items.map((i) => i.id)]),
     [
-      ['u1', null],
-      ['tb', 'ok'],
+      [true, ['u1']],
+      [true, ['u1', 'a4-0']],
     ],
   );
-  appendFileSync(wt, line(L.text));
-  await sleep(80);
+  rmSync(main);
+  appendFileSync(wt, jsonl(L.bash));
+  await sleep(200);
   assert.deepEqual(
-    got.at(-1).items.map((i) => i.id),
-    ['a4-0'],
-  );
-  assert.equal(got.at(-1).info.initial, false);
-
-  // ExitWorktree: back to the main folder
-  const n = got.length;
-  renameSync(wt, main);
-  appendFileSync(main, line(L.notify));
-  await sleep(120);
-  assert.equal(got.length, n + 1);
-  assert.equal(got.at(-1).info.initial, true);
-  assert.deepEqual(
-    got.at(-1).items.map((i) => i.id),
-    ['u1', 'tb', 'a4-0', 'u7'],
+    got.slice(2).map((g) => [g.info.initial, g.items.map((i) => i.id)]),
+    [[false, ['tb']]],
   );
 });
 
+test('tail: an older copy elsewhere, a locate that throws or finds nothing: the tail keeps following its file', async (t) => {
+  const { main, wt } = claudeHome(t);
+  writeFileSync(main, jsonl(L.prompt));
+  writeFileSync(wt, jsonl(L.prompt) + jsonl(L.text));
+  age(wt, 10);
+  const answers = [wt, null, 'boom', path.join(path.dirname(wt), 'gone.jsonl')];
+  let asked = 0;
+  const got = [];
+  const tail = tailTranscript(main, (items, info) => got.push({ items, info }), {
+    pollMs: 20,
+    locateMs: 20,
+    locate: () => {
+      const a = answers[asked++ % answers.length];
+      if (a === 'boom') throw new Error('boom');
+      return a;
+    },
+  });
+  t.after(() => tail.close());
+  await sleep(150);
+  assert.ok(asked >= 4);
+  appendFileSync(main, jsonl(L.bash));
+  await sleep(80);
+  assert.deepEqual(
+    got.map((g) => [g.info.initial, g.items.map((i) => i.id)]),
+    [
+      [true, ['u1']],
+      [false, ['tb']],
+    ],
+  );
+});
+
+test('tail: a missing file asks locate every 4th poll only', async (t) => {
+  const dir = makeTempRoot(t);
+  let asked = 0;
+  const tail = tailTranscript(path.join(dir, 'x.jsonl'), () => {}, { pollMs: 20, locate: () => (asked++, null) });
+  t.after(() => tail.close());
+  await sleep(250);
+  tail.close();
+  assert.ok(asked >= 1 && asked <= 4, `asked ${asked}`);
+});
+
 test('tail: a subagent transcript moves with its session folder and is followed', async (t) => {
-  const home = makeTempRoot(t);
-  const env = { CLAUDE_CONFIG_DIR: home };
-  const projects = path.join(home, 'projects');
-  const a = path.join(projects, projectSlug('D:/proj'));
-  const b = path.join(projects, projectSlug('D:/proj/.claude/worktrees/quick-68'));
+  const { env, main, wt } = claudeHome(t);
+  const a = path.dirname(main);
+  const b = path.dirname(wt);
   mkdirSync(path.join(a, SID, 'subagents'), { recursive: true });
-  mkdirSync(b, { recursive: true });
-  const line = (j) => JSON.stringify(j) + '\n';
-  writeFileSync(path.join(a, `${SID}.jsonl`), line(L.prompt));
+  writeFileSync(main, jsonl(L.prompt));
   const task = { type: 'user', uuid: 's1', isSidechain: true, message: { content: 'Do the step' } };
-  writeFileSync(path.join(a, SID, 'subagents', 'agent-a796.jsonl'), line(task));
+  writeFileSync(path.join(a, SID, 'subagents', 'agent-a796.jsonl'), jsonl(task));
   const locate = () => agentFile(transcriptFile('D:/proj', SID, env), { agentId: 'a796' });
   const got = [];
-  const tail = tailTranscript(locate(), (items, info) => got.push({ items, info }), { pollMs: 20, locate });
+  // no fs.watch: on Windows it would hold the session folder (the move fails with EPERM)
+  const tail = tailTranscript(locate(), (items, info) => got.push({ items, info }), {
+    pollMs: 20,
+    locate,
+    watch: false,
+  });
   t.after(() => tail.close());
   assert.deepEqual(
     got[0].items.map((i) => i.label),
     ['Task'],
   );
 
-  // the tail must not lock the session folder (fs.watch on Windows does: EPERM)
-  renameSync(path.join(a, `${SID}.jsonl`), path.join(b, `${SID}.jsonl`));
+  renameSync(main, wt);
   renameSync(path.join(a, SID), path.join(b, SID));
-  appendFileSync(path.join(b, SID, 'subagents', 'agent-a796.jsonl'), line({ ...L.text, isSidechain: true }));
-  await sleep(120);
+  appendFileSync(path.join(b, SID, 'subagents', 'agent-a796.jsonl'), jsonl({ ...L.text, isSidechain: true }));
+  await sleep(200);
   assert.equal(got.at(-1).info.initial, true);
   assert.deepEqual(
     got.at(-1).items.map((i) => i.id),
@@ -229,7 +323,7 @@ test('tail: a subagent transcript moves with its session folder and is followed'
   );
 });
 
-test('tail: without locate, or while the file is where it was, nothing is re-sent', async (t) => {
+test('tail: while the file is where it was, nothing is re-sent', async (t) => {
   const dir = makeTempRoot(t);
   const file = path.join(dir, 't.jsonl');
   writeFileSync(file, JSON.stringify(L.prompt) + '\n');
@@ -237,10 +331,11 @@ test('tail: without locate, or while the file is where it was, nothing is re-sen
   const got = [];
   const tail = tailTranscript(file, (items, info) => got.push({ items, info }), {
     pollMs: 20,
-    locate: () => (asked++, path.join(dir, 'x.jsonl')),
+    locateMs: 20,
+    locate: () => (asked++, file),
   });
   t.after(() => tail.close());
   await sleep(80);
-  assert.equal(asked, 0);
+  assert.ok(asked > 0);
   assert.equal(got.length, 1);
 });
