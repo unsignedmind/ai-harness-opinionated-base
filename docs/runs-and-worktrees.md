@@ -20,6 +20,7 @@ In short: every piece of work gets its own copy of the code; the plans live in o
 - Done → `nos run finish`: one merge at a time (lock), full test gate, fast-forward into main. Then worktree + branch deleted.
 - nos never pushes code. You push.
 - Ports for e2e tests / dev servers: borrowed per command ("slots"), so parallel runs do not collide.
+- A **POC** is a third kind of run: a throwaway branch to brainstorm in code, steered turn by turn. No spec, no status, never merged. It ends with a requirements list in `<specs>/pocs/`, then branch + worktree are deleted.
 - You see it in the spec-ui: run badges (running / stale / awaiting cleanup), ahead/behind main, dirty worktree.
 - All git mechanics live in the CLI. The AI only calls commands and reacts to exit codes.
 
@@ -31,7 +32,8 @@ In short: the words used everywhere below.
 
 | Term | Meaning |
 |---|---|
-| **run** | One plan (`plan-<domain id>`) or one quick step (`quick-<step id>`) in its own branch (same name) and worktree. Run file `<specs>/.runs/<run>.json`. |
+| **run** | One plan (`plan-<domain id>`), one quick step (`quick-<step id>`) or one POC (`poc-<slug>`) in its own branch (same name) and worktree. Run file `<specs>/.runs/<run>.json`. |
+| **POC** | Proof of concept run: no domain, no target, no statuses, never merged. The ability `poc` builds what the user asks turn by turn, commits `poc: …`, keeps notes in `<specs>/.runs/poc-<slug>.md`. Ends with `<specs>/pocs/poc-<slug>-result.md` (requirements + technical hints), which seeds a quick step or an idea. See [10](#10-run-lifecycle). |
 | **worktree** | A git linked worktree: second checkout of the same repo, own branch. Here: `<main>/.claude/worktrees/<run>`. |
 | **main checkout** (`<main>`) | The project folder you cloned. Its branch (`mainBranch`, usually `main`) moves only by `nos run finish` (exceptions: setup, architect, migration). |
 | **work root** (`<work>`) | The checkout the caller sits in: `<main>` or a run worktree. |
@@ -89,7 +91,8 @@ In short: project repo holds code + one config file; sibling repo holds specs; d
     ├── .gitattributes                 "* text=auto eol=lf"
     ├── config.json                    TRACKED (specs repo): project back-pointer, id-counters, chat
     ├── domain-<id>-<slug>/            TRACKED: idea.md, domain.json, plan.json, phases/, quick-steps/
-    ├── .runs/                         local: <run>.json registry + logs/<run|main>/<tool>.log
+    ├── pocs/                          TRACKED: poc-<slug>-result.md (POC results, kept after the POC)
+    ├── .runs/                         local: <run>.json registry, poc-<slug>.md (POC notes) + logs/<run|main>/<tool>.log
     ├── .locks/                        local: merge/, runs/, ids/, slot-<n>/, reclaim-slot-<n>/
     └── .chat/                         local: sessions.json, server.json, server.log, tls/ (own .gitignore "*")
 ```
@@ -238,8 +241,8 @@ In short: one JSON file per active run; the token in it decides who may act on t
 
 | Field | Meaning |
 |---|---|
-| `kind`, `id` | `plan` + domain id (D-2) or `quick` + step id. Run id regex `^(plan\|quick)-[1-9]\d*$` |
-| `domain` | domain folder |
+| `kind`, `id` | `plan` + domain id (D-2), `quick` + step id, or `poc` + slug (a string). Run id regex `^(plan\|quick)-[1-9]\d*$` or `^poc-<kebab slug>$` |
+| `domain` | domain folder; `null` for a POC |
 | `branch` | `<kind>-<id>` (reused if it exists) |
 | `worktree` | absolute, forward slashes |
 | `base` | main sha the branch builds on; updated by every clean sync |
@@ -273,15 +276,18 @@ Errors: one line on stderr `nos: <message>`. Exit 3–7 and some exit 1 (`run fi
 | `nos init [--root]` | — | creates missing: `nos.config.json` (template), specs root, `config.json` (+ back-pointer), `<specs>/.gitignore`, project `.gitignore` entries, `git init -b main` + `.gitattributes` + commit `nos: init` (no HEAD yet), `origin` = `specs.remote`. Idempotent | `init` {main, specs, created, existing, gitignoreAdded, backPointer{project,written}, commit, remote} | 0, 1 (in worktree, not repo top, inside nos folder, git identity missing) |
 | `nos roots [--root]` | — | prints roots, guards | `roots` | 0 |
 | `nos run start --domain <d> (--plan \| --quick <id>) [--token] [--take-over]` | domain, target | validate target (plan with phases / quick step; not merged/discarded), held check, one-per-domain check, commit specs leftovers `<run>: leftovers`, `git -c core.longpaths=true worktree add` (reuse branch or `-b <run> <worktree> <mainBranch>`), run file, `branch` in target, `install` into `logs/<run>/install.log` when worktree was created | `run-start` {run, token, roots{home, work=enter, main, specs}, enter, install{code,log[,error]}\|null, leftovers{committed,sha,files}\|null, warnings?} | 0, 1, 2, 4, 6 |
+| `nos run start --poc <slug> [--token] [--take-over]` | slug (kebab, else 2; not with `--domain/--plan/--quick`) | as above without target, domain check, leftovers and `branch`: held check, worktree add, run file (`domain: null`), install | `run-start`, same shape (`run.kind "poc"`, `run.id "<slug>"`) | 0, 1, 2, 4 |
 | `nos run sync --token` | — | stopped rebase → 3; dirty (incl. untracked) → 5; not on branch → 1; `git -c core.editor=true rebase --no-autostash <mainBranch>` (`GIT_EDITOR=true`); conflict → 3 left open; ok → `base` updated | `run-sync` {run, base, ahead, behind, rebased} | 0, 1, 3, 4, 5 |
-| `nos run finish --token` | — | merge protocol, sec. 11 | `run-finish` {run, merged, mainBranch, head, resumedFrom, gate, statuses, specs{committed,sha}} or {merged, already:true} | 0, 1, 3, 4, 5, 7 |
-| `nos run cleanup --token` | — | phase merged/abandoned; not from inside worktree; worktree remove (merged: untracked → force, modified tracked → 5), `worktree prune`, `branch -D` (merged: only if in mainBranch), run file delete, own merge lock released. Parts already gone skipped | `run-cleanup` {run, removed{worktree,branch,runFile}} | 0, 1, 4, 5 |
-| `nos run abandon --token` | — | refuses merged, and phase `merge` with branch already in main; not from inside worktree; `set-status --run discarded`, specs commit `<run>: discarded`, phase `abandoned`, then cleanup with `--force` / `-D` | `run-abandon` {run, removed, statuses, specs} | 0, 1, 4 |
+| `nos run finish --token` | — | merge protocol, sec. 11; a POC → 1 "never merged" | `run-finish` {run, merged, mainBranch, head, resumedFrom, gate, statuses, specs{committed,sha}} or {merged, already:true} | 0, 1, 3, 4, 5, 7 |
+| `nos run cleanup --token` | — | phase merged/abandoned; not from inside worktree; worktree remove (merged: untracked → force, modified tracked → 5), `worktree prune`, `branch -D` (merged: only if in mainBranch), run file + notes (`.runs/<run>.md`) delete, own merge lock released. Parts already gone skipped | `run-cleanup` {run, removed{worktree,branch,runFile,notes?}} | 0, 1, 4, 5 |
+| `nos run abandon --token` | — | refuses merged, and phase `merge` with branch already in main; not from inside worktree; `set-status --run discarded`, specs commit `<run>: discarded` (POC: neither, `statuses`/`specs` null), phase `abandoned`, then cleanup with `--force` / `-D` | `run-abandon` {run, removed, statuses, specs} | 0, 1, 4 |
 | `nos gate [--e2e]` | — | sec. 14 | `gate` {pass, tools[], reclaimed?} | 0, 1, 7 |
 | `nos exec <install\|dev\|deploy-test>` | name | runs the work root's command in a shell, stdio inherited, no JSON; `dev` under a slot lease | (raw) | command's code, 130/143 on SIGINT/SIGTERM, 1 not configured, 2 unknown name, 7 |
-| `nos specs commit (--run <r> \| --domain <d> \| --config) -m <msg>` | exactly one target | sec. 15 | `specs-commit` {domain, committed, sha, pushed, files, warning?} | 0, 1, 2 |
+| `nos specs commit (--run <r> \| --domain <d> \| --config) -m <msg>` | exactly one target | sec. 15; `--run poc-<slug>`: only `pocs/poc-<slug>-result.md`, no run file needed | `specs-commit` {domain, poc?, committed, sha, pushed, files, warning?} | 0, 1, 2 |
+| `nos poc results` | — | lists `<specs>/pocs/poc-<slug>-result.md` (front matter parsed) | `poc-results` {results[{slug, run, title, processed, runExists, file}], warnings?} | 0, 2 |
+| `nos poc processed <slug> --as <what>` | `no`, `dropped`, `quick <id>`, `idea <domain>` | sets `processed` in the result's front matter (line endings kept) | `poc-processed` {slug, run, file, previous, processed} | 0, 1 (no file / front matter), 2 |
 | `nos specs find-step <id>` | step id | scans `domain-*/plan.json` + `quick-steps/quick-steps.json` | `find-step` {id, domain, kind, phase, step, slug, intent, status, specFile, warnings?} | 0, 1 not found, 2 bad id |
-| `nos set-status --run <kind>-<id> merged\|discarded [--token]` | run, status | sec. 17; token required while the run file exists | `set-status` {run, domain, status, file, changes} | 0, 1, 2, 4 |
+| `nos set-status --run <kind>-<id> merged\|discarded [--token]` | run, status | sec. 17; token required while the run file exists; `poc-*` → 1 (no statuses) | `set-status` {run, domain, status, file, changes} | 0, 1, 2, 4 |
 | `nos set-status --domain <d> [--phase] [--step] --status <s>` | | normal status change; `merged`/`discarded` refused (1) | `set-status` | 0, 1, 2 |
 | `nos lock take <name> --token [--run] [--wait <sec>]` | | mkdir lock, reentrant per token | `lock-take` {lock, path, holder, reentrant} | 0, 2, 4 |
 | `nos lock release <name> (--token \| --break)` | | holder's token only, or `--break` (user's call) | `lock-release` {lock, path, released, broken, holder} | 0, 2, 4 |
@@ -298,7 +304,7 @@ Errors: one line on stderr `nos: <message>`. Exit 3–7 and some exit 1 (`run fi
 | 1 | FAILED | failed | park, report. From `run finish` → cycle finish step2: gate fail → FIX (develop resume, commit `step-<id>: gate fix`, specs commit, repeat) / PAUSE / ABANDON; main busy / dirty / other branch / ff refused twice → park, GO repeats after user fixed main. From `run cleanup` "a process … still uses <wt>" → user stops it, repeat |
 | 2 | USAGE | bad call | fix the call, never guess |
 | 3 | CONFLICT | rebase conflict (sync, finish) | ability integrate → pass: `nos specs commit --run <run> -m "<run>: integrate"`, repeat command; blocked → DECIDE (rerun integrate with decision) / PAUSE / ABANDON |
-| 4 | HELD | run held (no `details.lock`) | report holder + age → TAKEOVER (`run start … --take-over`, keep new token, repeat) / STOP |
+| 4 | HELD | run held (no `details.lock`) | report holder + age → TAKEOVER (`run start … --take-over`, POC: `run start --poc <slug> --take-over`; keep new token, repeat) / STOP |
 | 4 | | `--take-over`, `details.lock merge`, `pidAlive true` | wait 60 s, repeat, max 10×, then park |
 | 4 | | `details.lock ids` or `runs` | wait 60 s, repeat; twice more → park (`--break` is the user's) |
 | 4 | | from `run finish`, `details.lock merge` | wait 60 s (Monitor or sleep), repeat finish, max 10×, then park |
@@ -364,6 +370,35 @@ Crash recovery (option run step2):
 | stopped rebase | sync exit 3 `rebaseInProgress` | integrate first |
 | session without token | exit 4 | TAKEOVER (user) |
 | stale lock / run file | exit 4 with age / spec-ui "stale" | never auto-broken; user: `--take-over` or `nos lock release <name> --break` |
+
+### POC lifecycle (`workflow.md` option "poc")
+
+```
+  POC menu ─► NEW: name → slug ─► nos run start --poc <slug> (token)
+     cd <main>; EnterWorktree; nos roots; orchestrator guardrails
+                 │
+  ┌──── turns (ability "poc", one live subagent) ────────────────┐
+  │ user message ─► subagent: code, commit "poc: <what>",        │
+  │                 one notes line in .runs/poc-<slug>.md          │
+  │ options: DEPLOY (nos exec deploy-test) │ END │ CONTINUE/free text │
+  └──────────────────────────────────────────────────────────────┘
+                 │ END
+  subagent writes <specs>/pocs/poc-<slug>-result.md ─► APPROVE / CHANGE (loop)
+                 │ APPROVE: nos specs commit --run poc-<slug> -m "poc-<slug>: result"
+                 ▼
+  QUICK │ IDEA │ LATER │ DROP
+   QUICK/IDEA: ExitWorktree keep → option quick (step2) / idea with the result as input → quick step / domain created
+   QUICK/IDEA/DROP: nos poc processed <slug> --as "quick <id>"|"idea <domain>"|dropped,
+                    nos specs commit --run poc-<slug> -m "poc-<slug>: processed", nos run abandon --token
+                    (worktree, branch, run file, notes deleted; result kept)
+   LATER: ExitWorktree keep; run + worktree stay; IDEA and QUICK offer the result (USE <slug> / NO)
+```
+
+- No mode question, no statuses, no specs commits after turns, never `run finish` (exit 1). `run sync` works but is not called by the workflow.
+- Any number of POCs at once, next to any plan or quick run (no domain).
+- Resume: a session starting inside a POC worktree → `<start>` finds the poc run → option "poc" step7: result file with `processed: no` → APPROVE/CHANGE then hand-over; else the turn loop with a new `poc` subagent told "resume" (it reads its notes). No token → TAKEOVER (`run start --poc <slug> --take-over`).
+- PAUSE (free text "pause"): ExitWorktree keep, run stays. ABANDON (free text, confirmed): the DROP path; no result file → only `run abandon`.
+- A result whose run file is gone (cleaned up by hand) is still offered and processed; there is just nothing to abandon (`specs commit --run poc-<slug>` needs no run file).
 
 ---
 
@@ -498,7 +533,7 @@ Why a gate instead of running tools directly: only nos reads the right `nos.conf
 In short: only the orchestrator commits specs, through one CLI command scoped to one domain; agents commit only code, with a step prefix; nothing is pushed except an optional specs backup.
 
 `nos specs commit` (`cli/src/specs-git.js commitSpecs`):
-- Target, exactly one: `--run <r>` (domain of the run file), `--domain <d>` (D-3, outside runs), `--config` (config.json only).
+- Target, exactly one: `--run <r>` (domain of the run file), `--domain <d>` (D-3, outside runs), `--config` (config.json only). `--run poc-<slug>`: only `pocs/poc-<slug>-result.md` (no `config.json`, no run file needed).
 - Asserts the specs root is the top of its own repo (git never reaches the project repo) → else exit 1 "Run nos init".
 - `git add -- config.json [<domain>]` (adds, changes, deletions inside them; never `-A`), `git diff --cached --name-only`, then `git commit -q -m <m> --only -- <paths>` only when something is staged (`--only`: files another writer staged stay out).
 - Every git call: `-c commit.gpgsign=false -c core.hooksPath=` (no hooks, no signing), env `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`.
@@ -512,12 +547,14 @@ Who commits what:
 |---|---|---|
 | orchestrator, after each ability in a run | specs | `step-<id>: <ability>`, phase abilities `phase-<id>: <ability>`, specify + spec-review as one `step-<id>: specify, spec-review` |
 | orchestrator, integrate / pause / gate fix | specs | `<run>: integrate`, `<run>: pause`, `step-<id>: gate fix` |
+| orchestrator, POC | specs | `--run poc-<slug>`: `poc-<slug>: result`, `poc-<slug>: processed` (only the result file) |
 | orchestrator, outside runs | specs | `--domain`: `idea: <domain>`, `plan: <domain>`, `plan: revise <domain>`, `quick-step: step-<id>` (skipped when the domain has a run file; that run's next commit picks it up); `--config`: `setup: chat`, `setup: back-pointer` |
 | CLI | specs | `nos: init`, `<run>: leftovers` (run start), `<run>: merged` (finish), `<run>: discarded` (abandon) |
 | develop | project (worktree) | `step-<id>: <what>`, `step-<id>: gate fix` |
 | review-fixing | project (worktree) | `step-<id>: <what>` / `phase-<id>: <what>` |
 | integrate | project (worktree) | rebase continue, `<prefix> merge fix` |
 | orchestrator on exit 5 | project (worktree) | `step-<id>: leftovers` / `phase-<id>: leftovers` |
+| poc | project (POC worktree) | `poc: <what>`, never merged, deleted with the branch |
 | architect | project (cwd) | `architect: <what>`; from main → directly on main (D-7 exception) |
 | setup | project (main) | `setup: <what changed>`, only `nos.config.json` + `.gitignore` (D-7 exception) |
 
@@ -607,6 +644,7 @@ Dev server (`ui/`, `npm run dev`, port 5180; `ui/vite.config.ts` → `serve-spec
 
 Run display (`runs.ts`, `views/parts.ts`, `views/explore.ts`, `model.ts`):
 - Plan run joined to its domain (kind plan, domain or id = domain id); quick run to its step (kind quick, id = step number, same domain). Plan steps share the plan's run, dot shown once on the domain.
+- Runs joined to nothing (POC runs: kind poc, slug id, domain null) → `model.otherRuns`, one run badge each in the header next to the counts (`#status`), gone with the run file. POC results (`pocs/`) are not shown (not in `/__specs`, which serves domain files only).
 - States: `running` (pulsing dot), `stale` (active, not seen for > 2 h, greyed), `cleanup` (phase merged/abandoned: "awaiting cleanup (nos run cleanup)").
 - Badge: dot, run id, phase, `↑ahead ↓behind`, `● dirty`, `⚠` git error. Detail rows: Run, Main (ahead/behind, uncommitted changes), Seen, Worktree, Git error. `Branch` badge from `plan.json`/quick step `branch` (stays after cleanup).
 - No merge button: finishing needs a session to run the gate.

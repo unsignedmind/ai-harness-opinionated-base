@@ -29,9 +29,10 @@ nos <command> --help
 | `update-plan`       | Save an updated `plan.json` and create, move or delete phases and steps     |
 | `create-quick-step` | Add a quick step (one step outside any plan) to a domain                    |
 | `set-status`        | Change the status of a plan, phase, step or quick step (`--run`: merged/discarded for a whole run) |
-| `run start\|sync\|finish\|cleanup\|abandon` | Run lifecycle: branch + worktree, rebase onto main, gate + ff-only merge, removal |
-| `specs commit`      | Commit `config.json` + one domain folder of the specs repo (`--run`, `--domain` or `--config`) |
+| `run start\|sync\|finish\|cleanup\|abandon` | Run lifecycle: branch + worktree, rebase onto main, gate + ff-only merge, removal (`run start --poc <slug>`: a throwaway POC, never merged) |
+| `specs commit`      | Commit `config.json` + one domain folder of the specs repo (`--run`, `--domain` or `--config`; `--run poc-<slug>`: only its result file) |
 | `specs find-step`   | Find the spec file of a step id in any domain                               |
+| `poc results\|processed` | List the POC results in `<specs>/pocs`; mark one processed (`--as`)     |
 | `gate`              | Run the quality tools of `nos.config.json` (`--e2e`: also e2e, under a slot lease) |
 | `exec <name>`       | Run a project command: `install`, `dev` (holds a slot while it runs), `deploy-test` |
 | `lock <action>`     | `take`, `release` or `status` of a lock in `<specs>/.locks`                 |
@@ -125,6 +126,8 @@ How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the
   "phase": "develop | integrate | gate | merge | merged | abandoned" }
 ```
 
+Run ids: `plan-<domain id>`, `quick-<step id>`, `poc-<slug>`. A POC run has `"kind": "poc"`, `"id": "<slug>"` (a string) and `"domain": null`. Its notes file `<specs>/.runs/poc-<slug>.md` (written by the poc ability, one line per change) lives next to the run file and is deleted with it.
+
 - **Token = holder.** `run start` mints it. Every mutating run command needs `--token <t>` (fallback env `NOS_RUN_TOKEN`). Missing → exit 1 "--token required", another token → exit 4. Every token call updates `seen`. `sync`, `finish`, `cleanup` and `abandon` act on `--run <kind>-<id>` when given, else on the run whose worktree the current directory is in, else on the run holding the token (so `cleanup` from main needs only the token). Cooperative guard for solo use, not a security boundary. `src/runs.js` writes run files atomically (tmp + rename).
 - **Locks:** `<specs>/.locks/<name>/holder.json`, created by `mkdir` (atomic). Holder `{run, token, pid, command, taken}`. Reentrant for the same token, so a crashed `finish` resumes. Locks (`merge`, `ids`) and runs are never broken automatically; `--break` is the user's call. Only a slot lease whose process is gone is reclaimed (see [Slots](#slots)) [D-10]. Names: `merge` (finish), `runs` (run start, CLI internal), `ids` (id counters, CLI internal), `slot-<n>` (gate e2e, exec dev). Lock `ids`: every id reservation (`create-domain`, `create-plan`, `update-plan`, `create-quick-step`) runs its read-modify-write of `<specs>/config.json` under it, waiting up to 10 s (then exit 4, hint `nos lock release ids --break`).
 
@@ -132,7 +135,10 @@ How the orchestrator reacts (`workflow.md`): 3 → ability `integrate`, then the
 
 ```sh
 nos run start --domain <domain> (--plan | --quick <stepId>) [--token <t>] [--take-over]
+nos run start --poc <slug> [--token <t>] [--take-over]
 ```
+
+`--poc <slug>` (lowercase kebab-case, else exit 2; not combined with `--domain`, `--plan`, `--quick`) starts a POC `poc-<slug>`: a throwaway branch to brainstorm in code. It skips everything tied to a target: no domain check (step 4: POCs run next to each other and next to any run), no target validation, no leftovers commit (step 5), no `branch` written (step 6). Token, take-over, branch + worktree and install work as below. The output has the same shape, with `"kind": "poc"`, `"id": "<slug>"`, `"domain": null`, `"leftovers": null`.
 
 Steps 1–6 run under the short lock `runs` (waits up to 10 s, then 4): two sessions starting the same run, or two runs of one domain, at the same moment get one run and one 4 / 6.
 
@@ -186,7 +192,7 @@ File lists in `details`: `files` (relative to the worktree's top) and `paths` (a
 nos run finish --token <t> [--run <kind>-<id>]
 ```
 
-Precondition: the plan or quick step has status `done` (else 1, no lock taken); the `merged` transition is checked before main moves. Then, under lock `merge` (`{ run, token, command: "run finish" }`; held by another token → 4 with `{ lock, path, holder, ageSec, pidAlive, hint }`), recorded in the run file's `phase`:
+A POC run → 1 "a POC is never merged: nos run abandon". Precondition: the plan or quick step has status `done` (else 1, no lock taken); the `merged` transition is checked before main moves. Then, under lock `merge` (`{ run, token, command: "run finish" }`; held by another token → 4 with `{ lock, path, holder, ageSec, pidAlive, hint }`), recorded in the run file's `phase`:
 
 1. `phase=integrate`.
 2. Main's checkout is on `mainBranch` (else 1 "main checkout is on <x>, expected <mainBranch>"). Main busy (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, one `rev-parse -q --verify` each, or a `rebase-merge` / `rebase-apply` folder in main's git dir) → 1 with `details.busy`.
@@ -212,7 +218,7 @@ Every failure releases the lock and parks the run in `phase=develop` (a failure 
 nos run cleanup --token <t> [--run <kind>-<id>]
 ```
 
-Run from main, never from inside the worktree (refused with 1: "ExitWorktree (keep) first"). Needs `phase` `merged` or `abandoned`. `git -C <main> worktree remove [--force] <wt>` (`--force` for abandoned; for merged only when git refuses for untracked files alone, e.g. gate output; modified tracked files → 5 with the list), `git worktree prune`, `git branch -D` (merged: only when the branch is in `mainBranch`, so it works also when main's checkout is on another branch; else 1), run file deleted; a merge lock of this run's token is released. The `branch` field stays in the specs as history. Each part that is already gone is skipped, so a cleanup that failed half way is simply rerun. A folder still in use (Windows: "Permission denied", "Device or resource busy") → 1 "a process (dev server, terminal, editor) still uses <wt>; stop it and rerun nos run cleanup".
+Run from main, never from inside the worktree (refused with 1: "ExitWorktree (keep) first"). Needs `phase` `merged` or `abandoned`. `git -C <main> worktree remove [--force] <wt>` (`--force` for abandoned; for merged only when git refuses for untracked files alone, e.g. gate output; modified tracked files → 5 with the list), `git worktree prune`, `git branch -D` (merged: only when the branch is in `mainBranch`, so it works also when main's checkout is on another branch; else 1), run file and notes (`<specs>/.runs/<run>.md`, a POC's; `"notes": true` in `removed` only when there were some) deleted; a merge lock of this run's token is released. The `branch` field stays in the specs as history. Each part that is already gone is skipped, so a cleanup that failed half way is simply rerun. A folder still in use (Windows: "Permission denied", "Device or resource busy") → 1 "a process (dev server, terminal, editor) still uses <wt>; stop it and rerun nos run cleanup".
 
 ```json
 { "action": "run-cleanup", "run": { "kind": "quick", "id": 7, "...": "..." }, "removed": { "worktree": true, "branch": true, "runFile": true } }
@@ -226,9 +232,13 @@ nos run abandon --token <t> [--run <kind>-<id>]
 
 Any phase except `merged`, not from inside the worktree. `phase=merge` with the branch already in `mainBranch` (a finish crashed after the merge) → 1 "already in main: run nos run finish to complete it". `set-status --run <run> discarded`, `specs commit "<run>: discarded"`, `phase=abandoned` (written before the cleanup), then the cleanup (`--force`, `-D`). A failed cleanup is retried with `nos run cleanup`. A rerun on an abandoned run only does the cleanup (`statuses` and `specs` null).
 
+A POC run has no statuses and no specs commit: `phase=abandoned`, then the cleanup, which also deletes its notes. `statuses` and `specs` are null. Its result `<specs>/pocs/poc-<slug>-result.md` stays.
+
 ```json
 { "action": "run-abandon", "run": { "...": "...", "phase": "abandoned" }, "removed": { "worktree": true, "branch": true, "runFile": true },
   "statuses": { "action": "set-status", "...": "..." }, "specs": { "committed": true, "sha": "<sha>" } }
+{ "action": "run-abandon", "run": { "kind": "poc", "id": "dark-mode", "domain": null, "...": "...", "phase": "abandoned" },
+  "removed": { "worktree": true, "branch": true, "runFile": true, "notes": true }, "statuses": null, "specs": null }
 ```
 
 ### `set-status --run`
@@ -237,7 +247,7 @@ Any phase except `merged`, not from inside the worktree. `phase=merge` with the 
 nos set-status --run <kind>-<id> merged|discarded [--token <t>]
 ```
 
-Flips a whole run in one write per file. The domain comes from the run file (else the `domain-<id>-*` folder of a plan run, or the domain whose quick steps hold the step). Plan merged: plan `done → merged`, steps `done → merged`, phases unchanged. Plan discarded: plan and every step not merged → `discarded` (merged steps stay). Quick: the step `done → merged`, or any status except merged → `discarded`. Targets already at the status stay (a rerun changes nothing). A violation → 1 with `details.violations`, nothing written. While the run file exists the holder's `--token` (or `NOS_RUN_TOKEN`) is required (missing 1, another 4); `finish` and `abandon` call it internally. Plain `set-status --status merged|discarded` is refused (1, hint to `--run`): only `run finish` and `run abandon` call it.
+Flips a whole run in one write per file. The domain comes from the run file (else the `domain-<id>-*` folder of a plan run, or the domain whose quick steps hold the step). Plan merged: plan `done → merged`, steps `done → merged`, phases unchanged. Plan discarded: plan and every step not merged → `discarded` (merged steps stay). Quick: the step `done → merged`, or any status except merged → `discarded`. Targets already at the status stay (a rerun changes nothing). A violation → 1 with `details.violations`, nothing written. While the run file exists the holder's `--token` (or `NOS_RUN_TOKEN`) is required (missing 1, another 4); `finish` and `abandon` call it internally. Plain `set-status --status merged|discarded` is refused (1, hint to `--run`): only `run finish` and `run abandon` call it. `--run poc-<slug>` → 1: a POC has no statuses.
 
 ```json
 { "action": "set-status", "run": "quick-7", "domain": "domain-2-auth", "status": "merged",
@@ -296,6 +306,7 @@ nos specs commit (--run <kind>-<id> | --domain <domain> | --config) -m <message>
 Commits the specs repo, scoped to `config.json` + one domain folder: `git -C <specs> add -- config.json <domain>` (adds, changes and deletions inside them; never `add -A`), then `commit --only` those paths, so files another writer staged stay out. Commits only when something is staged.
 
 - `--run <kind>-<id>`: the domain of that run file. `--domain <d>`: a domain outside any run (idea, plan or quick step creation). `--config`: `config.json` only (`domain: null`). Exactly one of the three.
+- `--run poc-<slug>`: only `pocs/poc-<slug>-result.md` (no `config.json`), `"domain": null` and `"poc": "poc-<slug>"` in the result. Needs no run file: a result outlives its run (`poc-<slug>: processed` after a manual cleanup).
 - A `*.lock` of another writer (`index.lock`, `HEAD.lock`, ref locks): retried 5 times, 200 ms apart.
 - No hooks and no signing in the specs repo (`-c core.hooksPath= -c commit.gpgsign=false`). git never prompts (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`).
 - `specs.remote` set: `git push -u origin HEAD` after a commit, and also without a new commit when `HEAD` is ahead of its upstream (an earlier push failed) or has none. A failed push or one running over 60 s is a warning (stderr + `warning`), the commit stays.
@@ -315,6 +326,28 @@ $ nos specs commit --run quick-7 -m "step-7: develop"
   "pushed": false,
   "files": ["D:/repo.specs/domain-2-auth/quick-steps/quick-steps.json"]
 }
+```
+
+### `poc`
+
+```sh
+nos poc results [--root <dir>]
+nos poc processed <slug> --as <dropped|"quick <stepId>"|"idea <domain>"|no> [--root <dir>]
+```
+
+A POC (`run start --poc`) ends with `<specs>/pocs/poc-<slug>-result.md` (template `templates/poc-result.md`), versioned in the specs repo. Its front matter: `poc: poc-<slug>`, `created`, `processed: no | quick <step id> | idea <domain> | dropped` (a `# comment` after the value is ignored).
+
+- `results`: every `pocs/poc-<slug>-result.md`, sorted by name: `slug`, `run`, `title` (the `# POC result: <title>` heading), `processed` (`no` when missing), `runExists` (`<specs>/.runs/poc-<slug>.json`), `file`. An unreadable file → an entry in `warnings`.
+- `processed`: sets `processed` in the front matter (replaces the line or adds it), the rest and the line endings stay. No file or no front matter → 1, a bad slug or `--as` → 2. The orchestrator commits it: `nos specs commit --run poc-<slug> -m "poc-<slug>: processed"`.
+
+```sh
+$ nos poc results
+{ "action": "poc-results",
+  "results": [{ "slug": "dark-mode", "run": "poc-dark-mode", "title": "Dark mode toggle", "processed": "no",
+                "runExists": true, "file": "D:/repo.specs/pocs/poc-dark-mode-result.md" }] }
+$ nos poc processed dark-mode --as "quick 12"
+{ "action": "poc-processed", "slug": "dark-mode", "run": "poc-dark-mode",
+  "file": "D:/repo.specs/pocs/poc-dark-mode-result.md", "previous": "no", "processed": "quick 12" }
 ```
 
 ### `specs find-step`
@@ -645,7 +678,8 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 ├── .gitignore                  # ".chat/", ".locks/", ".runs/"
 ├── .gitattributes              # "* text=auto eol=lf" (nos init)
 ├── config.json                 # "project": "../<project>" (back-pointer), "id-counters" (managed by nos), "chat"
-├── .runs/                      # run registry (quick-7.json), gate logs (logs/)
+├── .runs/                      # run registry (quick-7.json, poc-<slug>.json + its notes poc-<slug>.md), gate logs (logs/)
+├── pocs/                       # POC results poc-<slug>-result.md (versioned)
 ├── .locks/                     # merge, ids, slot-<n>
 ├── .chat/                      # chat state
 └── domain-1-user-auth/

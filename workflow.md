@@ -17,10 +17,10 @@
     <rule>"review-needed" missing in plan.json → true</rule>
     <rule>Quick step: a single step without plan and phase in <specs>/<domain>/quick-steps/quick-steps.json. Its status changes with "nos set-status --domain <domain> --step <id>" without --phase. Pass "quick step" and no phase id to every ability</rule>
     <rule>Roots: "nos roots" prints home, work, main, specs, inWorktree, configured. Run it at start, after entering a worktree and after leaving one. Pass home, work and specs to every ability; inside a run also the run id and "mainBranch" of <specs>/.runs/<run>.json. Never build a nos path yourself. <specs> lies outside the checkout (default: the sibling folder ../<project>.specs): Read/Grep/Glob over the specs always get <specs> or a path in it passed explicitly</rule>
-    <rule>Run: one plan (run id plan-<domain id>) or one quick step (run id quick-<step id>) in its own branch and git worktree <main>/.claude/worktrees/<run>. The session works inside that worktree. One run per session, one run per domain. Running runs: <specs>/.runs/*.json</rule>
+    <rule>Run: one plan (run id plan-<domain id>), one quick step (run id quick-<step id>) or one POC (run id poc-<slug>) in its own branch and git worktree <main>/.claude/worktrees/<run>. The session works inside that worktree. One run per session, one run per domain. Running runs: <specs>/.runs/*.json. A POC has no domain, no statuses, is never merged and is deleted at the end (nos run abandon): option "poc"</rule>
     <rule>Token: "nos run start" prints the run token. Remember it (it stays in this transcript) and pass --token <token> to every "nos run" command. Fresh session without the token → only --take-over, and only after the user chose TAKEOVER. State run id and token in every park report, so they survive a compacted context</rule>
-    <rule>Specs commits: only you commit <specs>, only with "nos specs commit". Subagents never run git against <specs>. Inside a run, after every ability returns: nos specs commit --run <run> -m "step-<id>: <ability>" (phase abilities: "phase-<id>: <ability>"). specify and spec-review are one unit: one commit after spec-review reports done, -m "step-<id>: specify, spec-review". Outside a run (idea, plan, quick step creation): nos specs commit --domain <domain> -m "<ability>: <domain>" or "<ability>: <what>". Never --domain for a domain with a run file in <specs>/.runs: it would commit that run's spec edits; check first. Only <specs>/config.json changed (e.g. chat settings): nos specs commit --config -m "<ability>: <what>". Status changes are picked up by the next specs commit. Exception: the architect run by block "proposals" (no specs commit)</rule>
-    <rule>Code commits: develop, review-fixing, integrate and architect commit code and docs themselves in their cwd, subject prefix "step-<id>: ", "phase-<id>: " or "architect: " (colon included, matched exactly). Never a spec file, never a push</rule>
+    <rule>Specs commits: only you commit <specs>, only with "nos specs commit". Subagents never run git against <specs>. Inside a run, after every ability returns: nos specs commit --run <run> -m "step-<id>: <ability>" (phase abilities: "phase-<id>: <ability>"). specify and spec-review are one unit: one commit after spec-review reports done, -m "step-<id>: specify, spec-review". Outside a run (idea, plan, quick step creation): nos specs commit --domain <domain> -m "<ability>: <domain>" or "<ability>: <what>". Never --domain for a domain with a run file in <specs>/.runs: it would commit that run's spec edits; check first. Only <specs>/config.json changed (e.g. chat settings): nos specs commit --config -m "<ability>: <what>". Status changes are picked up by the next specs commit. Exception: the architect run by block "proposals" (no specs commit). POC: no specs commit after its turns; only its result file, with nos specs commit --run poc-<slug> -m "poc-<slug>: result" or "poc-<slug>: processed" (commits only <specs>/pocs/poc-<slug>-result.md, also when the run file is gone)</rule>
+    <rule>Code commits: develop, review-fixing, integrate and architect commit code and docs themselves in their cwd, subject prefix "step-<id>: ", "phase-<id>: " or "architect: " (colon included, matched exactly). The ability "poc" commits "poc: " on its throwaway branch. Never a spec file, never a push</rule>
     <rule>Exit codes of nos commands, react by the table <exitCodes>
     <code n="0">ok</code>
     <code n="1">failed → park, report the error. From "nos run finish" → cycle "finish" step2</code>
@@ -37,7 +37,7 @@
     </code>
     <code n="4" from="run start, sync, finish, cleanup, abandon" when="details without lock">run held by another token → report holder and age ("seen", "ageSec" in the details)
         <question>The run is held by another session. How do you want to continue?
-            <choice key="TAKEOVER">Take the run over: "nos run start --domain <domain> --plan|--quick <step id> --take-over", keep the new token. Came from run start → continue option "run" step2 with the new token (EnterWorktree, nos roots, …). Came from another nos run command → repeat it with the new token. Only when the other session is gone</choice>
+            <choice key="TAKEOVER">Take the run over: "nos run start --domain <domain> --plan|--quick <step id> --take-over" (POC: "nos run start --poc <slug> --take-over"), keep the new token. Came from run start → continue option "run" step2 (POC: option "poc" step7) with the new token (EnterWorktree, nos roots, …). Came from another nos run command → repeat it with the new token. Only when the other session is gone</choice>
             <choice key="STOP">Stop here</choice>
         </question>
     </code>
@@ -65,12 +65,13 @@
             <choice key="NO">Skip. Abilities that run quality checks will stop until setup ran</choice>
         </question>
     </check>
-    <check>inWorktree true → the run whose "worktree" in <specs>/.runs/*.json is <work> or contains it → option "run" step2 with that run. No such run → ExitWorktree action=keep, nos roots, then the menu</check>
+    <check>inWorktree true → the run whose "worktree" in <specs>/.runs/*.json is <work> or contains it → a plan or quick run: option "run" step2 with that run; a POC run (kind poc): option "poc" step7 with it. No such run → ExitWorktree action=keep, nos roots, then the menu</check>
     <question>What do you want to do?
         <choice key="IDEA">Document an idea</choice>
         <choice key="PLAN">Create a plan from an idea</choice>
         <choice key="RUN">Run or continue a plan or quick step</choice>
         <choice key="QUICK">Quick step: one small change straight to specify, develop, review</choice>
+        <choice key="POC">Brainstorm in a throwaway branch: you steer turn by turn, nothing is merged</choice>
         <choice key="ARCHITECT">Improve project quality and docs: architecture docs, guardrails, tests</choice>
         <choice key="SETUP">Set up or update nos for this project: nos.config.json, the specs repo, quality tools, slots</choice>
         <choice key="CHAT">Continue in the browser or on the phone: open the local chat (its own Claude Code sessions, one per tab)</choice>
@@ -88,8 +89,8 @@
 </option>
 
 <option name="idea">
-    <step1>Run ability "idea"</step1>
-    <step2>nos specs commit --domain <domain> -m "idea: <domain>". Report the domain folder. Pending guardrail proposals → block "proposals" first
+    <step1>No POC result passed in → block "poc-results" first. Run ability "idea", a POC result as its starting context (the result file path)</step1>
+    <step2>nos specs commit --domain <domain> -m "idea: <domain>". Came from a POC result → option "poc" step6 with that POC and "idea <domain>". Report the domain folder. Pending guardrail proposals → block "proposals" first
         <question>Create a plan now?
             <choice key="YES">Create the plan → option "plan" with this domain</choice>
             <choice key="NO">Stop here</choice>
@@ -107,9 +108,57 @@
             <choice key="NEW">Create a new quick step</choice>
         </question>
     </step1>
-    <step2>NEW or no quick step open → run ability "quick-step" with the intent if the user already gave one. It asks the user for the intent first. Relay all its questions to the user and the answers back</step2>
-    <step3>nos specs commit --domain <domain> -m "quick-step: step-<id>" (domain has a run file in <specs>/.runs → skip it, that run's next specs commit picks it up). Report the domain (new or existing) and the quick step. Pending guardrail proposals → block "proposals" first. Mode = the returned pipeline mode</step3>
+    <step2>NEW or no quick step open → no POC result passed in → block "poc-results" first. Run ability "quick-step" with the intent if the user already gave one (a POC result: the result file path is the intent). It asks the user for the intent first. Relay all its questions to the user and the answers back</step2>
+    <step3>nos specs commit --domain <domain> -m "quick-step: step-<id>" (domain has a run file in <specs>/.runs → skip it, that run's next specs commit picks it up). Came from a POC result → option "poc" step6 with that POC and "quick <step id>". Report the domain (new or existing) and the quick step. Pending guardrail proposals → block "proposals" first. Mode = the returned pipeline mode</step3>
     <step4>Option "run" step2 with the domain, the quick step and the mode</step4>
+</option>
+
+<option name="poc">
+    <rule>A POC: a throwaway branch poc-<slug> and worktree where the user steers the ability "poc" turn by turn. No mode question, no statuses, no set-status, no specs commit after a turn, never nos run finish. It ends with the result file <specs>/pocs/poc-<slug>-result.md (template <home>/templates/poc-result.md), which seeds a quick step or an idea. Worktree and branch are deleted (nos run abandon) only once the result is processed (quick step, idea) or the POC is dropped. Notes of the subagent: <specs>/.runs/poc-<slug>.md (deleted with the run)</rule>
+    <step1>Inside a worktree → ExitWorktree action=keep, nos roots. POC runs in <specs>/.runs/poc-*.json →
+        <question>Continue a POC or start a new one?
+            <choice key="slug">One choice per POC run: slug, phase, age; "result ready" when "nos poc results" lists its result with processed no; "cleanup pending" when its phase is abandoned → step7 with it</choice>
+            <choice key="NEW">Start a new POC</choice>
+        </question>
+        No POC run → step2
+    </step1>
+    <step2>NEW: ask for a short name. Make a slug from it (lowercase kebab-case, a-z 0-9, single dashes; a result pocs/poc-<slug>-result.md or run file poc-<slug>.json already exists → another slug). nos run start --poc <slug>. Exit 4 → exit code table. Keep "token" from the output. Install failure or "warnings" in the output → report them, continue. Cwd not <main> → cd <main> (absolute path, its own call). EnterWorktree path=<run.worktree>. Denied → cd <main>, retry once. Denied again → stop, report run id, token and the denial. "enter" differs from run.worktree → work in <enter>. nos roots. Read the orchestrator guardrails (rule "Guardrails"). Read the run file <specs>/.runs/poc-<slug>.json: mainBranch</step2>
+    <step3>Turns: no first message yet → ask "What do you want to try?". Run ability "poc" with home, work, specs, run id, mainBranch and the user's message. Keep its subagent alive. Each report ends with the turn result and the options: show both, as this question
+        <question>How do you want to continue?
+            <choice key="DEPLOY">Deploy to test → SendMessage "deploy" to the subagent. It runs nos exec deploy-test and reports the url. Show the report, ask this question again</choice>
+            <choice key="END">End the POC → step4</choice>
+            <choice key="CONTINUE">Continue → ask for the next request</choice>
+        </question>
+        <do>Any other answer (a question, a change request) counts as CONTINUE: forward it verbatim via SendMessage as the next turn, show the report, ask this question again</do>
+        <do>"pause" → PAUSE: pending guardrail proposals → block "proposals" first. ExitWorktree action=keep, nos roots. Report run id and token. End. The run, its worktree and branch stay, POC offers it</do>
+        <do>"abandon" or "drop" → ask YES/NO to confirm. YES → step6 with "dropped" (no result file → only the abandon part)</do>
+    </step3>
+    <step4>End: SendMessage "end" to the subagent. It writes <specs>/pocs/poc-<slug>-result.md. Show its requirements and technical details
+        <question>Is this the result of the POC?
+            <choice key="APPROVE">Approve → nos specs commit --run poc-<slug> -m "poc-<slug>: result". Step5</choice>
+            <choice key="CHANGE">Change it → ask what to change, SendMessage it to the subagent (it edits only the result file). Show the changes, ask this question again</choice>
+        </question>
+        <do>Any other answer counts as CHANGE with that text</do>
+    </step4>
+    <step5>Hand-over. Pending guardrail proposals → block "proposals" first
+        <question>What should happen with the result?
+            <choice key="QUICK">Start a quick step from it → ExitWorktree action=keep, nos roots. Option "quick" from step2 with the result file as the intent (POC result passed in). Its step3 continues with step6 here ("quick <step id>"), then option "quick" step4</choice>
+            <choice key="IDEA">Document an idea from it → ExitWorktree action=keep, nos roots. Option "idea" with the result file as the starting context (POC result passed in). Its step2 continues with step6 here ("idea <domain>"), then the rest of option "idea" step2</choice>
+            <choice key="LATER">Keep it for later → ExitWorktree action=keep, nos roots. The result stays unprocessed, worktree and branch stay. POC lists it as "result ready", IDEA and QUICK offer it. Report run id and token. End</choice>
+            <choice key="DROP">Drop the POC → step6 with "dropped"</choice>
+        </question>
+    </step5>
+    <step6>Processed (from step5, step3 ABANDON, block "poc-results"), with the POC slug and "<as>" (quick <step id> | idea <domain> | dropped):
+        <do>Inside a worktree → ExitWorktree action=keep</do>
+        <do>Result file exists → nos poc processed <slug> --as "<as>". nos specs commit --run poc-<slug> -m "poc-<slug>: processed" (dropped: kept as history)</do>
+        <do>Run file <specs>/.runs/poc-<slug>.json exists → nos run abandon --token <token> --run poc-<slug> (no token → TAKEOVER question of exit code 4 first, to get one). It deletes worktree, branch, run file and notes. Its cleanup part fails (exit 1, e.g. a dev server holds the folder) → report it, repeat "nos run cleanup --token <token> --run poc-<slug>" after the user stopped it. No run file (cleaned up by hand) → nothing to abandon</do>
+        <do>nos roots. Report: result <as>, worktree and branch removed. Then back where step6 was called from</do>
+    </step6>
+    <step7>Resume a POC (chosen in step1, or a session that starts inside its worktree):
+        <do>Phase abandoned (cleanup pending) → ExitWorktree action=keep when inside. nos run cleanup --token <token> --run poc-<slug> (no token → TAKEOVER first). nos roots. Report. End</do>
+        <do>Inside its worktree and this session holds its token → no run start. Otherwise → nos run start --poc <slug>, with --token <token> when this session holds one. Exit 4 → exit code table. Not inside yet → cd <main>, EnterWorktree as in step2. Always: nos roots, the orchestrator guardrails, the run file (mainBranch)</do>
+        <do>Result file with processed no exists → show it, step4 question (APPROVE after an earlier approval commits nothing new, then step5). Otherwise → step3; no live "poc" subagent of this session → run a new one with "resume" (it reads its notes and the result file)</do>
+    </step7>
 </option>
 
 <option name="architect">
@@ -278,6 +327,15 @@
     </step7>
 </cycle>
 
+<poc-results>
+    <rule>Asked by option "idea" step1 and option "quick" step2 when no POC result was passed in. nos poc results → the results with processed no. None → skip</rule>
+    <question>A proof of concept left a result. Use one as the input?
+        <choice key="USE <slug>">One choice per unprocessed result: title, slug, "POC still open" when runExists → the result file path is the input of the ability (POC result passed in)</choice>
+        <choice key="NO">Start without a POC result</choice>
+    </question>
+    <do>USE → after the ability created the idea or the quick step and its specs commit: option "poc" step6 with that slug and "idea <domain>" or "quick <step id>" (marks it processed, commits it, abandons its run when the run file exists; no token → TAKEOVER first). Then continue the option</do>
+</poc-results>
+
 <proposals>
     <rule>Asked by rule "Lessons → guardrail proposals", before any other question of that park, report or session end. Its own message: wait for the answer, then the next question. No pending proposal → skip</rule>
     <question>Lessons from this work, proposed as guardrails. Which should the architect add?
@@ -321,6 +379,7 @@
 <resume>
     <rule>A run can be interrupted anytime (limits, shutdown). Never reset a status on resume</rule>
     <rule>Read the target status in plan.json, quick step: in quick-steps.json. open → step1. done → skip the cycle. Otherwise → the step with resume-at = status: skip its status change, run its actions and parks</rule>
+    <rule>Resumed session already inside a POC's worktree → option "poc" step7</rule>
     <rule>Resumed session already inside a run's worktree → option "run" step2: no run start when it holds the token, always nos roots and the run file, then the rebase check: nos run sync exit 3 (a rebase in progress) → integrate first</rule>
     <rule>Tell a rerun ability that it resumes interrupted work</rule>
 </resume>

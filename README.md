@@ -115,9 +115,10 @@ A - Document an idea [IDEA]
 B - Create a plan from an idea [PLAN]
 C - Run or continue a plan or quick step [RUN]
 D - Quick step: one small change straight to specify, develop, review [QUICK]
-E - Improve project quality and docs: architecture docs, guardrails, tests [ARCHITECT]
-F - Set up or update nos for this project: nos.config.json, the specs repo, quality tools, slots [SETUP]
-G - Continue in the browser or on the phone: open the local chat (its own Claude Code sessions, one per tab) [CHAT]
+E - Brainstorm in a throwaway branch: you steer turn by turn, nothing is merged [POC]
+F - Improve project quality and docs: architecture docs, guardrails, tests [ARCHITECT]
+G - Set up or update nos for this project: nos.config.json, the specs repo, quality tools, slots [SETUP]
+H - Continue in the browser or on the phone: open the local chat (its own Claude Code sessions, one per tab) [CHAT]
 ```
 
 Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
@@ -152,6 +153,24 @@ Outside the typical path. For a small change that needs no idea and no plan. A q
 4. A new domain gets an `idea.md` with your intent and a note that the quick step flow generated it.
 5. The quick step runs like a plan step, in its own branch and worktree (`quick-<step id>`): same statuses, parks, `human-validation-needed` and `review-needed`. There is no phase and no phase review. PAUSE keeps the status; continue later via QUICK or RUN.
 6. When the step is done, nos integrates it into main automatically.
+
+### Proof of concept (POC)
+
+Outside the typical path. Brainstorm in code before you write an idea: try something, look at it, change it, throw it away. A POC is never merged. It has no spec, no ticket and no status. What survives is a requirements list.
+
+1. POC lists the open POCs to continue (`result ready` when one waits for its hand-over), or `NEW`.
+2. Give it a short name. nos creates the branch and worktree `poc-<slug>` and moves the session there.
+3. Tell the prototyper (ability `poc`) what to try. It builds it fast (no TDD, no spec), commits `poc: <what>` on the throwaway branch and logs every change in its notes (`<specs>/.runs/poc-<slug>.md`). Every turn ends with:
+   ```
+   A - Deploy to test [DEPLOY]
+   B - End the POC [END]
+   C - Continue [CONTINUE]
+   ```
+   `DEPLOY` runs `nos exec deploy-test` and shows the url. Any free text (a question, a change) is the next turn. `pause` leaves the worktree, the POC stays.
+4. `END`: the prototyper writes `<specs>/pocs/poc-<slug>-result.md` (`templates/poc-result.md`): numbered requirements in your words, technical details per requirement (marked as POC insights that may be sloppy) and what was tried and dropped. You `APPROVE` it or `CHANGE` it; approved, it is committed in the specs repo.
+5. Hand-over: `QUICK` (a quick step from the result), `IDEA` (an idea from it), `LATER` (keep result, worktree and branch; IDEA and QUICK offer the result later) or `DROP`. QUICK, IDEA and DROP mark the result `processed` (`nos poc processed`) and delete worktree, branch, run file and notes (`nos run abandon`). The result file stays as history.
+
+IDEA and QUICK ask `USE <slug>` / `NO` whenever unprocessed POC results exist. The idea or quick step treats the requirements as the intent and the technical details as hints, never as decisions, and links the result file.
 
 ### Project quality and docs (ARCHITECT)
 
@@ -231,7 +250,7 @@ A resumed session (`claude --resume`, a restarted chat) is back in the run's wor
 
 ### Runs: branches and worktrees
 
-- A **run** is one plan (`plan-<domain id>`) or one quick step (`quick-<step id>`) in its own branch and git worktree under `.claude/worktrees/<run>`. The session works inside it; subagents, tests and code commits land there. One run per domain, one run per session; run several in parallel from several terminals or chat tabs.
+- A **run** is one plan (`plan-<domain id>`), one quick step (`quick-<step id>`) or one POC (`poc-<slug>`) in its own branch and git worktree under `.claude/worktrees/<run>`. The session works inside it; subagents, tests and code commits land there. One run per domain, one run per session; run several in parallel from several terminals or chat tabs. A POC has no domain and no statuses, runs next to anything, is never merged and is deleted with `nos run abandon`.
 - The specs are not in the worktrees. They live once in `<specs>/` (its own git repo next to the project checkout, default `../<project>.specs`), shared by every run and live in the Spec UI. Only the orchestrator commits them (`nos specs commit`, after every ability; specify and spec-review count as one).
 - Why outside the checkout: Claude Code's worktree isolation (after `EnterWorktree`) refuses edits to the main checkout from the worktree session and its subagents, also through junctions, and blocks git redirected into it (`git -C <main>`, `cd <main> && git`). So the specs live outside, nos is always called as the literal `node <home>/cli/bin/nos.js …` (never via a variable or alias: computed command names are refused too), and git against main runs only inside nos commands.
 - Live-run rules that follow from it (workflow.md `<rules>`, repeated in every ability that needs them): never `cd` into `<specs>` or anywhere outside the work folder (the Bash cwd persists; `EnterWorktree` from outside the repo needs an approval auto mode and the chat cannot give, so a denied enter retries once from `<main>`, then parks); files in `<specs>` are written only with Write/Edit (auto mode refuses shell writes outside the cwd; `<specs>` is an added directory); shell commands that run git or change files stay literal (no `$(…)`, backticks, variables or `cd x && git`), one plain git command per call.
@@ -314,6 +333,7 @@ The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Ch
 │   ├── review-pessimistic/SKILL.md  also runs standalone
 │   ├── review-fixing/SKILL.md       also runs standalone
 │   ├── integrate.md                 merge agent: resolves a stopped rebase
+│   ├── poc.md                       prototyper: a throwaway POC, steered turn by turn
 │   ├── chat.md
 │   └── architect.md
 ├── templates/
@@ -327,7 +347,8 @@ The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Ch
 │   ├── architecture-sections.md    section catalog for a project's architecture template
 │   ├── quality-tools.md            config keys and the quality check
 │   ├── test-types.md               test groups and architecture rule ideas
-│   └── guardrails.xml              structure of docs/guardrails.xml
+│   ├── guardrails.xml              structure of docs/guardrails.xml
+│   └── poc-result.md               structure of a POC result (<specs>/pocs/poc-<slug>-result.md)
 ├── cli/                            `nos` CLI: ids, folders, statuses, runs, gate (Part 6)
 └── ui/                             read-only browser viewer for the specs root (Part 5)
 ```
@@ -336,7 +357,7 @@ All skill files are written in minimal pseudo-XML: `<coreRules>`, `<input>`, and
 
 ### SKILL.md: the orchestrator
 
-Defines the main session's role. It only delegates, orchestrates and reports. It never implements or verifies. It must read `workflow.md` first and must not read an ability file until the workflow calls for it. It lists the abilities: setup, idea, plan, quick-step, specify, spec-review, develop, review-pessimistic, review-fixing, integrate, chat, architect. Every ability gets `home`, `work` (the checkout: main or the run's worktree) and `specs` from the orchestrator, which reads them once per run from `nos roots`.
+Defines the main session's role. It only delegates, orchestrates and reports. It never implements or verifies. It must read `workflow.md` first and must not read an ability file until the workflow calls for it. It lists the abilities: setup, idea, plan, quick-step, specify, spec-review, develop, review-pessimistic, review-fixing, integrate, poc, chat, architect. Every ability gets `home`, `work` (the checkout: main or the run's worktree) and `specs` from the orchestrator, which reads them once per run from `nos roots`.
 
 #### Step and phase cycle
 
@@ -472,6 +493,10 @@ Both work standalone too: tell Claude to follow `abilities/review-pessimistic/SK
 
 Runs only when `nos run sync` or `nos run finish` stops with a rebase conflict (exit 3), or a resumed run has a rebase in progress. It is the only ability that continues a rebase. It reads the commits already on main since the run's base (`step-<id>:` prefixes → `nos specs find-step`) and its own step spec, resolves each conflict by the intent of both, continues the rebase commit by commit and runs `nos gate`. It notes each resolution in the Dev Log marked `(merge)`. When the two specs contradict each other it stops and cites both. The orchestrator then repeats the command that stopped.
 
+### abilities/poc.md: prototyper 🧪
+
+Not part of the run cycle. Started from the menu (POC), inside the POC's worktree `poc-<slug>`. The orchestrator keeps its subagent alive and forwards your messages turn by turn. Speed over polish: no TDD, no spec, no ACs, no statuses. It commits each change `poc: <what>` on the throwaway branch (never pushed, never merged), logs it in its notes `<specs>/.runs/poc-<slug>.md` (read again on resume) and ends every report with `DEPLOY` / `END` / `CONTINUE`. `deploy` runs `nos exec deploy-test`. `end` writes `<specs>/pocs/poc-<slug>-result.md` by `templates/poc-result.md`: requirements in user language, technical details per requirement (POC insights, may be sloppy), tried and dropped. After `end` it changes only that file. It reads the `coding` guardrails, since it writes code.
+
 ### abilities/architect.md: quality and docs architect 🏗️🕵🏼
 
 Not part of the run cycle. It is started from the menu (ARCHITECT) and works with you. Its core rules come from harness engineering: harden only in response to observed failures, change one thing at a time and measure it, don't trust a rule just because it exists, and test both "should happen" and "should NOT happen". It never changes production code, and it is the only role that changes the architecture docs.
@@ -507,6 +532,7 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
 - **review-template.md**: the Review section and phase `review.md`. It has a Date and Result line, a short summary, Criteria (one line per AC), Findings (`( )` with id, weight, category, location, evidence, fix and fix kind) and Fixes (written by review-fixing, referencing the commit prefix). Rules for weights and fix kinds are at the bottom.
 - **architecture-sections.md**: catalog for a project's architecture template. Core sections (Overview, Stack & commands, Structure, Rules, Testing, Decisions, Tech debt), optional sections with "include when", profiles per project type, and the template format.
 - **test-types.md**: test groups with when they add value and tooling examples, architecture rule ideas, enforcement mechanisms (lint rule, dependency graph, test) and pitfalls.
+- **poc-result.md**: the result of a POC: front matter (`poc`, `created`, `processed`: `no` | `quick <step id>` | `idea <domain>` | `dropped`, set by `nos poc processed`), a note that it holds POC insights and no spec, numbered Requirements, Technical details per requirement, Tried and dropped.
 - **guardrails.xml**: structure of `docs/guardrails.xml`. One section per reader: `coding` (develop, integrate), `review` (both reviewers), `specify` (specify, spec-review), `plan` (plan), `architect`, `orchestrator` (the main session running `workflow.md`). Every guardrail has a `reason`. Orchestrator guardrails only add restrictions (extra parks, questions, MANUAL mode, refusals); they never remove a park and never override a workflow rule, the workflow wins on conflict. The orchestrator re-reads them after entering or leaving a worktree (the file is versioned per branch) and names a guardrail when it applies.
 
 ### Markers
@@ -530,8 +556,9 @@ Used in ACs, the Task List and review findings:
 | `nos update-plan --domain <d> --plan <file>` | plan (extend, revise) | saves the changed plan, creates/moves/deletes phases and steps |
 | `nos create-quick-step --domain <d> --step <file>` | quick-step | new step id, quick step file, entry in `quick-steps/quick-steps.json` |
 | `nos set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | orchestrator | changes one status, checked against the matching `status.xml` section. A step id not in `plan.json` is looked up in the quick steps |
-| `nos run start\|sync\|finish\|cleanup\|abandon` | orchestrator | run lifecycle (branch, worktree, rebase, gate, ff-only merge, removal) |
-| `nos specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | orchestrator | commits one domain's specs (or only `config.json`) in `<specs>` |
+| `nos run start\|sync\|finish\|cleanup\|abandon` | orchestrator | run lifecycle (branch, worktree, rebase, gate, ff-only merge, removal); `run start --poc <slug>`: a throwaway POC branch |
+| `nos specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | orchestrator | commits one domain's specs (or only `config.json`) in `<specs>`; `--run poc-<slug>`: only that POC's result file |
+| `nos poc results`, `nos poc processed <slug> --as <what>` | orchestrator | lists the POC results in `<specs>/pocs`; marks one processed |
 | `nos specs find-step <id>` | integrate | spec file of a step id in any domain |
 | `nos gate [--e2e]` | develop, reviewers, integrate, architect, setup | the quality check, JSON per tool |
 | `nos exec <install\|dev\|deploy-test>` | setup, `run start` | project commands with slot lease |
@@ -548,6 +575,7 @@ Used in ACs, the Task List and review findings:
 | review-pessimistic | no | Review | no | no |
 | review-fixing | yes | Review marks, Dev Log | no | code only (`step-<id>: `/`phase-<id>: `) |
 | integrate | resolves conflicts | Dev Log `(merge)` | no | rebase, merge fixes (`step-<id>: `) |
+| poc | yes, on its throwaway branch | its notes and the POC result (`<specs>/pocs`) | no | code only (`poc: `) |
 | architect | tests and test tooling only | no. Writes architecture template and doc, guardrails | no | code and docs (`architect: `) |
 
 ### Known limitations
@@ -741,7 +769,7 @@ The dev server finds the project with the nos resolver: it walks up from `ui/` t
 | `NOS_UI_OPEN=0` / `1` | never / always open `dev.html` in the browser on start (default: open, except under `NOS_SPECS_ROOT`, vitest or CI) |
 | `NOS_CHAT_PORT` | port of the chat server the dev server starts (`nos chat start`: a running server with the same version and code fingerprint is kept with its tabs; other code is replaced) |
 
-Runs (`nos run start`) show live: `/__runs` lists `<specs>/.runs/*.json` with ahead/behind main and a dirty worktree. A chat tab working in a run shows its id (`quick-7`). Domains, quick steps and cards get a dot: pulsing = running, grey = stale (not seen for 2h), green = merged/abandoned, awaiting `nos run cleanup`. Statuses `merged` and `discarded` have their own pills; Board and Backlog hide `discarded` unless the status filter asks for it.
+Runs (`nos run start`) show live: `/__runs` lists `<specs>/.runs/*.json` with ahead/behind main and a dirty worktree. A chat tab working in a run shows its id (`quick-7`, `poc-dark-mode`). A POC run belongs to no domain: it shows as a badge in the header next to the counts while its run file exists. Domains, quick steps and cards get a dot: pulsing = running, grey = stale (not seen for 2h), green = merged/abandoned, awaiting `nos run cleanup`. Statuses `merged` and `discarded` have their own pills; Board and Backlog hide `discarded` unless the status filter asks for it.
 
 `npm run dev-to-lan` does the same, but also listens on the network. Other devices open the printed `Network` URL (`http://<host-ip>:5180/`) and see the host's `<specs>/` without picking a folder. Windows may ask to let Node through the firewall.
 
@@ -849,11 +877,13 @@ Invocation: `node <home>/cli/bin/nos.js <command>`, `<home>` = the nos folder, a
 | `create-quick-step --domain <d> --step <file\|->` | reserves a step id, creates `quick-steps/step-<id>-<slug>.md` and adds the step to `quick-steps/quick-steps.json` |
 | `set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | changes one status. Plan, phase or step depends on the arguments. A step not in `plan.json` (without `--phase`) is looked up in the quick steps. Checked against `templates/status.xml`. `--run <r> merged\|discarded` flips a whole run (finish/abandon only) |
 | `run start --domain <d> (--plan\|--quick <id>)` | branch + worktree + run token for a plan or quick step |
+| `run start --poc <slug>` | branch + worktree + run token for a POC: no domain, no statuses, never merged (finish refuses), abandon deletes it with its notes |
 | `run sync\|finish\|cleanup\|abandon --token <t>` | rebase onto main; lock + checks + gate + ff-only merge; remove worktree and branch; drop the run |
 | `gate [--e2e]` | the quality tools of `nos.config.json`, JSON per tool |
 | `exec <install\|dev\|deploy-test>` | a project command; `dev` holds a slot |
 | `specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | commits one domain's specs (or only `config.json`) in `<specs>`. Never `--domain` for a domain another session's run owns |
 | `specs find-step <id>` | spec file of a step id |
+| `poc results` / `poc processed <slug> --as <what>` | the POC results in `<specs>/pocs` (title, processed, run still there); sets `processed` in one. `specs commit --run poc-<slug>` commits only that result |
 | `lock take\|release\|status <name> --token <t> [--break]` | the `merge`, `ids`, `slot-<n>` locks |
 
 ### Rules

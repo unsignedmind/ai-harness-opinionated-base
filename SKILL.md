@@ -63,6 +63,10 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
             <description>this skill is the merge agent: it resolves a stopped rebase of a run branch onto main by the intent of both specs, then runs the gate</description>
             <skill>./abilities/integrate.md</skill>
         </ability>
+        <ability name="poc">
+            <description>this skill is the prototyper: it builds a throwaway proof of concept turn by turn as the user steers, can deploy it to test, and ends with a requirements list (a POC result) that seeds an idea or a quick step</description>
+            <skill>./abilities/poc.md</skill>
+        </ability>
         <ability name="chat">
             <description>this skill opens the local chat in the spec-ui (desktop or phone); the chat answers with its own Claude Code sessions, one per tab. Runs in the main session, not in a subagent</description>
             <skill>./abilities/chat.md</skill>
