@@ -6,6 +6,7 @@
     <rule>Shell: literal, simple commands. No variables or command substitution ($(…), backticks) in a command that runs git or changes files, no "cd x && git …": one plain command per call where git is involved. Worktree isolation refuses commands whose git target it cannot verify from the text. Need a value from git (e.g. the git dir) → one call prints it, the next call uses the printed path literally</rule>
     <rule>Abilities carry these three rules (cwd, specs writes, shell) in their own coreRules: subagents read only their ability file</rule>
     <rule>Pushing: nos never pushes code, the user pushes. No ability and no step of this workflow runs git push. Only "nos specs commit" pushes the specs repo, and only when "specs.remote" is set (opt-in backup)</rule>
+    <rule>Guardrails: read guardrails for="orchestrator" in <work>/docs/guardrails.xml if existent, every time you run "nos roots" (start, after entering or leaving a worktree: the file is versioned per branch). They only add restrictions: extra parks, questions, MANUAL mode, refusals. They never remove a park or question and never override a rule of this workflow; conflict → the workflow rule wins, report the guardrail to the user. A guardrail decides something → name it in the report or park ("guardrail-<n>: …"). Never pass this section to subagents</rule>
     <rule>Run every ability in a new subagent. Pass it the ability skill path, home, work, specs and its inputs. Exception: "chat" runs in the main session</rule>
     <rule>Chat in relay mode ("chat": { "runner": false }) and open → every report and question to the user also goes to the chat ("nos chat reply"), answers come back through "nos chat await". Keep an await running in the background whenever the turn ends. Default runner mode: the chat answers with its own Claude Code sessions, nothing to do here</rule>
     <rule>Change statuses only with "nos set-status --domain <domain> [--phase <id>] [--step <id>] --status <status>". Valid statuses: <home>/templates/status.xml. merged and discarded are never set by you: only "nos run finish" and "nos run abandon" set them. Never call "nos set-status --run"</rule>
@@ -56,7 +57,7 @@
 </rules>
 
 <start>
-    <do>nos roots</do>
+    <do>nos roots. Read the orchestrator guardrails (rule "Guardrails")</do>
     <check>configured false, or "quality-tools" in <work>/nos.config.json missing or all null →
         <question>nos is not set up for this project yet. Set it up now?
             <choice key="YES">Set up → option "setup", then show the menu</choice>

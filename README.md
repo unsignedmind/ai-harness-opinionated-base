@@ -267,7 +267,7 @@ nos.config.json                          tracked: quality tools, project command
 docs/
 ├── architecture-template.md             structure of the architecture doc (architect)
 ├── architecture.md                      architecture, rules, tech debt (architect)
-└── guardrails.xml                       extra rules per ability (architect)
+└── guardrails.xml                       extra rules per ability and for the orchestrator (architect)
 ```
 
 Code commits start with `step-<id>: ` or `phase-<id>: ` (with the colon), so `git log --grep "^step-3:"` shows everything done for step 3 and never step 30. The architect's commits start with `architect: `, setup's with `setup: `. Spec changes are committed in `<specs>` (`git -C <specs> log`), one commit per ability.
@@ -489,7 +489,7 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
 - **review-template.md**: the Review section and phase `review.md`. It has a Date and Result line, a short summary, Criteria (one line per AC), Findings (`( )` with id, weight, category, location, evidence, fix and fix kind) and Fixes (written by review-fixing, referencing the commit prefix). Rules for weights and fix kinds are at the bottom.
 - **architecture-sections.md**: catalog for a project's architecture template. Core sections (Overview, Stack & commands, Structure, Rules, Testing, Decisions, Tech debt), optional sections with "include when", profiles per project type, and the template format.
 - **test-types.md**: test groups with when they add value and tooling examples, architecture rule ideas, enforcement mechanisms (lint rule, dependency graph, test) and pitfalls.
-- **guardrails.xml**: structure of `docs/guardrails.xml`. One section per ability that reads it (coding, review, specify). Every guardrail has a `reason`.
+- **guardrails.xml**: structure of `docs/guardrails.xml`. One section per reader: `coding` (develop, integrate), `review` (both reviewers), `specify` (specify, spec-review), `architect`, `orchestrator` (the main session running `workflow.md`). Every guardrail has a `reason`. Orchestrator guardrails only add restrictions (extra parks, questions, MANUAL mode, refusals); they never remove a park and never override a workflow rule, the workflow wins on conflict. The orchestrator re-reads them after entering or leaving a worktree (the file is versioned per branch) and names a guardrail when it applies.
 
 ### Markers
 
@@ -635,11 +635,11 @@ Most changes touch more than one file. Before you finish a change, check these c
 | commit prefix (`step-<id>: `, with colon) | develop, review-fixing, integrate, review-pessimistic (it matches the prefix exactly), `workflow.md` (specs commit messages, exit code 5). `architect: ` prefix: architect (MEASURE searches by it) |
 | a `nos` command or its output | `workflow.md` (exit code table), the abilities that call it, `templates/quality-tools.md` (gate, exec), `cli/README.md` |
 | markers | specify, spec-review, develop, both reviewers, the template, `ui/src/model.ts` |
-| doc paths (`<work>/docs/architecture.md`, `<work>/docs/architecture-template.md`, `<work>/docs/guardrails.xml`) | architect `<files>` and every ability that reads them: plan, develop, specify, spec-review, both reviewers |
+| doc paths (`<work>/docs/architecture.md`, `<work>/docs/architecture-template.md`, `<work>/docs/guardrails.xml`) | architect `<files>` and every ability that reads them: plan, develop, integrate, specify, spec-review, both reviewers; `workflow.md` (orchestrator guardrails) |
 | Spec Log markers `(specify)`, `(spec-review)` | specify, spec-review, develop (must not change it), the template |
 | Test Strategy section | the template, specify, spec-review, develop, review-pessimistic (tests pass) |
 | Dev Log marker `(architecture)` | develop, review-fixing, architect (UPDATE-DOCS) |
-| guardrail sections (`coding`, `review`, `specify`) | `templates/guardrails.xml`, architect (ADD-GUARDRAILS), the abilities that read the section (`specify`: specify and spec-review) |
+| guardrail sections (`coding`, `review`, `specify`, `architect`, `orchestrator`) | `templates/guardrails.xml`, architect (ADD-GUARDRAILS, REVIEW-GUARDRAILS), the readers of the section (`specify`: specify and spec-review; `orchestrator`: `workflow.md` rule "Guardrails" and `SKILL.md`) |
 | architect handover (tech debt) | `<option name="architect">` in `workflow.md`, `idea.md` input |
 | `plan.json` structure or spec sections | `ui/src/model.ts` and its tests |
 

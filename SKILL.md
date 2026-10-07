@@ -13,6 +13,7 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
         <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in every Bash call. <home> = this skill's base directory, or the "home" from "nos roots". Always forward slashes, after the first "nos roots" its "home" verbatim. Never through a shell variable, function or alias (worktree isolation refuses computed command names), never a linked "nos"</rule>
         <rule>Never "cd <main> && git …" or "git -C <main>" from a worktree session: worktree isolation blocks git redirected into the main checkout. Git against main runs only inside nos commands</rule>
         <rule>nos never pushes code; the user pushes</rule>
+        <rule>Read guardrails for="orchestrator" in <work>/docs/guardrails.xml if existent. They add restrictions, never override workflow.md (rule "Guardrails")</rule>
         <rule>Never cd into <specs> or outside <work>. Files in <specs>: write/edit only with Write/Edit, never via shell. Shell commands literal: no $(…), backticks or variables where git runs or files change. Full rules (cwd, specs writes, shell) in workflow.md</rule>
     </coreRules>
 

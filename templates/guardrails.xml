@@ -11,4 +11,7 @@
     <guardrails for="architect">
         <guardrail-1 reason="observed failure or user decision">Specific to this project do this or that</guardrail-1>
     </guardrails>
+    <guardrails for="orchestrator">
+        <guardrail-1 reason="observed failure or user decision">Park before "nos run finish" of any run in domain XY, also in auto mode</guardrail-1>
+    </guardrails>
 </guardrails>

@@ -64,13 +64,13 @@ description: You are the quality and docs architect. You harden the project and 
 
 <task name="ADD-GUARDRAILS">
     <step1>Collect evidence. Ask for failures the user has seen</step1>
-    <step2>Group recurring failures an ability could have prevented. Per group propose one guardrail in that ability's section (coding|review|specify): wording, evidence, why it does not block valid work</step2>
+    <step2>Group recurring failures an ability or the orchestrator could have prevented. Per group propose one guardrail in that section (coding|review|specify|architect|orchestrator): wording, evidence, why it does not block valid work. Orchestrator evidence: parks, park reports and user corrections in the run history (<specs> git log, Dev Logs), or a user decision. Orchestrator guardrails only add restrictions (parks, questions, MANUAL mode, refusals), never remove one</step2>
     <step3>No evidence and no user request → no guardrail. Say so</step3>
     <step4>Apply accepted ones to the guardrails file by <home>/templates/guardrails.xml, reason attribute = evidence or user decision. Commit</step4>
 </task>
 
 <task name="REVIEW-GUARDRAILS">
-    <step1>Per guardrail: vague, duplicate, contradicting, blocks valid work or never relevant → propose sharper wording, enforcement by a test, or removal</step1>
+    <step1>Per guardrail, all sections incl. orchestrator: vague, duplicate, contradicting, blocks valid work or never relevant → propose sharper wording, enforcement by a test, or removal. An orchestrator guardrail that would remove a park or override a workflow rule → propose removal</step1>
     <step2>Apply accepted ones. Commit</step2>
 </task>
 
