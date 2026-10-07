@@ -108,3 +108,21 @@ test("execCommand stdio 'log': output to <specs>/.runs/logs/<run>/<name>.log, re
   });
   assert.match(readFileSync(result.log, 'utf8'), /^installed/);
 });
+
+test('execCommand: the command never sees the caller NODE_ENV or run token', async (t) => {
+  const saved = { NODE_ENV: process.env.NODE_ENV, NOS_RUN_TOKEN: process.env.NOS_RUN_TOKEN };
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  Object.assign(process.env, { NODE_ENV: 'development', NOS_RUN_TOKEN: 'abcd1234' });
+  const show = `node -e "console.log([process.env.NODE_ENV, process.env.NOS_RUN_TOKEN].join(','))"`;
+  const { roots } = project(t, { install: show });
+
+  const result = await execCommand(roots, 'install', { stdio: 'log' });
+
+  assert.equal(result.code, 0);
+  assert.match(readFileSync(result.log, 'utf8'), /^,\r?\n/);
+});

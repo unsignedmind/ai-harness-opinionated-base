@@ -251,7 +251,7 @@ Flips a whole run in one write per file. The domain comes from the run file (els
 nos gate [--e2e] [--root <dir>]
 ```
 
-Runs the `quality-tools` of work's `nos.config.json` in the work root, in order: `test`, `lint`, `format-check`, `typecheck`, each `additional` entry (a command string, named `additional-<n>`, or `{ "name", "cmd" }`), then `e2e` (only with `--e2e`). Every tool runs, also after a failure. Each runs in a shell with `NOS_HOME`; only e2e runs under a slot lease with `NOS_SLOT=<n>`. Full output goes to `<specs>/.runs/logs/<run>/<tool>.log` (`<run>` = the run of this worktree, else `main`), the result carries the last 60 lines. No tool configured at all (e2e counts only with `--e2e`) → exit 1 "quality tools are not set up".
+Runs the `quality-tools` of work's `nos.config.json` in the work root, in order: `test`, `lint`, `format-check`, `typecheck`, each `additional` entry (a command string, named `additional-<n>`, or `{ "name", "cmd" }`), then `e2e` (only with `--e2e`). Every tool runs, also after a failure. Each runs in a shell with `NOS_HOME` and without the caller's `NODE_ENV`, `NOS_SLOT` and `NOS_RUN_TOKEN` (a session's `NODE_ENV=development` would switch build tools into another mode); only e2e runs under a slot lease with `NOS_SLOT=<n>`. Full output goes to `<specs>/.runs/logs/<run>/<tool>.log` (`<run>` = the run of this worktree, else `main`), the result carries the last 60 lines. No tool configured at all (e2e counts only with `--e2e`) → exit 1 "quality tools are not set up".
 
 - Timeout: a tool running longer than `quality-tools.timeout` minutes (default 30) is killed with its process tree: `status: "fail"`, `timedOut: true`. `signal` is the signal that ended a tool (else `null`).
 - Ctrl+C / SIGTERM: the running tool's tree is killed, the e2e lease released, exit 1 "gate interrupted".
@@ -279,7 +279,7 @@ $ nos gate
 nos exec <install|dev|deploy-test> [--root <dir>]
 ```
 
-Runs a `project-commands` entry of work's `nos.config.json` in a shell in the work root, stdio inherited (no JSON), `NOS_HOME` set. The exit code is the command's. `dev` takes a slot lease (`NOS_SLOT=<n>`) and holds it until the server exits; SIGINT/SIGTERM stop the server's process tree (`taskkill /T /F` on Windows, the process group elsewhere, `src/proc.js`), then the lease is released and the exit code is 130 (SIGINT) / 143 (SIGTERM). A `null` command → exit 1, an unknown name → 2, no slot within `slotWait` → 7. A dev lease taken over from a dead process is reported on stderr.
+Runs a `project-commands` entry of work's `nos.config.json` in a shell in the work root, stdio inherited (no JSON), `NOS_HOME` set, the caller's `NODE_ENV`, `NOS_SLOT` and `NOS_RUN_TOKEN` removed. The exit code is the command's. `dev` takes a slot lease (`NOS_SLOT=<n>`) and holds it until the server exits; SIGINT/SIGTERM stop the server's process tree (`taskkill /T /F` on Windows, the process group elsewhere, `src/proc.js`), then the lease is released and the exit code is 130 (SIGINT) / 143 (SIGTERM). A `null` command → exit 1, an unknown name → 2, no slot within `slotWait` → 7. A dev lease taken over from a dead process is reported on stderr.
 
 `execCommand(roots, name, { stdio: 'log' })` (for `run start`'s install) writes the output to `<specs>/.runs/logs/<run>/<name>.log` and resolves with `{ code, log }`.
 

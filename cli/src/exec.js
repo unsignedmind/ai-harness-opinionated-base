@@ -3,8 +3,7 @@ import { closeSync, openSync } from 'node:fs';
 import path from 'node:path';
 import { FAILED, NosError, USAGE } from './exit-codes.js';
 import { logDirOf } from './gate.js';
-import { gitEnv } from './git.js';
-import { killTree } from './proc.js';
+import { killTree, toolEnv } from './proc.js';
 import { projectCommands } from './project-config.js';
 import { slash } from './roots.js';
 import { withSlot } from './slots.js';
@@ -74,8 +73,7 @@ export async function execCommand(
   if (typeof cmd !== 'string' || !cmd.trim()) {
     throw new NosError(FAILED, `project-commands.${name} is not configured in nos.config.json. Run setup`);
   }
-  const env = { ...gitEnv(process.env), NOS_HOME: roots.home };
-  delete env.NOS_SLOT;
+  const env = toolEnv(roots.home);
   const toLog = stdio === 'log';
   const { runId, logDir } = logDirOf(roots, run, { create: toLog });
   const log = toLog ? path.join(logDir, `${name}.log`) : null;

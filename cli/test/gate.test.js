@@ -94,6 +94,27 @@ test('runGate: tools run in the work root with NOS_HOME, NOS_SLOT only for e2e; 
   assert.equal(lockStatus(roots, 'slot-2').held, false, 'lease released');
 });
 
+test('runGate: a tool never sees the caller NODE_ENV, NOS_SLOT or run token', async (t) => {
+  const saved = {
+    NODE_ENV: process.env.NODE_ENV,
+    NOS_SLOT: process.env.NOS_SLOT,
+    NOS_RUN_TOKEN: process.env.NOS_RUN_TOKEN,
+  };
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  Object.assign(process.env, { NODE_ENV: 'development', NOS_SLOT: '9', NOS_RUN_TOKEN: 'abcd1234' });
+  const show = `node -e "console.log([process.env.NODE_ENV, process.env.NOS_SLOT, process.env.NOS_RUN_TOKEN].join(','))"`;
+  const { roots } = project(t, { test: show });
+
+  const result = await runGate(roots);
+
+  assert.equal(result.tools[0].tail, ',,');
+});
+
 test('runGate --e2e with e2e null reports it not-configured and takes no slot', async (t) => {
   const { roots } = project(t, { test: pass('ok') });
   takeLock(roots, 'slot-1', { token: 'other' });

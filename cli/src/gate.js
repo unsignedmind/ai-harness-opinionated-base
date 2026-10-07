@@ -2,8 +2,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { FAILED, NosError } from './exit-codes.js';
-import { gitEnv } from './git.js';
-import { killTree } from './proc.js';
+import { killTree, toolEnv } from './proc.js';
 import { qualityTools } from './project-config.js';
 import { slash } from './roots.js';
 import { parseRunId, runIdOf, runOfWorktree, runsDir } from './runs.js';
@@ -11,7 +10,8 @@ import { withSlot } from './slots.js';
 
 // nos gate: the quality tools of work's nos.config.json, in order test, lint, format-check, typecheck,
 // additional[], then e2e (only with e2e: true). Every tool runs, also after a failure. Each runs in a shell
-// in the work root with NOS_HOME (and NOS_SLOT for e2e, the only tool under a slot lease). Full output goes to
+// in the work root with NOS_HOME (and NOS_SLOT for e2e, the only tool under a slot lease), never with the
+// caller's NODE_ENV or run token (proc.js toolEnv). Full output goes to
 // <specs>/.runs/logs/<run|main>/<tool>.log, the result carries its last TAIL_LINES lines. A tool running longer
 // than quality-tools.timeout minutes (default 30) is killed with its process tree and fails (timedOut).
 export const GATE_TOOLS = Object.freeze(['test', 'lint', 'format-check', 'typecheck']);
@@ -67,8 +67,7 @@ const notConfigured = (name) => ({
 function runTool(roots, tool, logDir, ctx, slot) {
   if (!tool.cmd) return Promise.resolve(notConfigured(tool.name));
   const log = path.join(logDir, `${tool.name}.log`);
-  const env = { ...gitEnv(process.env), NOS_HOME: roots.home };
-  delete env.NOS_SLOT;
+  const env = toolEnv(roots.home);
   if (slot != null) env.NOS_SLOT = String(slot);
   return new Promise((resolve) => {
     const fd = openSync(log, 'w');
