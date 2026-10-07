@@ -585,6 +585,37 @@ test('details view: the switch shows the pushed steps of the tab, merged by id; 
   expect(log.querySelector('details')).toBeNull();
 });
 
+test('details view: another initial list on the same stream (the transcript moved) replaces the steps', async () => {
+  const { toggle, dialog } = setup({ state: { key: A, server: true, runner: true, tabs: [tabOf(A)] } });
+  await tick();
+  FakeES.last!.emit('sessions', { sessions: [tabOf(A)], runner: true });
+  toggle.click();
+  dialog.querySelector<HTMLElement>('[data-chat="view"][data-view="details"]')!.click();
+  const steps = FakeES.steps!;
+  steps.emit('items', {
+    items: [
+      step('u1', 'user', { text: 'Go' }),
+      step('t1', 'tool', { summary: 'Bash: ls', state: 'running', output: null }),
+    ],
+    initial: true,
+    truncated: false,
+  });
+  steps.emit('items', {
+    items: [
+      step('u1', 'user', { text: 'Go' }),
+      step('t1', 'tool', { summary: 'Bash: ls', state: 'ok', output: 'a' }),
+      step('x', 'text', { text: 'Done.' }),
+    ],
+    initial: true,
+    truncated: false,
+  });
+  const log = dialog.querySelector('.chat-log')!;
+  expect(log.querySelectorAll('details.tr-tool').length).toBe(1);
+  expect(log.querySelector<HTMLElement>('details.tr-tool')!.dataset.state).toBe('ok');
+  expect(log.querySelectorAll('.msg.agent .t').length).toBe(1);
+  expect(steps.closed).toBe(false);
+});
+
 test('a subagent in view: back button instead of the tabs, its own steps, messages go through Claude, back restores', async () => {
   const { calls, toggle, dialog } = setup({ state: { key: A, server: true, runner: true, tabs: [tabOf(A)] } });
   await tick();

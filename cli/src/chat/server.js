@@ -299,7 +299,9 @@ export function createChatServer({
 
   // Details view: the transcript of a tab's Claude Code session, or of one of its subagents
   // (?agent=<agentId> or ?tool=<tool_use id>), as `items` events: first the last steps, then each
-  // new or changed step. Waits for the session to get its Claude Code id (first message).
+  // new or changed step. Waits for the session to get its Claude Code id (first message). Follows the
+  // transcript when Claude Code moves it to another project folder (Enter/ExitWorktree): the steps
+  // come again as an initial list.
   function transcriptEvents(res, q) {
     const key = q.get('key') ?? '';
     const agentId = q.get('agent') || null;
@@ -314,10 +316,17 @@ export function createChatServer({
     const follow = () => {
       const s = store.get(key);
       if (!s?.claudeSession) return false;
-      const main = transcriptFile(root, s.claudeSession, claudeEnv);
-      const file = agentId || toolUseId ? agentFile(main, { agentId, toolUseId }) : main;
+      const sid = s.claudeSession;
+      const locate = () => {
+        const main = transcriptFile(root, sid, claudeEnv);
+        return agentId || toolUseId ? agentFile(main, { agentId, toolUseId }) : main;
+      };
+      const file = locate();
       if (!file) return false;
-      tail = tailTranscript(file, (items, info) => send(res, 'items', { items, ...info }), { rel: relTo(root) });
+      tail = tailTranscript(file, (items, info) => send(res, 'items', { items, ...info }), {
+        rel: relTo(root),
+        locate,
+      });
       return true;
     };
     if (!follow()) {

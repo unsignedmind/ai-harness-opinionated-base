@@ -188,14 +188,47 @@ export function createCondenser({ rel = (t) => t } = {}) {
 
 // Follows a transcript: onItems(items, { initial, truncated }) first with the last `limit` items,
 // then with each change. Waits for a file that does not exist yet. Returns close().
-export function tailTranscript(file, onItems, { limit = 400, rel, pollMs = 1000 } = {}) {
-  const condenser = createCondenser({ rel });
+// Claude Code moves a session's transcript (with its subagents folder) to another project folder
+// when the session changes its cwd (EnterWorktree, ExitWorktree): with `locate` (() => the path the
+// transcript has now), a poll that misses the file asks it, and when it is elsewhere the tail
+// switches to it and starts over with an initial list, as a reconnect would.
+// No fs.watch on Windows: it holds a handle on the file's folder, so Claude Code could not move the
+// session folder a watched subagent transcript is in (EPERM); a shorter poll instead.
+const WATCH = process.platform !== 'win32';
+export function tailTranscript(
+  file,
+  onItems,
+  { limit = 400, rel, pollMs = WATCH ? 1000 : 500, locate, watch: useWatch = WATCH } = {},
+) {
+  let condenser = createCondenser({ rel });
   let offset = 0;
   let rest = '';
   let started = false;
   let closed = false;
   let watcher = null;
 
+  const moved = () => {
+    if (!locate || existsSync(file)) return;
+    let next;
+    try {
+      next = locate();
+    } catch {
+      return;
+    }
+    if (!next || next === file || !existsSync(next)) return;
+    // a watch on the old path is stale: drop it, read() watches the new one
+    try {
+      watcher?.close();
+    } catch {
+      // already gone
+    }
+    watcher = null;
+    file = next;
+    condenser = createCondenser({ rel });
+    offset = 0;
+    rest = '';
+    started = false;
+  };
   const read = () => {
     if (closed) return;
     let fd;
@@ -234,7 +267,7 @@ export function tailTranscript(file, onItems, { limit = 400, rel, pollMs = 1000 
     } finally {
       closeSync(fd);
     }
-    if (!watcher) {
+    if (useWatch && !watcher) {
       try {
         watcher = watch(file, () => read());
         watcher.on('error', () => {});
@@ -248,7 +281,10 @@ export function tailTranscript(file, onItems, { limit = 400, rel, pollMs = 1000 
     const truncated = items.length > limit;
     onItems((truncated ? items.slice(-limit) : items).map((i) => ({ ...i })), { initial: true, truncated });
   }
-  const timer = setInterval(read, pollMs);
+  const timer = setInterval(() => {
+    moved();
+    read();
+  }, pollMs);
   read();
   return {
     close() {

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { request } from '../../src/chat/client.js';
 import { allowed, hostOf } from '../../src/chat/guard.js';
@@ -419,6 +419,36 @@ test('transcript-events: the tab session steps, then appended ones; a subagent b
   );
   assert.equal((await sse(port, `/transcript-events?key=${key}&agent=../x`, () => true)).status, 400);
   assert.equal((await sse(port, `/transcript-events?key=nope`, () => true)).status, 400);
+});
+
+test('transcript-events: a transcript Claude Code moves to the worktree folder (EnterWorktree) is followed on the same stream', async (t) => {
+  const home = makeTempRoot(t);
+  const { port, key, store, dir } = await start(t, { claudeEnv: { CLAUDE_CONFIG_DIR: home } });
+  const sid = '76275042-a4c6-49b2-847a-44d65cf907b9';
+  const folder = path.join(home, 'projects', dir.replace(/[^a-zA-Z0-9]/g, '-'));
+  const wt = path.join(home, 'projects', `${dir}/.claude/worktrees/quick-68`.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(folder, { recursive: true });
+  mkdirSync(wt, { recursive: true });
+  const line = (j) => JSON.stringify(j) + '\n';
+  writeFileSync(path.join(folder, `${sid}.jsonl`), line({ type: 'user', uuid: 'u1', message: { content: 'hi' } }));
+  store.update(key, { claudeSession: sid });
+
+  const stream = sse(port, `/transcript-events?key=${key}`, (g) => g.length >= 2);
+  setTimeout(() => {
+    renameSync(path.join(folder, `${sid}.jsonl`), path.join(wt, `${sid}.jsonl`));
+    appendFileSync(
+      path.join(wt, `${sid}.jsonl`),
+      line({ type: 'assistant', uuid: 'a1', message: { content: [{ type: 'text', text: 'in the worktree' }] } }),
+    );
+  }, 100);
+  const { got } = await stream;
+  assert.deepEqual(
+    got.map((g) => [g.data.initial, g.data.items.map((i) => i.text)]),
+    [
+      [true, ['hi']],
+      [true, ['hi', 'in the worktree']],
+    ],
+  );
 });
 
 test('runner: a nos run of a tab (onRun) is stored, shown in the tabs, the session and a sessions event', async (t) => {
