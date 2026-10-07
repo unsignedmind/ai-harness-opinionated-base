@@ -7,6 +7,7 @@
     <rule>Abilities carry these three rules (cwd, specs writes, shell) in their own coreRules: subagents read only their ability file</rule>
     <rule>Pushing: nos never pushes code, the user pushes. No ability and no step of this workflow runs git push. Only "nos specs commit" pushes the specs repo, and only when "specs.remote" is set (opt-in backup)</rule>
     <rule>Guardrails: read guardrails for="orchestrator" in <work>/docs/guardrails.xml if existent, every time you run "nos roots" (start, after entering or leaving a worktree: the file is versioned per branch). They only add restrictions: extra parks, questions, MANUAL mode, refusals. They never remove a park or question and never override a rule of this workflow; conflict → the workflow rule wins, report the guardrail to the user. A guardrail decides something → name it in the report or park ("guardrail-<n>: …"). Never pass this section to subagents</rule>
+    <rule>Lessons → guardrail proposals: you would save a memory (a user correction or decision, a recurring failure, a project convention) → never write a memory. Collect a guardrail proposal instead: section (coding|review|specify|plan|architect|orchestrator), wording, reason, why it does not block valid work. Reason required: the user's words and the date ("user decision 2026-10-07: …") or an observed failure and its reference (step id, park, Dev Log entry, review finding). No proposal for a guess, a one-off, or what a guardrail or the docs already say. A lesson about nos itself, not the project → report it to the user, no proposal. Never ask mid-step: ask by block "proposals" at the next park (park step2) or final report (option run step6, cycle "finish" step1 and step3, option plan step4, the report of any other option), also in AUTO. Keep pending proposals in the park report too, so they survive a compacted context</rule>
     <rule>Run every ability in a new subagent. Pass it the ability skill path, home, work, specs and its inputs. Exception: "chat" runs in the main session</rule>
     <rule>Chat in relay mode ("chat": { "runner": false }) and open → every report and question to the user also goes to the chat ("nos chat reply"), answers come back through "nos chat await". Keep an await running in the background whenever the turn ends. Default runner mode: the chat answers with its own Claude Code sessions, nothing to do here</rule>
     <rule>Change statuses only with "nos set-status --domain <domain> [--phase <id>] [--step <id>] --status <status>". Valid statuses: <home>/templates/status.xml. merged and discarded are never set by you: only "nos run finish" and "nos run abandon" set them. Never call "nos set-status --run"</rule>
@@ -136,7 +137,7 @@
         </question>
     </step2>
     <step3>Run ability "plan" (action create) with the domain and the sizing. nos specs commit --domain <domain> -m "plan: <domain>"</step3>
-    <step4>Report the phases
+    <step4>Report the phases. Pending guardrail proposals → block "proposals" first
         <question>Run it now?
             <choice key="YES">Run the plan → option "run" with this domain</choice>
             <choice key="CHANGE">Change the split → ask what to change. Run ability "plan" (action revise) with the domain and the changes. nos specs commit --domain <domain> -m "plan: revise <domain>". Repeat step4</choice>
@@ -181,7 +182,7 @@
         <status target="plan" from="in-progress" to="done"/>
     </step5>
     <step6 resume-at="done">
-        <do>Report. Then
+        <do>Report. Pending guardrail proposals → block "proposals" (still in the worktree). Then
             <question>The plan is done on its branch. Integrate it into main now?
                 <choice key="YES">Integrate → cycle "finish"</choice>
                 <choice key="NO">Stop here. The run stays; RUN offers it again</choice>
@@ -191,7 +192,7 @@
 </option>
 
 <cycle name="finish">
-    <step1>nos run finish --token <token>. It locks, checks main, syncs, runs the full gate (e2e included when configured) and merges ff-only. Exit 0 → step3. Exit 1 → step2. Other codes → exit code table (3: integrate, then repeat step1; 4: wait for the merge lock)</step1>
+    <step1>Pending guardrail proposals → block "proposals" first, still in the worktree: the architect's commit lands on the run branch and merges with it. Then nos run finish --token <token>. It locks, checks main, syncs, runs the full gate (e2e included when configured) and merges ff-only. Exit 0 → step3. Exit 1 → step2. Other codes → exit code table (3: integrate, then repeat step1; 4: wait for the merge lock)</step1>
     <step2>Exit 1:
         <do>Gate fail (gate JSON in the details) → stop, report run id and token, the failing tools and their tails. Ask only this question (not the question of park step2)
             <question>The gate failed while integrating. How do you want to continue?
@@ -203,7 +204,7 @@
         <do>Main busy ("details.busy": a merge, rebase, cherry-pick or revert in progress in main), main dirty ("details.files" on paths the branch touches), main checkout on another branch ("main checkout is on <x>, expected <mainBranch>") or "git merge --ff-only … refused twice" → park, report the error and the details. GO → repeat step1 after the user fixed main</do>
         <do>Other → park, report the error</do>
     </step2>
-    <step3>Merged → ExitWorktree action=keep. nos run cleanup --token <token> (from main the token finds the run). nos roots. Report: merged into <mainBranch>, worktree and branch removed</step3>
+    <step3>Merged → ExitWorktree action=keep. nos run cleanup --token <token> (from main the token finds the run). nos roots. Report: merged into <mainBranch>, worktree and branch removed. Proposals collected since step1 → block "proposals" (now on main)</step3>
     <step4>Cleanup refused: exit 1 "a process … still uses <wt>" (e.g. a dev server) → report it, repeat "nos run cleanup --token <token>" after the user stopped it. Exit 5 → exit code table</step4>
 </cycle>
 
@@ -277,9 +278,20 @@
     </step7>
 </cycle>
 
+<proposals>
+    <rule>Asked by rule "Lessons → guardrail proposals", before any other question of that park or report. No pending proposal → skip</rule>
+    <question>Lessons from this work, proposed as guardrails. Which should the architect add?
+        <choice key="P<n>">One choice per proposal, numbered P1, P2…: section, wording, reason, why it does not block valid work. Several letters or keys accept several</choice>
+        <choice key="ALL">Accept all</choice>
+        <choice key="NO">Drop all. Nothing is written, no memory either</choice>
+    </question>
+    <do>Accepted → run ability "architect" with task ADD-GUARDRAILS and the accepted proposals, in this session's cwd. Inside a run: its commit lands on the run branch and reaches main with the merge. Outside a run: on main (listed exception). No specs commit for it. Relay its questions (only about problem proposals) and the answers back. Report what it added</do>
+    <do>Not accepted → dropped. Then continue with the park or report you came from</do>
+</proposals>
+
 <park>
-    <step1>Stop. Report run id and token, target, status and reason. Specified → summarize the description and ACs in simple words. Human validation → explain in simple steps how the user verifies. No review ran → derive the steps from the ACs of the step or of the phase's steps</step1>
-    <step2>
+    <step1>Stop. Report run id and token, target, status, reason and pending guardrail proposals. Specified → summarize the description and ACs in simple words. Human validation → explain in simple steps how the user verifies. No review ran → derive the steps from the ACs of the step or of the phase's steps</step1>
+    <step2>Pending guardrail proposals → block "proposals" first
         <question>How do you want to continue?
             <choice key="GO">Continue with the next step of the cycle</choice>
             <choice key="AUTO|MANUAL">Switch to the other mode and continue. Show only the mode not active</choice>
@@ -300,7 +312,7 @@
                 <do>nos specs commit --run <run> -m "<run>: pause". ExitWorktree action=keep. End. The run, its worktree and branch stay. A quick step keeps its status and continues via QUICK or RUN</do>
             </choice>
             <choice key="ABANDON">Drop the plan or quick step: its branch and worktree are deleted, the specs stay as history with status discarded
-                <do>Ask YES/NO to confirm. YES → ExitWorktree action=keep. nos run abandon --token <token>. nos roots. Report. Its cleanup part fails (exit 1, e.g. a dev server holds the folder) → report it, repeat "nos run cleanup --token <token>" after the user stopped it</do>
+                <do>Ask YES/NO to confirm. YES → ExitWorktree action=keep. nos run abandon --token <token>. nos roots. Report. Guardrails added at this park died with the branch → run ability "architect" again with the same proposals (now on main). Its cleanup part fails (exit 1, e.g. a dev server holds the folder) → report it, repeat "nos run cleanup --token <token>" after the user stopped it</do>
             </choice>
         </question>
     </step2>

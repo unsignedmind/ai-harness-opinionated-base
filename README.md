@@ -170,6 +170,22 @@ G - End [DONE]                                          (after a task ran)
 
 After each task the menu comes back. Every change is proposed first and committed on its own with prefix `architect: ` (on main when started from the menu, a listed exception). Bugs it finds go into the Tech debt section of the architecture doc. At the end nos offers to start an idea for them.
 
+### Lessons become guardrails
+
+nos never saves a Claude Code memory. When you correct it, decide something for the project, or the same failure keeps coming back, the orchestrator writes it down as a **guardrail proposal**: the section (`coding`, `review`, `specify`, `plan`, `architect` or `orchestrator`), the wording, the reason (your words and the date, or the failure with its step, park, Dev Log entry or review finding) and why it does not block valid work. Guesses, one-offs and things already in a guardrail or the docs get no proposal. A lesson about nos itself is just reported to you.
+
+It never interrupts a step for this. It asks at the next park or final report, also in AUTO:
+
+```
+Lessons from this work, proposed as guardrails. Which should the architect add?
+A - coding: … (reason, why it does not block valid work) [P1]
+B - plan: … [P2]
+C - Accept all [ALL]
+D - Drop all. Nothing is written, no memory either [NO]
+```
+
+Accepted ones go to the architect (task ADD-GUARDRAILS). It checks each (section, wording, reason, duplicates, contradictions, valid work blocked), adds the good ones to `docs/guardrails.xml` and commits `architect: guardrails from run lessons`. It asks you only about problem ones. Inside a run the commit lands on the run branch and reaches main with the merge; outside a run it goes on main (a listed exception). Subagents read their section, so the lesson reaches the agent that needs it, versioned with the code.
+
 ### Modes
 
 | | AUTO | MANUAL |
@@ -196,6 +212,8 @@ C - Give feedback on what is wrong [REJECT]      (only when something is specifi
 D - Pause the plan [PAUSE]
 E - Drop the plan or quick step [ABANDON]
 ```
+
+Pending guardrail proposals are asked first (see "Lessons become guardrails").
 
 - **GO**: continue.
 - **AUTO/MANUAL**: switch the mode and continue.
@@ -378,7 +396,7 @@ Not part of the plan flow. Started from the menu (QUICK). Gets your intent (a ro
 
 ### abilities/plan.md: implementation architect and planner 🏗️
 
-Reads `docs/architecture.md` if it exists and respects its structure and rules. Two actions:
+Reads `docs/architecture.md` if it exists and respects its structure and rules. Reads the `plan` guardrails in `docs/guardrails.xml` in every action: they add constraints to splitting and flags, but never override your sizing or the `review-needed` rules unless they say so. Three actions:
 - **create**: needs the domain and its `idea.md`. Splits the idea into phases and steps that respect the existing architecture, following `templates/plan.json`. All statuses are `open`, and every phase and step gets a slug. Pure documentation steps, and phases that are only documentation and human verification (with all their steps), get `review-needed: false`. A phase with exactly one step always gets `review-needed: false` on the phase only. Saves with `nos create-plan`, which creates phase folders and empty step spec files and fills `spec-file`.
 - **extend**: used after a phase is rejected. Inserts a fix phase directly after the rejected one, with the issues split into steps and `human-validation-needed: true`, and `review-needed` set by the same rules as create. Saves with `nos update-plan`.
 - **revise**: used when you pick `CHANGE` after the split is shown. Applies your changes (move, merge, split, add or remove phases and steps), reapplies the `review-needed` rules and saves with `nos update-plan`.
@@ -464,8 +482,8 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
 | --- | --- |
 | CREATE-DOCS | Derives a project template (`docs/architecture-template.md`) from `templates/architecture-sections.md`: from the code's project type and stack, or for an empty project from `idea.md` or your intent. You approve the template, then it writes `docs/architecture.md` exactly by it |
 | UPDATE-DOCS | Checks each section against the code, fixed tech debt and `(architecture)` Dev Log notes. Proposes one fix per drift. A new section changes the template first |
-| ADD-GUARDRAILS | Collects observed failures (review findings, `(!)` markers, `(reviewer)` Dev Log entries, fix commits) and proposes one guardrail per recurring failure, with the evidence as `reason`. No evidence, no guardrail |
-| REVIEW-GUARDRAILS | Proposes sharper wording, enforcement by a test, or removal for vague, duplicate, contradicting, blocking or never relevant guardrails |
+| ADD-GUARDRAILS | Collects observed failures (review findings, `(!)` markers, `(reviewer)` Dev Log entries, fix commits, plan revisions and fix phases) and proposes one guardrail per recurring failure, with the evidence as `reason`. No evidence, no guardrail. Started by the orchestrator with proposals you already accepted: skips the search, checks each, applies the good ones without asking again and asks only about problem ones |
+| REVIEW-GUARDRAILS | Proposes sharper wording, enforcement by a test, or removal for vague, duplicate, contradicting, blocking or never relevant guardrails, in all six sections |
 | TESTS | Investigates the code and existing tests, then summarizes needed tests grouped as unit logic, unit ui, unit a11y, integration, e2e and architecture, with tooling present or a suggested library. Only tests that add value. You approve, also partly. Then group by group: tooling, and per test: fail first, see it fail, final version, see it pass |
 | MEASURE | Lists the `architect` commits. For the one you pick it compares the failures it targets before and after, and recommends keep, sharpen or remove |
 
@@ -489,7 +507,7 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
 - **review-template.md**: the Review section and phase `review.md`. It has a Date and Result line, a short summary, Criteria (one line per AC), Findings (`( )` with id, weight, category, location, evidence, fix and fix kind) and Fixes (written by review-fixing, referencing the commit prefix). Rules for weights and fix kinds are at the bottom.
 - **architecture-sections.md**: catalog for a project's architecture template. Core sections (Overview, Stack & commands, Structure, Rules, Testing, Decisions, Tech debt), optional sections with "include when", profiles per project type, and the template format.
 - **test-types.md**: test groups with when they add value and tooling examples, architecture rule ideas, enforcement mechanisms (lint rule, dependency graph, test) and pitfalls.
-- **guardrails.xml**: structure of `docs/guardrails.xml`. One section per reader: `coding` (develop, integrate), `review` (both reviewers), `specify` (specify, spec-review), `architect`, `orchestrator` (the main session running `workflow.md`). Every guardrail has a `reason`. Orchestrator guardrails only add restrictions (extra parks, questions, MANUAL mode, refusals); they never remove a park and never override a workflow rule, the workflow wins on conflict. The orchestrator re-reads them after entering or leaving a worktree (the file is versioned per branch) and names a guardrail when it applies.
+- **guardrails.xml**: structure of `docs/guardrails.xml`. One section per reader: `coding` (develop, integrate), `review` (both reviewers), `specify` (specify, spec-review), `plan` (plan), `architect`, `orchestrator` (the main session running `workflow.md`). Every guardrail has a `reason`. Orchestrator guardrails only add restrictions (extra parks, questions, MANUAL mode, refusals); they never remove a park and never override a workflow rule, the workflow wins on conflict. The orchestrator re-reads them after entering or leaving a worktree (the file is versioned per branch) and names a guardrail when it applies.
 
 ### Markers
 
@@ -545,7 +563,7 @@ Used in ACs, the Task List and review findings:
 
 | Block | Purpose |
 | --- | --- |
-| `<rules>` | Invocation and roots. Runs, token, specs commits after every ability, code commit prefixes. Every ability runs in a new subagent. Statuses change only via `nos set-status`. Questions from subagents are relayed to you and the answers sent back to the same subagent. Reports use simple language. Every question uses the `A - text [KEY]` format |
+| `<rules>` | Invocation and roots. Runs, token, specs commits after every ability, code commit prefixes. Orchestrator guardrails; lessons become guardrail proposals, never memories. Every ability runs in a new subagent. Statuses change only via `nos set-status`. Questions from subagents are relayed to you and the answers sent back to the same subagent. Reports use simple language. Every question uses the `A - text [KEY]` format |
 | `<exitCodes>` | What to do on each nos exit code: 3 integrate (blocked → DECIDE), 4 take over or stop (merge lock: wait and retry), 6 switch, wait or stop, 5 commit the step's leftover files or park, 7 and 1 park |
 | `<start>` | `nos roots`, the setup check, resume of a run when the session sits in its worktree, and the IDEA / PLAN / RUN / QUICK / ARCHITECT / SETUP / CHAT menu |
 | `<option name="idea">` | Runs idea, then offers PLAN |
@@ -557,7 +575,8 @@ Used in ACs, the Task List and review findings:
 | `<cycle name="finish">` | `nos run finish`, leave the worktree, `nos run cleanup` |
 | `<cycle name="phase">` | Runs all steps, then reviews the phase as a whole |
 | `<cycle name="step">` | specify → spec-review → develop → review-pessimistic → review-fixing |
-| `<park>` | Stop, explain, and ask GO / switch mode / REJECT / PAUSE / ABANDON |
+| `<proposals>` | Asks pending guardrail proposals (P1… / ALL / NO) at a park or final report; accepted ones go to architect ADD-GUARDRAILS |
+| `<park>` | Stop, explain, ask pending proposals, then GO / switch mode / REJECT / PAUSE / ABANDON |
 | `<resume>` | How to continue after an interruption |
 
 ---
@@ -639,7 +658,7 @@ Most changes touch more than one file. Before you finish a change, check these c
 | Spec Log markers `(specify)`, `(spec-review)` | specify, spec-review, develop (must not change it), the template |
 | Test Strategy section | the template, specify, spec-review, develop, review-pessimistic (tests pass) |
 | Dev Log marker `(architecture)` | develop, review-fixing, architect (UPDATE-DOCS) |
-| guardrail sections (`coding`, `review`, `specify`, `architect`, `orchestrator`) | `templates/guardrails.xml`, architect (ADD-GUARDRAILS, REVIEW-GUARDRAILS), the readers of the section (`specify`: specify and spec-review; `orchestrator`: `workflow.md` rule "Guardrails" and `SKILL.md`) |
+| guardrail sections (`coding`, `review`, `specify`, `plan`, `architect`, `orchestrator`) | `templates/guardrails.xml`, architect (ADD-GUARDRAILS, REVIEW-GUARDRAILS), `workflow.md` rule "Lessons → guardrail proposals", the readers of the section (`specify`: specify and spec-review; `plan`: plan; `orchestrator`: `workflow.md` rule "Guardrails" and `SKILL.md`) |
 | architect handover (tech debt) | `<option name="architect">` in `workflow.md`, `idea.md` input |
 | `plan.json` structure or spec sections | `ui/src/model.ts` and its tests |
 

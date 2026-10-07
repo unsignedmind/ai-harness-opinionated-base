@@ -8,6 +8,9 @@
     <guardrails for="specify">
         <guardrail-1 reason="observed failure or user decision">When AC contains XY to always add A</guardrail-1>
     </guardrails>
+    <guardrails for="plan">
+        <guardrail-1 reason="observed failure or user decision">UI work: e2e tests in their own step at the end of the phase</guardrail-1>
+    </guardrails>
     <guardrails for="architect">
         <guardrail-1 reason="observed failure or user decision">Specific to this project do this or that</guardrail-1>
     </guardrails>
