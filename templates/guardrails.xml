@@ -16,6 +16,6 @@
     </guardrails>
     <guardrails for="orchestrator">
         <guardrail-1 reason="observed failure or user decision">Park before "nos run finish" of any run in domain XY, also in auto mode</guardrail-1>
-        <guardrail-2 reason="user decision <date>: …">AUTO mode only: when the architect asks whether to apply its proposed architecture doc changes from the run's (architecture) notes, answer yes</guardrail-2>
+        <guardrail-2 reason="user decision YYYY-MM-DD: …">AUTO mode only: when the architect asks whether to apply its proposed architecture doc changes from the run's (architecture) notes, answer yes</guardrail-2>
     </guardrails>
 </guardrails>
