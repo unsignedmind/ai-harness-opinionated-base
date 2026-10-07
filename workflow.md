@@ -245,7 +245,7 @@
 </option>
 
 <cycle name="finish">
-    <step1>Pending guardrail proposals → block "proposals" first, still in the worktree: the architect's commit lands on the run branch and merges with it. Then nos run finish --token <token>. It locks, checks main, syncs, runs the full gate (e2e included when configured) and merges ff-only. Exit 0 → step3. Exit 1 → step2. Other codes → exit code table (3: integrate, then repeat step1; 4: wait for the merge lock)</step1>
+    <step1>Pending guardrail proposals → block "proposals" first, still in the worktree: the architect's commit lands on the run branch and merges with it. Then block "docs-update". Then nos run finish --token <token>. It locks, checks main, syncs, runs the full gate (e2e included when configured) and merges ff-only. Exit 0 → step3. Exit 1 → step2. Other codes → exit code table (3: integrate, then repeat step1; 4: wait for the merge lock)</step1>
     <step2>Exit 1:
         <do>Gate fail (gate JSON in the details) → stop, report run id and token, the failing tools and their tails. Ask only this question (not the question of park step2)
             <question>The gate failed while integrating. How do you want to continue?
@@ -351,6 +351,13 @@
     <do>Accepted → run ability "architect" with task ADD-GUARDRAILS and the accepted proposals, in this session's cwd. Inside a run: its commits land on the run branch and reach main with the merge. Outside a run: on main (listed exception). No specs commit for it. Relay its questions (only about problem proposals) and the answers back. Report one line per applied proposal: key, section, wording ("applied P1: coding — …"). Inside a run repeat these lines in every later park report of the run, so they survive a compacted context (ABANDON needs them)</do>
     <do>Not accepted → dropped. Then continue with the park or report you came from</do>
 </proposals>
+
+<docs-update>
+    <rule>Asked by cycle "finish" step1: after block "proposals", before nos run finish, still in the worktree. Skip when resuming a crashed finish (status merged: the merge already ran). Never in a POC</rule>
+    <do>Collect the Dev Log entries marked (architecture) in the run's step spec files: quick step → its "spec-file" in quick-steps.json; plan → the "spec-file" of every step in plan.json (relative to <specs>). Leave out entries already passed to the architect in this run (step1 repeated after integrate or a gate fix). None → skip</do>
+    <do>Run ability "architect" with task UPDATE-DOCS, the run mode (auto|manual) and the entries (spec path and entry text), in this session's cwd. Its commits "architect: …" land on the run branch and reach main with the merge. No specs commit</do>
+    <do>Relay its questions (rule "If a subagent returns questions"): AUTO and a matching standing answer → answer it (rule "Guardrails"). Otherwise ask the user and wait, also in AUTO. Report one line ("docs update: <n> changes committed" or "docs update: nothing to change") and repeat it in every later park report of the run</do>
+</docs-update>
 
 <park>
     <step1>Stop. Report run id and token, target, status and reason. Pending guardrail proposals by key only ("pending proposals: P1, P2, asked below"), the applied ones of this run by their lines. Specified → summarize the description and ACs in simple words. Human validation → explain in simple steps how the user verifies. No review ran → derive the steps from the ACs of the step or of the phase's steps</step1>
