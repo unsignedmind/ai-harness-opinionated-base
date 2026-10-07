@@ -74,6 +74,9 @@ export function createChatServer({
   runner = null,
   // where the transcripts of Claude Code are (CLAUDE_CONFIG_DIR), see transcript.js
   claudeEnv = process.env,
+  // runExists(run) -> false when the run file of a tab's run is gone (another session abandoned or cleaned it
+  // up): the tab's run is cleared. null: never checked (tests, relay without specs)
+  runExists = null,
   onStop = () => {},
 }) {
   const wake = new EventEmitter();
@@ -109,8 +112,23 @@ export function createChatServer({
     for (const res of streams.get(key) ?? []) send(res, event, data);
     for (const res of allStreams) send(res, event, { key, ...data });
   };
+  // A tab learns of its run's end only from its own run-abandon / run-cleanup result: a run another session
+  // ended (its run file is gone) is cleared here. A file existence check per tab with a run, no git.
+  function clearGoneRuns() {
+    if (!runExists) return;
+    for (const s of store.list()) {
+      let gone = false;
+      try {
+        gone = !!s.run && !runExists(s.run);
+      } catch {
+        // an unreadable run reference stays as it is
+      }
+      if (gone) store.update(s.key, { run: null });
+    }
+  }
   // open tabs, oldest first
   function sessionsView() {
+    clearGoneRuns();
     return store
       .list()
       .filter((s) => s.status !== 'ended')
@@ -420,9 +438,12 @@ export function createChatServer({
     }
     if (m === 'GET' && (k = /^\/events\/([^/]+)$/.exec(p))) return events(req, res, k[1]);
     if (m === 'GET' && p === '/transcript-events') return transcriptEvents(res, url.searchParams);
-    if (m === 'GET' && p === '/api/sessions')
-      return json(res, 200, { sessions: store.list(), tabs: sessionsView(), runner: !!runner });
+    if (m === 'GET' && p === '/api/sessions') {
+      const tabs = sessionsView();
+      return json(res, 200, { sessions: store.list(), tabs, runner: !!runner });
+    }
     if (m === 'GET' && (k = /^\/api\/session\/([^/]+)$/.exec(p))) {
+      clearGoneRuns();
       const s = session(k[1]);
       const { key, dir, name, status, endedBy, chat } = s;
       const run = s.run ?? null;

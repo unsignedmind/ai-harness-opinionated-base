@@ -2,7 +2,7 @@
 // project around the current directory (resolved like every nos command; from a worktree it is the chat of
 // main), so no command takes an id.
 import { X509Certificate } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -21,6 +21,7 @@ import { runHook } from './hook.js';
 import { launchBrowser } from './launch.js';
 import { chatConfig, ensureStateDir, files, chatRoots, keyOf, portOf, SPEC_UI_PORT, stateDirOf } from './paths.js';
 import { slash } from '../roots.js';
+import { runPath } from '../runs.js';
 import { createRunner } from './runner.js';
 import { createChatServer } from './server.js';
 import { createSessionStore } from './sessions.js';
@@ -133,6 +134,17 @@ function idleOf(env) {
   return Number(v) || 1800000;
 }
 
+// A tab's run ({ kind, id }) still has its run file <specs>/.runs/<kind>-<id>.json. Not a run id nos knows -> true
+// (left alone)
+export function runFileExists(roots, run) {
+  if (run?.kind == null || run?.id == null) return true;
+  try {
+    return existsSync(runPath(roots, `${run.kind}-${run.id}`));
+  } catch {
+    return true;
+  }
+}
+
 // root = main (already real)
 async function serve(roots, stateDir, port, { env, stderr }) {
   const root = roots.main;
@@ -148,6 +160,7 @@ async function serve(roots, stateDir, port, { env, stderr }) {
     version: VERSION,
     fingerprint: FINGERPRINT(),
     root,
+    runExists: (run) => runFileExists(roots, run),
     idleMs: idleOf(env),
     onStop: () => {
       removeServerJson(stateDir);

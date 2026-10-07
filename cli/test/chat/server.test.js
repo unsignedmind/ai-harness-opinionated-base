@@ -479,3 +479,32 @@ test('runner: a nos run of a tab (onRun) is stored, shown in the tabs, the sessi
   assert.equal(store.get(key).run, null);
   assert.equal((await call('GET', `/api/session/${key}`)).body.run, null);
 });
+
+test('a tab whose run file is gone (another session ended the run) loses its run in every view', async (t) => {
+  const alive = new Set(['quick-7']);
+  const { store, call, key } = await start(t, { runExists: (run) => alive.has(`${run.kind}-${run.id}`) });
+  const other = (await call('POST', '/api/sessions/new', { dir: store.get(key).dir })).body.key;
+  store.update(key, { run: { kind: 'poc', id: 'greeting-banner', domain: null } });
+  store.update(other, { run: { kind: 'quick', id: 7, domain: 'domain-1-a' } });
+
+  const { body } = await call('GET', '/api/sessions');
+  const runOf = (k) => body.tabs.find((tab) => tab.key === k).run;
+  assert.equal(runOf(key), null, 'poc-greeting-banner has no run file');
+  assert.deepEqual(runOf(other), { kind: 'quick', id: 7, domain: 'domain-1-a' }, 'quick-7 still runs');
+  assert.equal(body.sessions.find((s) => s.key === key).run, null);
+  assert.equal(store.get(key).run, null, 'cleared in the store');
+
+  alive.clear();
+  assert.equal((await call('GET', `/api/session/${other}`)).body.run, null);
+});
+
+test('runFileExists: the run file of a tab run decides; unknown run ids are left alone', async (t) => {
+  const { runFileExists } = await import('../../src/chat/commands.js');
+  const { makeRoots, writeFile } = await import('../helpers.js');
+  const roots = makeRoots(t);
+  writeFile(roots.specs, '.runs/poc-x.json', '{}');
+  assert.equal(runFileExists(roots, { kind: 'poc', id: 'x' }), true);
+  assert.equal(runFileExists(roots, { kind: 'quick', id: 3 }), false);
+  assert.equal(runFileExists(roots, { kind: 'odd', id: 'Y' }), true);
+  assert.equal(runFileExists(roots, { kind: null, id: null }), true);
+});

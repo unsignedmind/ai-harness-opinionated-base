@@ -754,7 +754,7 @@ Untested / unfinished:
 - Plan runs not live-tested in AUTO mode yet (quick runs were, incl. parallel runs and the conflict → integrate path, in a sandbox clone; plan runs only via the CLI scenario tests).
 - Logs never pruned: `<specs>/.runs/logs/<run>/` survives `run cleanup`; gate from main logs to `logs/main/`. An empty `.claude/worktrees/` stays. Ignored, harmless.
 - Specs only on this disk unless `specs.remote`; not visible in PRs/CI.
-- Chat run detection misses `nos run start` in a background shell call (`run_in_background`) and runs started by subagents; a tab's `run` stays set after `finish` until `cleanup`/`abandon` output is seen.
+- Chat run detection misses `nos run start` in a background shell call (`run_in_background`) and runs started by subagents; a tab's `run` stays set after `finish` until `cleanup`/`abandon` output is seen, or until its run file is gone (the chat server clears a tab's `run` whose `<specs>/.runs/<run>.json` no longer exists whenever it lists the tabs, e.g. a run another tab abandoned).
 - `nos lock take` by hand records the short-lived CLI pid → `pidAlive: false` is normal; such a lock is never reclaimed (only slot leases are).
 - Worktrees under `.claude/worktrees/` that are no nos run (made by hand or by other tools) are ignored by nos and spec-ui.
 - "One run per session" is a workflow rule only; the CLI cannot see sessions.

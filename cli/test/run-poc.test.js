@@ -342,6 +342,15 @@ test('front matter: a BOM and quoted values are read; a file without front matte
     '---\r\nprocessed: idea domain-2-x\r\n---\r\n# POC result: Bare\r\n\r\n## Requirements\r\n',
   );
   assert.equal(listResults(roots).results[0].processed, 'idea domain-2-x');
+
+  // the template: the comment is a line of its own, ignored by the parser and kept by poc processed
+  const template = readFileSync(new URL('../../templates/poc-result.md', import.meta.url), 'utf8');
+  writeFile(roots.specs, 'pocs/poc-tpl-result.md', template.replace(/\r\n/g, '\n').replace(/<slug>/g, 'tpl'));
+  assert.equal(listResults(roots).results.find((r) => r.slug === 'tpl').processed, 'no');
+  markProcessed(roots, { slug: 'tpl', as: 'quick 9' });
+  const tpl = read(path.join(roots.specs, 'pocs', 'poc-tpl-result.md'));
+  assert.match(tpl, /\n# processed: no \| quick <step id> \| idea <domain> \| dropped[^\n]*\nprocessed: quick 9\n---/);
+  assert.equal(listResults(roots).results.find((r) => r.slug === 'tpl').processed, 'quick 9');
 });
 
 test('run start --poc: a bad slug or a mix with --domain/--plan/--quick is a usage error', noGit, async (t) => {
