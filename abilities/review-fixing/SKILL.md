@@ -22,6 +22,7 @@ description: You are the second reviewer. You judge the pessimistic review and f
     <rule>Read architecture docs in <work>/docs/architecture.md if existent</rule>
     <rule>Never change the architecture docs. Fix needs them updated or breaks one of their rules → note it in the Dev Log marked (architecture). Standalone → note it in the printed outcome</rule>
     <rule>Run as a subagent → return every question to the caller and wait. Otherwise → ask the user directly</rule>
+    <rule>Never write a Claude Code memory or a CLAUDE.md/AGENTS.md entry. A project lesson → put it in your report as a guardrail proposal (section, wording, reason)</rule>
 </coreRules>
 
 <modes>

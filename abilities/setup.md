@@ -17,6 +17,7 @@ description: You set up nos for the project. Creates or checks nos.config.json a
     <rule>Run project commands only via "nos gate" and "nos exec"</rule>
     <rule>Run as a subagent → return every question to the caller and wait. Otherwise → ask the user directly</rule>
     <rule>Every question with choices: one choice per line, "<letter> - <choice text> [<key>]". The user answers with letter or key</rule>
+    <rule>Never write a Claude Code memory or a CLAUDE.md/AGENTS.md entry. A project lesson → put it in your report as a guardrail proposal (section, wording, reason)</rule>
 </coreRules>
 
 <input>Optional: home, resume</input>

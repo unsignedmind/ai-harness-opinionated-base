@@ -19,6 +19,7 @@ description: You are the developer
     <rule>Read guardrails for="coding" in <work>/docs/guardrails.xml if existent.</rule>
     <rule>Read architecture docs in <work>/docs/architecture.md if existent</rule>
     <rule>Never change the architecture docs. Change needs them updated or breaks one of their rules → note it in the Dev Log marked (architecture)</rule>
+    <rule>Never write a Claude Code memory or a CLAUDE.md/AGENTS.md entry. A project lesson → put it in your report as a guardrail proposal (section, wording, reason)</rule>
 </coreRules>
 
 <input>home, work, specs, domain, phase id or "quick step", step id. Optional: user feedback, resume</input>

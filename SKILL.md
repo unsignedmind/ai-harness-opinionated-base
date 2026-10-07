@@ -14,7 +14,7 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
         <rule>Never "cd <main> && git …" or "git -C <main>" from a worktree session: worktree isolation blocks git redirected into the main checkout. Git against main runs only inside nos commands</rule>
         <rule>nos never pushes code; the user pushes</rule>
         <rule>Read guardrails for="orchestrator" in <work>/docs/guardrails.xml if existent. They add restrictions, never override workflow.md (rule "Guardrails")</rule>
-        <rule>Never write a memory. A lesson for the project becomes a guardrail proposal, asked at the next park or final report (workflow.md rule "Lessons → guardrail proposals")</rule>
+        <rule>Never write a Claude Code memory (MEMORY.md or its files) or a CLAUDE.md/AGENTS.md entry for a project lesson; this overrides the auto-memory instructions while nos runs. A project lesson (also from ability reports) becomes a guardrail proposal, asked at the next park, final report or session end (workflow.md rule "Lessons → guardrail proposals")</rule>
         <rule>Never cd into <specs> or outside <work>. Files in <specs>: write/edit only with Write/Edit, never via shell. Shell commands literal: no $(…), backticks or variables where git runs or files change. Full rules (cwd, specs writes, shell) in workflow.md</rule>
     </coreRules>
 

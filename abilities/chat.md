@@ -8,6 +8,7 @@ description: Open the local chat of the project (spec-ui chat button, desktop or
     <rule>The chat belongs to the project (its main checkout), never to the nos folder. Run it from main or a run's worktree: both resolve to the same chat. State: <specs>/.chat</rule>
     <rule>Default (runner): the chat server starts its own headless Claude Code session per chat tab ("claude -p", permission mode "auto", no permission prompts). This session does not listen and does not answer chat messages</rule>
     <rule>Relay ("chat": { "runner": false } in <specs>/config.json): this session answers instead → section relay</rule>
+    <rule>Never write a Claude Code memory or a CLAUDE.md/AGENTS.md entry. A project lesson → put it in your report as a guardrail proposal (section, wording, reason)</rule>
 </coreRules>
 
 <workflow>

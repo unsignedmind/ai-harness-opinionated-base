@@ -168,13 +168,13 @@ F - Measure the effect of past harness changes [MEASURE]
 G - End [DONE]                                          (after a task ran)
 ```
 
-After each task the menu comes back. Every change is proposed first and committed on its own with prefix `architect: ` (on main when started from the menu, a listed exception). Bugs it finds go into the Tech debt section of the architecture doc. At the end nos offers to start an idea for them.
+After each task the menu comes back. Every change is proposed first (handed-over proposals: see "Lessons become guardrails") and committed on its own with prefix `architect: ` (on main when started from the menu, a listed exception). Bugs it finds go into the Tech debt section of the architecture doc. At the end nos offers to start an idea for them.
 
 ### Lessons become guardrails
 
-nos never saves a Claude Code memory. When you correct it, decide something for the project, or the same failure keeps coming back, the orchestrator writes it down as a **guardrail proposal**: the section (`coding`, `review`, `specify`, `plan`, `architect` or `orchestrator`), the wording, the reason (your words and the date, or the failure with its step, park, Dev Log entry or review finding) and why it does not block valid work. Guesses, one-offs and things already in a guardrail or the docs get no proposal. A lesson about nos itself is just reported to you.
+nos never saves a Claude Code memory or a CLAUDE.md/AGENTS.md entry for a project lesson, and neither does any ability: guardrail proposals are the single channel. Abilities put their lessons into their report, the orchestrator collects them with its own. When you correct it, decide something for the project, or the same failure keeps coming back, the orchestrator writes it down as a **guardrail proposal**: the section (`coding`, `review`, `specify`, `plan`, `architect` or `orchestrator`), the wording, the reason (your words and the date, or the failure with its step, park, Dev Log entry or review finding) and why it does not block valid work. Guesses, one-offs and things already in a guardrail or the docs get no proposal. A lesson about nos itself is just reported to you.
 
-It never interrupts a step for this. It asks at the next park or final report, also in AUTO:
+It tells you in one line when it notes one (`Noted guardrail proposal P1: …`) but never interrupts a step for the question. It asks at the next park or final report, or before the session ends (pause, stop, abandon), also in AUTO, as its own question:
 
 ```
 Lessons from this work, proposed as guardrails. Which should the architect add?
@@ -184,7 +184,7 @@ C - Accept all [ALL]
 D - Drop all. Nothing is written, no memory either [NO]
 ```
 
-Accepted ones go to the architect (task ADD-GUARDRAILS). It checks each (section, wording, reason, duplicates, contradictions, valid work blocked), adds the good ones to `docs/guardrails.xml` and commits `architect: guardrails from run lessons`. It asks you only about problem ones. Inside a run the commit lands on the run branch and reaches main with the merge; outside a run it goes on main (a listed exception). Subagents read their section, so the lesson reaches the agent that needs it, versioned with the code.
+Accepted ones go to the architect (task ADD-GUARDRAILS). It checks each (section, wording, reason, duplicates, contradictions, valid work blocked), adds the good ones to `docs/guardrails.xml`, each with its own commit `architect: guardrail <section>-<n> from run lessons`. It asks you only about problem ones, and never applies an orchestrator guardrail that would remove a park or override a workflow rule. Inside a run the commits land on the run branch and reach main with the merge; outside a run they go on main (a listed exception). When you abandon a run, its guardrails are offered again and applied on main. Subagents read their section, so the lesson reaches the agent that needs it, versioned with the code.
 
 ### Modes
 
@@ -658,7 +658,7 @@ Most changes touch more than one file. Before you finish a change, check these c
 | Spec Log markers `(specify)`, `(spec-review)` | specify, spec-review, develop (must not change it), the template |
 | Test Strategy section | the template, specify, spec-review, develop, review-pessimistic (tests pass) |
 | Dev Log marker `(architecture)` | develop, review-fixing, architect (UPDATE-DOCS) |
-| guardrail sections (`coding`, `review`, `specify`, `plan`, `architect`, `orchestrator`) | `templates/guardrails.xml`, architect (ADD-GUARDRAILS, REVIEW-GUARDRAILS), `workflow.md` rule "Lessons → guardrail proposals", the readers of the section (`specify`: specify and spec-review; `plan`: plan; `orchestrator`: `workflow.md` rule "Guardrails" and `SKILL.md`) |
+| guardrail sections (`coding`, `review`, `specify`, `plan`, `architect`, `orchestrator`) | `templates/guardrails.xml`, architect (ADD-GUARDRAILS, REVIEW-GUARDRAILS), `workflow.md` rule "Lessons → guardrail proposals" and the lesson coreRule of every ability, the readers of the section (`specify`: specify and spec-review; `plan`: plan; `orchestrator`: `workflow.md` rule "Guardrails" and `SKILL.md`) |
 | architect handover (tech debt) | `<option name="architect">` in `workflow.md`, `idea.md` input |
 | `plan.json` structure or spec sections | `ui/src/model.ts` and its tests |
 
