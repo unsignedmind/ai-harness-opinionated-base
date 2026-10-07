@@ -6,12 +6,14 @@ import { git, NO_PROMPT_ENV } from './git.js';
 import { asList, PLAN_FILE } from './plan.js';
 import { specsConfig } from './project-config.js';
 import { sleepSync } from './proc.js';
+import { resultRel } from './poc.js';
 import { quickStepId, QUICK_STEPS_DIR, QUICK_STEPS_FILE } from './quick-step.js';
 import { slash, specFileOf, specPath } from './roots.js';
-import { readRun } from './runs.js';
+import { parseRunId, readRun } from './runs.js';
 
 // The specs root is its own git repo. Only the orchestrator commits it, through commitSpecs: the add is
-// scoped to config.json + one domain folder (exact, because a domain has at most one run). Never add -A.
+// scoped to config.json + one domain folder (exact, because a domain has at most one run), or to one POC's
+// result file. Never add -A.
 const DOMAIN = /^domain-[1-9]\d*-[a-z0-9-]+$/;
 const LOCK_RETRIES = 5;
 const LOCK_DELAY_MS = 200;
@@ -76,6 +78,16 @@ export function domainOfTarget(roots, { run, domain, config = false } = {}) {
   return file.domain;
 }
 
+// What nos specs commit commits: { poc: <slug> } for --run poc-<slug> (only its result file; no run file
+// needed, a result outlives its run), else { domain } as domainOfTarget gives it.
+export function commitTargetOf(roots, { run, domain, config = false } = {}) {
+  if (run && !domain && !config) {
+    const parsed = parseRunId(run);
+    if (parsed.kind === 'poc') return { poc: parsed.id };
+  }
+  return { domain: domainOfTarget(roots, { run, domain, config }) };
+}
+
 // Push to origin when there is something to push: after a commit, when HEAD is ahead of its upstream, or
 // when the upstream is unknown (first push, -u sets it). { pushed, warning? }; never throws.
 function push(roots, { committed, timeout }) {
@@ -92,10 +104,11 @@ function push(roots, { committed, timeout }) {
 }
 
 // Commits config.json + <domain>/ of the specs repo (adds, changes, deletions), only when something is staged.
-// domain null: config.json only. When specs.remote is set it pushes to origin (also an earlier commit a failed
+// domain null: config.json only. poc (a slug): only <specs>/pocs/poc-<slug>-result.md (no config.json).
+// When specs.remote is set it pushes to origin (also an earlier commit a failed
 // push left behind); a failed or timed out push (pushTimeoutMs, default 60s) is a warning, the commit stays.
-// Returns { action: 'specs-commit', domain, committed, sha, pushed, files (absolute), warning? }.
-export function commitSpecs(roots, { domain = null, message, pushTimeoutMs = PUSH_TIMEOUT_MS } = {}) {
+// Returns { action: 'specs-commit', domain, poc? (poc-<slug>), committed, sha, pushed, files (absolute), warning? }.
+export function commitSpecs(roots, { domain = null, poc = null, message, pushTimeoutMs = PUSH_TIMEOUT_MS } = {}) {
   if (!message || !String(message).trim()) throw new NosError(USAGE, 'Missing input: -m <message>');
   if (domain !== null && !DOMAIN.test(domain ?? '')) {
     throw new NosError(USAGE, `Domain "${domain}" does not match "domain-<id>-<slug>"`);
@@ -103,8 +116,16 @@ export function commitSpecs(roots, { domain = null, message, pushTimeoutMs = PUS
   assertSpecsRepo(roots);
   const known = (p) => existsSync(path.join(roots.specs, p)) || specsGit(roots, ['ls-files', '--', p]).stdout.trim();
   if (domain && !known(domain)) throw new NosError(FAILED, `Domain ${domain} does not exist in ${slash(roots.specs)}`);
-  const paths = [CONFIG_FILE, ...(domain ? [domain] : [])].filter(known);
-  const result = { action: 'specs-commit', domain, committed: false, sha: null, pushed: false, files: [] };
+  const paths = (poc ? [resultRel(poc)] : [CONFIG_FILE, ...(domain ? [domain] : [])]).filter(known);
+  const result = {
+    action: 'specs-commit',
+    domain,
+    ...(poc && { poc: `poc-${poc}` }),
+    committed: false,
+    sha: null,
+    pushed: false,
+    files: [],
+  };
 
   if (paths.length) {
     // git add <pathspec> also stages deletions inside it (git 2), nothing outside it

@@ -181,10 +181,11 @@ function transition(status, previous, { keepMerged = false } = {}) {
 // step of a run, one write per file. Plan merged: plan and steps done -> merged. Plan discarded: plan and every
 // step not merged -> discarded. Quick: done -> merged, or anything except merged -> discarded. Targets already
 // at the status stay (a crashed finish or abandon reruns it). A violation -> NosError FAILED
-// { violations }, nothing written. dryRun: checks only.
+// { violations }, nothing written. dryRun: checks only. A POC run (poc-<slug>) has no statuses -> FAILED.
 // Returns { action: 'set-status', run, domain, status, file, changes: [{ target, id, slug, previous, status }] }.
 export function setRunStatus(roots, { run, status, dryRun = false } = {}) {
   const { runId, kind, id } = parseRunId(run);
+  if (kind === 'poc') throw new NosError(FAILED, `${runId}: a POC has no statuses (nos run abandon ends it)`);
   if (!RUN_STATUSES.includes(status)) {
     throw new NosError(USAGE, `set-status --run takes ${RUN_STATUSES.join(' or ')}, not "${status ?? ''}"`);
   }

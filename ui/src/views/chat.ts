@@ -50,8 +50,8 @@ export type ChatTab = {
   run?: TabRun | null;
 };
 
-// cli/src/chat/runner.js runOf: what a tab knows about its run
-export type TabRun = { kind: string; id: number; domain?: string; branch?: string; worktree?: string };
+// cli/src/chat/runner.js runOf: what a tab knows about its run (a POC: id = slug, domain null)
+export type TabRun = { kind: string; id: number | string; domain?: string | null; branch?: string; worktree?: string };
 
 // "quick-7", "" without a run
 export const tabRunLabel = (t: Pick<ChatTab, 'run'>) =>

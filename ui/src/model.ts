@@ -1,7 +1,8 @@
 // Turns the raw files of the specs root (<specs>) into ideas -> phases -> steps. Pure: the loader
 // hands over `path relative to the specs root -> text` (src/folder.ts readSpecsFolder), so tests feed
 // fixtures. spec-file values in plan.json / quick-steps.json are relative to the specs root as well.
-// Runs (GET /__runs) are joined in: a plan run by its domain, a quick run by its step.
+// Runs (GET /__runs) are joined in: a plan run by its domain, a quick run by its step; the rest (POCs) are
+// otherRuns.
 import type { Run } from './runs';
 import { normStatus, type Status } from './status';
 
@@ -85,6 +86,8 @@ export type Model = {
   // the specs root as an absolute path with forward slashes ('' when unknown: the standalone viewer). Paths sent
   // to Claude use it, because a chat session may sit in a worktree where specsRel does not lead to the specs
   specsAbs: string;
+  // runs that belong to no idea or step: POCs (no domain), or a run whose domain or step is unknown here
+  otherRuns: Run[];
 };
 
 // fallback when the loader names none (tests, an older dev server)
@@ -194,7 +197,9 @@ export function buildModel(
   const phases = ideas.flatMap((i) => i.phases);
   const steps = ideas.flatMap((i) => i.steps);
   const labels = [...new Set(ideas.flatMap((i) => i.labels))].sort();
-  return { ideas, phases, steps, labels, specsRel, specsAbs };
+  const attached = new Set([...ideas.map((i) => i.run), ...steps.map((s) => s.run)]);
+  const otherRuns = runs.filter((r) => !attached.has(r));
+  return { ideas, phases, steps, labels, specsRel, specsAbs, otherRuns };
 }
 
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);

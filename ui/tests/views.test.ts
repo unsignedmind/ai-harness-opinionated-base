@@ -524,3 +524,24 @@ test('parseRuns drops what is no run and coerces numbers; runsKey ignores the ag
   expect(runsKey([run({ ageSec: 1 })])).toBe(runsKey([run({ ageSec: 500 })]));
   expect(runsKey([run({ ahead: 1 })])).not.toBe(runsKey([run({ ahead: 2 })]));
 });
+
+test('parseRuns keeps a POC: slug id, domain null; a POC with a bad slug or a domain-less quick run is dropped', () => {
+  const runs = parseRuns([
+    { kind: 'poc', id: 'dark-mode', domain: null, branch: 'poc-dark-mode', phase: 'develop', ahead: 2, behind: 0 },
+    { kind: 'poc', id: 'Bad Slug', domain: null },
+    { kind: 'poc', id: 3, domain: null },
+    { kind: 'poc', id: 'x', domain: 'domain-1-a' },
+    { kind: 'quick', id: 4, domain: null },
+  ]);
+  expect(runs).toHaveLength(1);
+  expect(runs[0]).toMatchObject({ kind: 'poc', id: 'dark-mode', domain: null, branch: 'poc-dark-mode', ahead: 2 });
+});
+
+test('a POC run belongs to no idea or step: model.otherRuns, its badge reads poc-<slug>', () => {
+  const poc = run({ kind: 'poc', id: 'dark-mode', domain: null, branch: 'poc-dark-mode' });
+  const m = buildModel(quickFixtureFiles(), [run(), poc]);
+  expect(m.otherRuns).toStrictEqual([poc]);
+  expect(m.steps.some((s) => s.run === poc) || m.ideas.some((i) => i.run === poc)).toBe(false);
+  expect(mount(runBadge(poc)).querySelector('.run .mono')?.textContent).toBe('poc-dark-mode');
+  expect(buildModel(quickFixtureFiles()).otherRuns).toStrictEqual([]);
+});

@@ -14,6 +14,7 @@ import {
   deleteRun,
   listRuns,
   mintToken,
+  notesPath,
   readRun,
   requireToken,
   runIdOf,
@@ -21,11 +22,15 @@ import {
   touchSeen,
   writeRun,
 } from './runs.js';
+import { assertSlug } from './slug.js';
 import { commitSpecs } from './specs-git.js';
 import { setRunStatus } from './status.js';
 
-// The run lifecycle: nos run start | sync | finish | cleanup | abandon. A run is one plan (plan-<domain id>) or
-// one quick step (quick-<step id>) in its own branch <kind>-<id> and worktree <main>/.claude/worktrees/<kind>-<id>.
+// The run lifecycle: nos run start | sync | finish | cleanup | abandon. A run is one plan (plan-<domain id>),
+// one quick step (quick-<step id>) or one POC (poc-<slug>) in its own branch <kind>-<id> and worktree
+// <main>/.claude/worktrees/<kind>-<id>. A POC has no domain and no statuses, and run commands never commit the
+// specs for it: it is never merged (finish refuses it), only abandoned, which deletes worktree, branch, run file
+// and notes. Its result file (<specs>/pocs/poc-<slug>-result.md) stays.
 // The CLI owns every git mechanic: main is touched only here, always with git -C <main>, and moves only by
 // merge --ff-only under the lock "merge".
 export const WORKTREES_DIR = Object.freeze(['.claude', 'worktrees']);
@@ -340,16 +345,39 @@ function startResult(roots, run, { install: installed = null, leftovers = null, 
   };
 }
 
+// --poc <slug>: lowercase kebab-case, else a usage error
+function parsePocSlug(value) {
+  try {
+    return assertSlug(value, '--poc');
+  } catch (err) {
+    throw new NosError(USAGE, err.message);
+  }
+}
+
 // nos run start --domain <d> (--plan | --quick <id>) [--token t] [--take-over]
+// nos run start --poc <slug> [--token t] [--take-over]: no domain, no target, no statuses
 export async function startRun(
   roots,
-  { domain, plan = false, quick, token, takeOver = false, env = process.env } = {},
+  { domain, plan = false, quick, poc, token, takeOver = false, env = process.env } = {},
 ) {
   requireGit(roots);
-  if (Boolean(plan) === (quick != null)) throw new NosError(USAGE, 'Give exactly one of --plan, --quick <stepId>');
-  resolveDomain(roots, domain, 'run start');
-  const kind = plan ? 'plan' : 'quick';
-  const id = plan ? Number(/^domain-(\d+)-/.exec(domain)[1]) : parseStepId(quick);
+  let kind;
+  let id;
+  if (poc != null) {
+    if (domain != null || plan || quick != null) {
+      throw new NosError(USAGE, 'run start --poc takes no --domain, --plan or --quick');
+    }
+    kind = 'poc';
+    id = parsePocSlug(poc);
+    domain = null;
+  } else {
+    if (Boolean(plan) === (quick != null)) {
+      throw new NosError(USAGE, 'Give exactly one of --plan, --quick <stepId>, --poc <slug>');
+    }
+    resolveDomain(roots, domain, 'run start');
+    kind = plan ? 'plan' : 'quick';
+    id = plan ? Number(/^domain-(\d+)-/.exec(domain)[1]) : parseStepId(quick);
+  }
   const runId = `${kind}-${id}`;
   const given = token || env.NOS_RUN_TOKEN;
 
@@ -371,6 +399,7 @@ export async function startRun(
 // A finish or abandon of this run crashed between set-status --run and the phase change: the target is merged
 // while the phase is merge, or discarded while the phase is not yet abandoned
 function statusesFlipped(roots, run) {
+  if (run.kind === 'poc') return false;
   let status;
   try {
     status = targetOf(roots, run).item.status;
@@ -401,7 +430,8 @@ function startLocked(roots, { domain, kind, id, runId, given, takeOver }) {
     }
   }
 
-  const other = listRuns(roots).find((r) => r.domain === domain && runIdOf(r) !== runId);
+  // one run per domain; a POC has none and runs next to anything
+  const other = domain != null && listRuns(roots).find((r) => r.domain === domain && runIdOf(r) !== runId);
   if (other) {
     throw new NosError(
       DOMAIN_RUNNING,
@@ -419,16 +449,19 @@ function startLocked(roots, { domain, kind, id, runId, given, takeOver }) {
     );
   }
 
-  const target = targetOf(roots, { domain, kind, id });
-  const status = target.item.status;
-  if (kind === 'plan' && !asList(target.data.phases).length) {
-    throw new NosError(FAILED, `The plan of ${domain} has no phases. Plan it first`);
-  }
-  if (TERMINAL_STATUSES.includes(status)) {
-    throw new NosError(FAILED, `The ${target.label} is ${status}: nothing to run`);
+  // a POC has no target, no statuses and no specs of its own
+  const target = kind === 'poc' ? null : targetOf(roots, { domain, kind, id });
+  if (target) {
+    const status = target.item.status;
+    if (kind === 'plan' && !asList(target.data.phases).length) {
+      throw new NosError(FAILED, `The plan of ${domain} has no phases. Plan it first`);
+    }
+    if (TERMINAL_STATUSES.includes(status)) {
+      throw new NosError(FAILED, `The ${target.label} is ${status}: nothing to run`);
+    }
   }
 
-  const leftovers = commitLeftovers(roots, runId, domain);
+  const leftovers = target ? commitLeftovers(roots, runId, domain) : null;
   const mainTop = mainTopOf(roots);
   const mainBranch = existing?.mainBranch ?? currentBranch(mainTop);
   if (!mainBranch) throw new NosError(FAILED, `${slash(mainTop)} has a detached HEAD: check out the main branch first`);
@@ -465,7 +498,7 @@ function startLocked(roots, { domain, kind, id, runId, given, takeOver }) {
     };
   }
   writeRun(roots, run);
-  writeBranch(target, branch);
+  if (target) writeBranch(target, branch);
   return { run, created: added.created, leftovers, warnings };
 }
 
@@ -622,6 +655,7 @@ const hasE2e = (roots) => {
 export async function finishRun(roots, { gate: gateOptions = {}, ...options } = {}) {
   let run = resolveRun(roots, options);
   const runId = runIdOf(run);
+  if (run.kind === 'poc') throw new NosError(FAILED, `${runId}: a POC is never merged: nos run abandon`);
   if (run.phase === 'abandoned') throw new NosError(FAILED, `Run ${runId} is abandoned: nothing to finish`);
   if (run.phase === 'merged') {
     releaseOwnMergeLock(roots, run.token);
@@ -737,8 +771,9 @@ function removeWorktree(mainTop, run, wt, force) {
   throw new NosError(FAILED, `git worktree remove ${slash(wt)} failed: ${message}`, { worktree: slash(wt) });
 }
 
-// Removes worktree, branch (-D: merged into mainBranch, or abandoned) and run file. Each part is skipped when already gone, so a
-// cleanup that failed half way is simply rerun. Returns { worktree, branch, runFile } (true = removed now).
+// Removes worktree, branch (-D: merged into mainBranch, or abandoned), run file and notes (<specs>/.runs/<run>.md,
+// a POC's). Each part is skipped when already gone, so a cleanup that failed half way is simply rerun.
+// Returns { worktree, branch, runFile, notes? } (true = removed now; notes only when there were some).
 function removeRun(roots, run) {
   const mainTop = mainTopOf(roots);
   const wt = path.resolve(run.worktree);
@@ -773,8 +808,11 @@ function removeRun(roots, run) {
     mustGit(['branch', '-D', run.branch], mainTop);
     branch = true;
   }
+  const notesFile = notesPath(roots, runIdOf(run));
+  const notes = existsSync(notesFile);
+  if (notes) rmSync(notesFile, { force: true });
   deleteRun(roots, runIdOf(run));
-  return { worktree, branch, runFile: true };
+  return { worktree, branch, runFile: true, ...(notes && { notes: true }) };
 }
 
 // nos run cleanup --token t: from main, phase merged or abandoned
@@ -792,6 +830,7 @@ export function cleanupRun(roots, { cwd = process.cwd(), ...options } = {}) {
 
 // nos run abandon --token t: statuses discarded + specs commit + phase abandoned (written before the cleanup,
 // so a failed cleanup is retried with nos run cleanup), then the cleanup with --force / -D.
+// POC: no statuses, no specs commit (statuses and specs null); its result file in <specs>/pocs stays.
 export function abandonRun(roots, { cwd = process.cwd(), ...options } = {}) {
   let run = resolveRun(roots, options);
   const runId = runIdOf(run);
@@ -803,7 +842,10 @@ export function abandonRun(roots, { cwd = process.cwd(), ...options } = {}) {
   refuseInside(cwd, run);
   let statuses = null;
   let specs = null;
-  if (run.phase !== 'abandoned') {
+  if (run.phase !== 'abandoned' && run.kind === 'poc') {
+    run = { ...run, phase: 'abandoned' };
+    writeRun(roots, run);
+  } else if (run.phase !== 'abandoned') {
     statuses = setRunStatus(roots, { run: runId, status: 'discarded' });
     const commit = commitSpecs(roots, { domain: run.domain, message: `${runId}: discarded` });
     if (commit.warning) process.stderr.write(`nos: warning: ${commit.warning}\n`);

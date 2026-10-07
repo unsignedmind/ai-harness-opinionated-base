@@ -1,14 +1,16 @@
 // A run as `GET /__runs` reports it (src/serve-runs.ts): one per run file in <specs>/.runs/, a plan
-// (id = domain id) or a quick step (id = step id) in its own branch and worktree. Never the token.
+// (id = domain id), a quick step (id = step id) or a POC (id = slug, no domain: a throwaway branch) in
+// its own branch and worktree. Never the token.
 // The run file stays until `nos run cleanup`: phase merged or abandoned = the run is over and only
 // waits for its cleanup. Browser-safe: types and small helpers only.
-export type RunKind = 'plan' | 'quick';
+export type RunKind = 'plan' | 'quick' | 'poc';
 
 export type Run = {
   kind: RunKind;
-  id: number;
-  // the domain folder, e.g. domain-3-sync
-  domain: string;
+  // plan / quick: a number; poc: the slug
+  id: number | string;
+  // the domain folder, e.g. domain-3-sync; null for a POC
+  domain: string | null;
   branch: string;
   // develop | integrate | gate | merge | merged | abandoned
   phase: string;
@@ -55,22 +57,23 @@ export function age(sec: number | null): string {
 const int = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : null);
 const text = (v: unknown) => (typeof v === 'string' ? v : '');
 
+const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+// plan / quick: a numeric id and a domain; poc: a slug id, domain null
+const isRunShape = (r: { kind?: unknown; id?: unknown; domain?: unknown }) =>
+  r.kind === 'poc'
+    ? typeof r.id === 'string' && SLUG.test(r.id) && r.domain == null
+    : (r.kind === 'plan' || r.kind === 'quick') && Number.isInteger(r.id) && typeof r.domain === 'string';
+
 // the shape check for data from the network: anything else is dropped, numbers coerced
 export function parseRuns(data: unknown): Run[] {
   if (!Array.isArray(data)) return [];
   return data
-    .filter(
-      (r) =>
-        !!r &&
-        typeof r === 'object' &&
-        (r.kind === 'plan' || r.kind === 'quick') &&
-        Number.isInteger(r.id) &&
-        typeof r.domain === 'string',
-    )
+    .filter((r) => !!r && typeof r === 'object' && isRunShape(r))
     .map((r): Run => ({
       kind: r.kind,
       id: r.id,
-      domain: r.domain,
+      domain: r.kind === 'poc' ? null : r.domain,
       branch: text(r.branch),
       phase: text(r.phase),
       seen: typeof r.seen === 'string' ? r.seen : null,

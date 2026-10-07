@@ -5,27 +5,40 @@ import { FAILED, HELD, NosError, USAGE } from './exit-codes.js';
 import { writeFileAtomic } from './fs-atomic.js';
 import { isInside, slash } from './roots.js';
 
-// Run registry: <specs>/.runs/<kind>-<id>.json, one file per running plan or quick step (one writer each).
+// Run registry: <specs>/.runs/<kind>-<id>.json, one file per running plan, quick step or POC (one writer each).
 // { kind, id, domain, branch, worktree, base, mainBranch, token, started, seen, phase }
-//   kind 'plan' (id = domain id) | 'quick' (id = step id); worktree absolute; base = main sha the branch
-//   builds on; mainBranch = the branch of main the run merges into; token = holder (8 hex).
+//   kind 'plan' (id = domain id) | 'quick' (id = step id) | 'poc' (id = slug, domain null: a throwaway branch,
+//   never merged); worktree absolute; base = main sha the branch builds on; mainBranch = the branch of main the
+//   run merges into (a POC only builds on it); token = holder (8 hex).
+//   A POC keeps its notes next to its run file: <specs>/.runs/poc-<slug>.md, deleted with the run.
 export const RUNS_DIR = '.runs';
-export const RUN_KINDS = Object.freeze(['plan', 'quick']);
+export const RUN_KINDS = Object.freeze(['plan', 'quick', 'poc']);
 export const RUN_PHASES = Object.freeze(['develop', 'integrate', 'gate', 'merge', 'merged', 'abandoned']);
 const RUN_ID = /^(plan|quick)-([1-9]\d*)$/;
+const POC_RUN_ID = /^poc-([a-z0-9]+(?:-[a-z0-9]+)*)$/;
+const isRunId = (runId) => RUN_ID.test(runId) || POC_RUN_ID.test(runId);
 
 export const runsDir = (roots) => path.join(roots.specs, RUNS_DIR);
 
-// '<kind>-<id>' -> { runId, kind, id }; anything else is a usage error
+// '<kind>-<id>' -> { runId, kind, id }: id a number for plan/quick, the slug for poc; anything else is a usage
+// error
 export function parseRunId(runId) {
-  const match = RUN_ID.exec(String(runId ?? ''));
-  if (!match) throw new NosError(USAGE, `Invalid run "${runId}". Use <kind>-<id>, e.g. quick-7 or plan-3`);
+  const text = String(runId ?? '');
+  const poc = POC_RUN_ID.exec(text);
+  if (poc) return { runId: poc[0], kind: 'poc', id: poc[1] };
+  const match = RUN_ID.exec(text);
+  if (!match) {
+    throw new NosError(USAGE, `Invalid run "${runId}". Use <kind>-<id>, e.g. quick-7, plan-3 or poc-dark-mode`);
+  }
   return { runId: match[0], kind: match[1], id: Number(match[2]) };
 }
 
 export const runIdOf = (run) => `${run.kind}-${run.id}`;
 
 export const runPath = (roots, runId) => path.join(runsDir(roots), `${parseRunId(runId).runId}.json`);
+
+// The notes of a run (a POC subagent's log, survives a lost context): <specs>/.runs/<run>.md
+export const notesPath = (roots, runId) => path.join(runsDir(roots), `${parseRunId(runId).runId}.md`);
 
 // The run file, null when there is none. An unreadable file is an error (never silently replaced).
 export function readRun(roots, runId) {
@@ -55,7 +68,7 @@ export function listRuns(roots) {
   const runs = [];
   for (const name of names) {
     const runId = name.endsWith('.json') ? name.slice(0, -'.json'.length) : '';
-    if (!RUN_ID.test(runId)) continue;
+    if (!isRunId(runId)) continue;
     try {
       const run = readRun(roots, runId);
       if (run) runs.push(run);

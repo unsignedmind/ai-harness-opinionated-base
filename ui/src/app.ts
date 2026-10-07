@@ -1,6 +1,7 @@
 // DOM wiring: render the routed view into #main, delegate clicks, keep nav and search in sync.
 import { buildDocs, type Docs } from './docs';
 import { DEFAULT_FILTERS, type Filters } from './filter';
+import { esc } from './markdown';
 import type { Model } from './model';
 import { parseRoute, viewHref, type View } from './route';
 import { renderBacklog } from './views/backlog';
@@ -8,7 +9,7 @@ import { renderBoard } from './views/board';
 import { renderDocs } from './views/docs';
 import { renderExplore, type ExploreUi } from './views/explore';
 import { suggestions, type SearchKind } from './views/filterbar';
-import { plural } from './views/parts';
+import { plural, runBadge } from './views/parts';
 
 export type App = {
   render: () => void;
@@ -74,7 +75,11 @@ export function mountApp(root: HTMLElement, initial: Model, opts: AppOptions = {
       if (filtered(v)) a.setAttribute('href', viewHref(v, lastFilters));
     }
     const status = root.querySelector('#status');
-    if (status) status.textContent = `${plural(model.ideas.length, 'idea')} · ${plural(model.steps.length, 'step')}`;
+    // counts, then a badge per run that belongs to no idea or step (a POC): shown while its run file exists
+    if (status)
+      status.innerHTML =
+        esc(`${plural(model.ideas.length, 'idea')} · ${plural(model.steps.length, 'step')}`) +
+        model.otherRuns.map((r) => ` <span class="other-run">${runBadge(r)}</span>`).join('');
 
     if (caret) {
       const q2 = main.querySelector<HTMLInputElement>('#q');

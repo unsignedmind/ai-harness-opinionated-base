@@ -1,13 +1,13 @@
 // Types of runs.js for the spec-ui dev server (TypeScript), which lists the runs (/__runs), and its tests.
 import type { Roots } from './roots.js';
 
-export type RunKind = 'plan' | 'quick';
+export type RunKind = 'plan' | 'quick' | 'poc';
 export type RunPhase = 'develop' | 'integrate' | 'gate' | 'merge' | 'merged' | 'abandoned';
-/** a run file: <specs>/.runs/<kind>-<id>.json */
+/** a run file: <specs>/.runs/<kind>-<id>.json. poc: id = slug, domain null */
 export type RunFile = {
   kind: RunKind;
-  id: number;
-  domain: string;
+  id: number | string;
+  domain: string | null;
   branch: string;
   worktree: string;
   base: string;
@@ -23,9 +23,11 @@ export const RUN_KINDS: readonly RunKind[];
 export const RUN_PHASES: readonly RunPhase[];
 export function runsDir(roots: Pick<Roots, 'specs'>): string;
 /** '<kind>-<id>' -> parts; anything else throws a NosError (USAGE) */
-export function parseRunId(runId: string): { runId: string; kind: RunKind; id: number };
+export function parseRunId(runId: string): { runId: string; kind: RunKind; id: number | string };
 export function runIdOf(run: Pick<RunFile, 'kind' | 'id'>): string;
 export function runPath(roots: Pick<Roots, 'specs'>, runId: string): string;
+/** the notes of a run: <specs>/.runs/<run>.md (a POC's log) */
+export function notesPath(roots: Pick<Roots, 'specs'>, runId: string): string;
 /** the run file, null when there is none; an unreadable file throws a NosError (FAILED) */
 export function readRun(roots: Pick<Roots, 'specs'>, runId: string): RunFile | null;
 /** every readable run file, sorted by run id */

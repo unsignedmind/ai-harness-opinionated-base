@@ -89,7 +89,8 @@ export async function runView(roots: Pick<Roots, 'main'>, file: RunFile, now = D
   const run: Run = {
     kind: file.kind,
     id: file.id,
-    domain: str(file.domain),
+    // a POC has no domain: null stays null
+    domain: file.kind === 'poc' ? null : str(file.domain),
     branch: str(file.branch),
     phase: str(file.phase),
     seen: typeof file.seen === 'string' ? file.seen : null,
@@ -116,7 +117,7 @@ export function listRunViews(roots: Pick<Roots, 'main' | 'specs'>, now = Date.no
       runView(roots, file, now).catch((e: Error): Run => ({
         kind: file.kind,
         id: file.id,
-        domain: String(file.domain ?? ''),
+        domain: file.kind === 'poc' ? null : String(file.domain ?? ''),
         branch: String(file.branch ?? ''),
         phase: String(file.phase ?? ''),
         seen: null,

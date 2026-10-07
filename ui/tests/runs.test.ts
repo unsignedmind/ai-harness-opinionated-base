@@ -147,6 +147,25 @@ test('a run git cannot answer for gets nulls and an error, the others are unharm
   expect(gone.error).toMatch(/ahead\/behind: .*; worktree missing: /);
 });
 
+test('a POC run keeps domain null and its slug id; the page parses it back', async () => {
+  const poc = await runView(
+    { main },
+    {
+      ...base,
+      kind: 'poc',
+      id: 'dark-mode',
+      domain: null,
+      branch: 'main',
+      worktree: main,
+      base: 'x',
+      seen: new Date().toISOString(),
+      phase: 'develop',
+    },
+  );
+  expect(poc).toMatchObject({ kind: 'poc', id: 'dark-mode', domain: null, ahead: 0, behind: 0 });
+  expect(parseRuns(JSON.parse(JSON.stringify([poc])))).toHaveLength(1);
+});
+
 test('branch names that look like options or revisions never reach git; a non-top worktree is not asked', async () => {
   mkdirSync(join(wt('plan-1'), 'sub'), { recursive: true });
   const evil = { ...base, kind: 'quick' as const, domain: 'domain-3-x', worktree: join(wt('plan-1'), 'sub') };

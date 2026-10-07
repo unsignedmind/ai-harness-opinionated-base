@@ -13,7 +13,8 @@ import { createQuickStep } from './quick-step.js';
 import { homeGuard, NOS_HOME, resolveRoots, slash, specsGuard } from './roots.js';
 import { abandonRun, cleanupRun, finishRun, startRun, syncRun } from './run.js';
 import { readRun, requireToken } from './runs.js';
-import { commitSpecs, domainOfTarget, findStep } from './specs-git.js';
+import { listResults, markProcessed } from './poc.js';
+import { commitSpecs, commitTargetOf, findStep } from './specs-git.js';
 import { setRunStatus, setStatus } from './status.js';
 import { updatePlan } from './update-plan.js';
 
@@ -31,9 +32,12 @@ Commands:
   create-quick-step  Add a quick step (no plan) to <specs>/<domain>/quick-steps/
   set-status         Change the status of a plan, phase, step or quick step
                      (--run <kind>-<id> merged|discarded: a whole run, only run finish / abandon)
-  run <command>      Run lifecycle: start, sync, finish, cleanup, abandon (branch + worktree per run)
-  specs commit       Commit config.json + one domain folder of the specs repo (--run, --domain or --config)
+  run <command>      Run lifecycle: start, sync, finish, cleanup, abandon (branch + worktree per run;
+                     --poc <slug>: a throwaway POC branch, never merged)
+  specs commit       Commit config.json + one domain folder of the specs repo (--run, --domain or --config;
+                     --run poc-<slug>: only that POC's result file)
   specs find-step    Find the spec file of a step id in any domain
+  poc <command>      POC results in <specs>/pocs: results (list), processed <slug> --as <what> (mark one)
   gate               Run the quality tools of nos.config.json (--e2e: also e2e, under a slot lease)
   exec <name>        Run a project command: install, dev (holds a slot while it runs), deploy-test
   lock <action>      take, release or status of a lock in <specs>/.locks (merge, ids, slot-<n>)
@@ -314,6 +318,7 @@ The status must be listed in templates/status.xml of this nos:
 <plans> for the plan, <phases> for phases, <steps> for steps.
 Only the "status" field is changed; the rest of plan.json is kept as-is.
 merged and discarded are refused here (exit 1): they are set for a whole run with --run.
+A POC run (--run poc-<slug>) has no statuses: exit 1.
 
 --run <kind>-<id> merged|discarded flips every target of a run, one write per file (run finish and
 run abandon call it; the domain comes from the run file <specs>/.runs/<kind>-<id>.json):
@@ -354,10 +359,16 @@ Example:
   }`;
 
 const RUN_HELP = `Usage: nos run start --domain <domain> (--plan | --quick <stepId>) [--token <t>] [--take-over] [--root <dir>]
+       nos run start --poc <slug> [--token <t>] [--take-over] [--root <dir>]
        nos run sync|finish|cleanup|abandon --token <t> [--run <kind>-<id>] [--root <dir>]
 
-A run is one plan (run id plan-<domain id>) or one quick step (quick-<step id>) in branch <kind>-<id> and
-worktree <main>/.claude/worktrees/<kind>-<id>. Run file: <specs>/.runs/<kind>-<id>.json. Needs git.
+A run is one plan (run id plan-<domain id>), one quick step (quick-<step id>) or one POC (poc-<slug>) in
+branch <kind>-<id> and worktree <main>/.claude/worktrees/<kind>-<id>. Run file: <specs>/.runs/<kind>-<id>.json.
+Needs git.
+A POC is a throwaway branch to brainstorm in code: no domain ("domain": null), no target, no statuses, run
+commands never commit the specs for it, any number of POCs next to each other and next to other runs. It is never
+merged (finish -> 1), only abandoned. Its notes <specs>/.runs/poc-<slug>.md are deleted with the run, its result
+<specs>/pocs/poc-<slug>-result.md stays (nos poc).
 --token falls back to NOS_RUN_TOKEN. Missing token -> 1, another token -> 4. Every token call updates "seen".
 sync/finish/cleanup/abandon act on --run, else the run of the worktree you sit in, else the run holding the token.
 
@@ -371,9 +382,11 @@ start    Validates the target (a plan with phases, or a quick step; not merged/d
          git worktree add, run file (base, phase develop), "branch" in plan.json / the quick step.
          project-commands.install in a new worktree, output to <specs>/.runs/logs/<run>/install.log
          (a failure is reported in "install", the run stays).
+         --poc <slug> (lowercase kebab-case, else 2; not with --domain/--plan/--quick): no target, no
+         domain check, no leftovers commit, no "branch" written; token, take-over, worktree and install as above.
 sync     Rebase in progress -> 3. Dirty worktree -> 5 (never autostashed). git rebase <mainBranch> in the
          worktree; conflict -> 3 with the files, the rebase is left open. Clean -> updates base.
-finish   The plan / quick step must be done. Under lock merge (another token -> 4): phase integrate,
+finish   POC -> 1 (never merged: abandon it). The plan / quick step must be done. Under lock merge (another token -> 4): phase integrate,
          main on mainBranch, main busy (MERGE_HEAD, CHERRY_PICK_HEAD, REVERT_HEAD, rebase
          folders) -> 1, main dirty on the paths the branch touches -> 1, sync (3, 5), phase gate: the full
          gate in the worktree (e2e when configured) -> fail 1 with the gate in details, phase merge:
@@ -382,9 +395,11 @@ finish   The plan / quick step must be done. Under lock merge (another token -> 
          A crash keeps lock and phase: the same token resumes.
 cleanup  Not from inside the worktree. Phase merged or abandoned. git worktree remove (merged: modified
          tracked files -> 5 with the list; untracked files are removed), branch -D (merged: only when the
-         branch is in mainBranch), run file deleted. Parts already gone are skipped (rerun after a failure).
+         branch is in mainBranch), run file and notes (<specs>/.runs/<run>.md, "notes": true when there were
+         some) deleted. Parts already gone are skipped (rerun after a failure).
 abandon  Not for a merged run, not from inside the worktree. set-status --run discarded, specs commit
          "<run>: discarded", phase abandoned, then the cleanup with --force / -D.
+         POC: no statuses, no specs commit ("statuses" and "specs" null), phase abandoned, then the cleanup.
 
 Exit: 0 ok, 1 failed (finish: gate fail, main busy/dirty/on another branch, ff refused twice print
 { action, error, exit, details }), 2 usage, 3 rebase conflict, 4 held by another token (run or merge
@@ -403,7 +418,14 @@ Example:
     "enter": "D:/repo/.claude/worktrees/quick-7",
     "install": { "code": 0, "log": "D:/repo.specs/.runs/logs/quick-7/install.log" },
     "leftovers": null
-  }`;
+  }
+  nos run start --poc dark-mode
+  -> the same shape: "run": { "kind": "poc", "id": "dark-mode", "domain": null, "branch": "poc-dark-mode",
+     "worktree": "D:/repo/.claude/worktrees/poc-dark-mode", ... }, "leftovers": null
+  nos run abandon --token 5e6f7a8b      (a POC, from main)
+  { "action": "run-abandon", "run": { "kind": "poc", ..., "phase": "abandoned" },
+    "removed": { "worktree": true, "branch": true, "runFile": true, "notes": true },
+    "statuses": null, "specs": null }`;
 
 const SPECS_HELP = `Usage: nos specs commit (--run <kind>-<id> | --domain <domain> | --config) -m <message> [--root <dir>]
        nos specs find-step <id> [--root <dir>]
@@ -417,6 +439,8 @@ specs commit
   ahead of its upstream (a commit an earlier failed push left behind) or has none. A failed push or one
   running over 60s is a warning (stderr and "warning" in the result), the commit stays.
     --run <kind>-<id>  the domain of that run file (<specs>/.runs/<kind>-<id>.json)
+                       poc-<slug>: only pocs/poc-<slug>-result.md, no config.json ("domain" null, "poc":
+                       "poc-<slug>" in the result); needs no run file (a result outlives its run)
     --domain <domain>  a domain outside any run (idea, plan or quick step creation)
     --config           config.json only (e.g. setup changed the chat node); "domain" is null
     -m, --message <m>  commit message, e.g. "step-7: develop"                (required)
@@ -450,6 +474,37 @@ specs find-step
     "specFile": "D:/repo.specs/domain-2-auth/quick-steps/step-7-fix-login-typo.md"
   }
   kind "plan": phase is the phase id.`;
+
+const POC_HELP = `Usage: nos poc results [--root <dir>]
+       nos poc processed <slug> --as <dropped|"quick <stepId>"|"idea <domain>"|no> [--root <dir>]
+
+A POC (nos run start --poc <slug>) ends with a result file <specs>/pocs/poc-<slug>-result.md (template
+templates/poc-result.md): front matter "poc", "created", "processed" (no | quick <step id> | idea <domain> |
+dropped), then requirements and technical details. The idea and quick step flows offer the unprocessed ones.
+
+results    Lists every pocs/poc-<slug>-result.md, sorted by name: slug, run id, title (the "# POC result: <title>"
+           heading), processed ("no" when the field is missing), runExists (<specs>/.runs/poc-<slug>.json is
+           there), file. An unreadable file is skipped with an entry in "warnings".
+processed  Sets "processed" in the front matter of that result (replaces the line, or adds it), keeps the rest
+           and the line endings. No result file or no front matter -> 1, a bad slug or --as -> 2.
+           Commit it afterwards: nos specs commit --run poc-<slug> -m "poc-<slug>: processed".
+
+Example:
+  nos poc results
+  {
+    "action": "poc-results",
+    "results": [{ "slug": "dark-mode", "run": "poc-dark-mode", "title": "Dark mode toggle", "processed": "no",
+                  "runExists": true, "file": "D:/repo.specs/pocs/poc-dark-mode-result.md" }]
+  }
+  nos poc processed dark-mode --as "quick 12"
+  {
+    "action": "poc-processed",
+    "slug": "dark-mode",
+    "run": "poc-dark-mode",
+    "file": "D:/repo.specs/pocs/poc-dark-mode-result.md",
+    "previous": "no",
+    "processed": "quick 12"
+  }`;
 
 const GATE_HELP = `Usage: nos gate [--e2e] [--root <dir>]
 
@@ -723,6 +778,7 @@ const COMMANDS = {
       domain: { type: 'string' },
       plan: { type: 'boolean' },
       quick: { type: 'string' },
+      poc: { type: 'string' },
       token: { type: 'string' },
       'take-over': { type: 'boolean' },
       run: { type: 'string' },
@@ -733,12 +789,20 @@ const COMMANDS = {
     action: ([sub]) => `run-${sub}`,
     async execute(values, io, roots, [sub]) {
       if (sub === 'start') {
-        if (values.run) throw new UsageError('run start takes no --run: use --domain with --plan or --quick', 'run');
-        if (!values.domain) throw new UsageError('Missing input: --domain. Please provide it and retry', 'run');
+        if (values.run) {
+          throw new UsageError('run start takes no --run: use --domain with --plan or --quick, or --poc', 'run');
+        }
+        if (values.poc !== undefined && (values.domain || values.plan || values.quick !== undefined)) {
+          throw new UsageError('run start --poc takes no --domain, --plan or --quick', 'run');
+        }
+        if (values.poc === undefined && !values.domain) {
+          throw new UsageError('Missing input: --domain (or --poc <slug>). Please provide it and retry', 'run');
+        }
         return startRun(roots, {
           domain: values.domain,
           plan: values.plan ?? false,
           quick: values.quick,
+          poc: values.poc,
           token: values.token,
           takeOver: values['take-over'] ?? false,
           env: io.env,
@@ -748,7 +812,7 @@ const COMMANDS = {
       if (!commands[sub]) {
         throw new UsageError(`Unknown run command "${sub}". Use start, sync, finish, cleanup or abandon`, 'run');
       }
-      const startOnly = ['domain', 'plan', 'quick', 'take-over'].find((name) => values[name] !== undefined);
+      const startOnly = ['domain', 'plan', 'quick', 'poc', 'take-over'].find((name) => values[name] !== undefined);
       if (startOnly) throw new UsageError(`run ${sub} takes no --${startOnly}`, 'run');
       return commands[sub](roots, { run: values.run, token: values.token, env: io.env, cwd: io.cwd });
     },
@@ -769,8 +833,7 @@ const COMMANDS = {
       if (sub === 'commit') {
         if (arg !== undefined) throw new UsageError(`specs commit takes no argument "${arg}"`, 'specs');
         if (!values.message) throw new UsageError('Missing input: -m <message>. Please provide it and retry', 'specs');
-        const domain = domainOfTarget(roots, values);
-        const result = commitSpecs(roots, { domain, message: values.message });
+        const result = commitSpecs(roots, { ...commitTargetOf(roots, values), message: values.message });
         if (result.warning) io.stderr.write(`nos: warning: ${result.warning}\n`);
         return result;
       }
@@ -779,6 +842,26 @@ const COMMANDS = {
         return findStep(roots, arg);
       }
       throw new UsageError(`Unknown specs command "${sub}". Use commit or find-step`, 'specs');
+    },
+  },
+  poc: {
+    help: POC_HELP,
+    options: { as: { type: 'string' }, root: { type: 'string' } },
+    required: [],
+    positionals: { min: 1, max: 2 },
+    action: ([sub]) => `poc-${sub}`,
+    execute(values, io, roots, [sub, slug]) {
+      if (sub === 'results') {
+        if (slug !== undefined) throw new UsageError(`poc results takes no argument "${slug}"`, 'poc');
+        if (values.as !== undefined) throw new UsageError('poc results takes no --as', 'poc');
+        return listResults(roots);
+      }
+      if (sub === 'processed') {
+        if (slug === undefined) throw new UsageError('Missing input: <slug>. Please provide it and retry', 'poc');
+        if (values.as === undefined) throw new UsageError('Missing input: --as. Please provide it and retry', 'poc');
+        return markProcessed(roots, { slug, as: values.as });
+      }
+      throw new UsageError(`Unknown poc command "${sub}". Use results or processed`, 'poc');
     },
   },
   gate: {

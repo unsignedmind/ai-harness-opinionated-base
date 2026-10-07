@@ -3,6 +3,7 @@ import { test, expect, beforeEach, afterEach } from 'vitest';
 import { mountApp, type App, type AppOptions } from '../src/app';
 import { buildDocs } from '../src/docs';
 import { buildModel } from '../src/model';
+import type { Run } from '../src/runs';
 import { fixtureFiles } from './fixtures';
 
 const shell = (files = fixtureFiles(), opts: AppOptions = {}) => {
@@ -161,6 +162,31 @@ test('status line and overview count in singular for one', () => {
   shell().setModel(buildModel(files));
   expect(document.getElementById('status')?.textContent).toBe('1 idea · 3 steps');
   expect(main().querySelector('.detail > p.muted')?.textContent).toBe('1 domain · 2 phases · 3 steps');
+});
+
+test('the header shows a badge per POC run while it exists, none without', () => {
+  const app = shell();
+  const poc: Run = {
+    kind: 'poc',
+    id: 'dark-mode',
+    domain: null,
+    branch: 'poc-dark-mode',
+    phase: 'develop',
+    seen: new Date().toISOString(),
+    ageSec: 0,
+    worktree: 'D:/p/.claude/worktrees/poc-dark-mode',
+    ahead: 2,
+    behind: 0,
+    dirty: true,
+  };
+  app.setModel(buildModel(fixtureFiles(), [poc]));
+  const status = document.getElementById('status')!;
+  expect(status.textContent).toMatch(/^2 ideas · 3 steps poc-dark-mode develop/);
+  expect(status.querySelector('.other-run .run.running .dirty')).not.toBeNull();
+  expect(status.querySelector('.other-run .ab')?.textContent).toBe('↑2 ↓0');
+  app.setModel(buildModel(fixtureFiles(), []));
+  expect(status.textContent).toBe('2 ideas · 3 steps');
+  expect(status.querySelector('.other-run')).toBeNull();
 });
 
 // ── opening a folder (standalone viewer) ──
