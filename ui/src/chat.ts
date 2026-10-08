@@ -9,6 +9,7 @@
 import {
   CHAT_SHELL,
   PRESENCE_LABEL,
+  doneAgents,
   renderAgents,
   renderLog,
   renderTabs,
@@ -152,6 +153,8 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
   let view: 'chat' | 'details' = ls.get(KEY_VIEW) === 'details' ? 'details' : 'chat';
   // the subagents opened, innermost last; while one is open the tab bar gives way to a back button
   let inspecting: InspectTarget[] = [];
+  // the folder of done subagents is open in the list; it too swaps the tab bar for a back button
+  let agentsFolder = false;
   // the followed transcript: pushed by the server, steps merged by id
   let steps: { src: string; es: EventSource; items: TranscriptItem[]; truncated: boolean } | null = null;
 
@@ -211,15 +214,27 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
 
   function drawInspect() {
     const t = target();
-    inspectBar.hidden = !t;
+    inspectBar.hidden = !t && !agentsFolder;
     viewSwitch.hidden = !!t;
     for (const b of viewSwitch.querySelectorAll<HTMLElement>('[data-view]'))
       b.setAttribute('aria-pressed', String(b.dataset.view === view));
     form.hidden = !!t && !t.agentId;
     text.placeholder = t ? `Message ${t.type} (via Claude)…` : 'Message Claude…';
-    if (!t) return;
+    if (!t) {
+      if (!agentsFolder) return;
+      const n = doneAgents(current()).length;
+      inspectBar.querySelector('.lbl')!.textContent = current()?.title ?? 'Chat';
+      inspectBar.querySelector('.type')!.textContent = 'Done';
+      inspectBar.querySelector('.desc')!.textContent = `${n} subagent${n === 1 ? '' : 's'}`;
+      inspectBar.querySelector<HTMLElement>('.chat-inspect-what')!.dataset.status = 'done';
+      return;
+    }
     const prev = inspecting.at(-2);
-    inspectBar.querySelector('.lbl')!.textContent = prev ? prev.type : (tabOf(t.key)?.title ?? 'Chat');
+    inspectBar.querySelector('.lbl')!.textContent = prev
+      ? prev.type
+      : agentsFolder
+        ? 'Done'
+        : (tabOf(t.key)?.title ?? 'Chat');
     inspectBar.querySelector('.type')!.textContent = t.type;
     inspectBar.querySelector('.desc')!.textContent = t.description;
     inspectBar.querySelector<HTMLElement>('.chat-inspect-what')!.dataset.status = agentOf(t)?.status ?? 'done';
@@ -246,6 +261,7 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
     const p = presenceNow();
     const tab = current();
     if (inspecting.length && !tabOf(inspecting[0].key)) inspecting = [];
+    if (!tab) agentsFolder = false;
     syncSteps();
     const t = target();
     if (showSteps())
@@ -256,7 +272,7 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
       });
     else renderLog(log, (active && chats[active]) || [], p);
     tabBar.innerHTML = renderTabs(tabs, active, unread);
-    tabRow.hidden = !!t || status === 'unpaired' || (!tabs.length && status !== null);
+    tabRow.hidden = !!t || agentsFolder || status === 'unpaired' || (!tabs.length && status !== null);
     drawInspect();
     drawAgents();
     const pill = $('.chat-presence');
@@ -298,7 +314,7 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
     agentsBtn.dataset.running = String(n > 0);
     agentsBtn.title = n ? `Subagents: ${n} running` : 'Subagents';
     agentsBtn.setAttribute('aria-expanded', String(!agentsBox.hidden));
-    if (!agentsBox.hidden) agentsBox.innerHTML = renderAgents(current());
+    if (!agentsBox.hidden) agentsBox.innerHTML = renderAgents(current(), Date.now(), agentsFolder);
   }
 
   function setNotice(html: string | null) {
@@ -700,8 +716,16 @@ export function mountChat(root: HTMLElement, deps: ChatDeps = {}): Chat {
       draw();
       log.scrollTop = log.scrollHeight;
     } else if (a === 'inspect' && el?.dataset.tool) inspect(el.dataset.tool, el.dataset.agent || null);
-    else if (a === 'back') {
-      inspecting.pop();
+    else if (a === 'agents-done') {
+      agentsFolder = true;
+      agentsBox.hidden = false;
+      draw();
+    } else if (a === 'back') {
+      if (inspecting.length) {
+        inspecting.pop();
+        // out of a subagent opened from the folder: the folder again
+        if (!inspecting.length && agentsFolder) agentsBox.hidden = false;
+      } else agentsFolder = false;
       draw();
       log.scrollTop = log.scrollHeight;
     } else if (a === 'agents') {

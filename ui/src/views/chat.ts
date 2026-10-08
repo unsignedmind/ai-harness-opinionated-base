@@ -79,19 +79,33 @@ const took = (ms: number) => {
 
 export const runningAgents = (tab: ChatTab | null) => (tab?.agents ?? []).filter((a) => a.status === 'running').length;
 
+export const doneAgents = (tab: ChatTab | null) => (tab?.agents ?? []).filter((a) => a.status === 'done');
+
+function agentRow(a: SubAgent, now: number): string {
+  const status = AGENT_STATUS.includes(a.status) ? a.status : 'done';
+  const what = a.status === 'running' ? (a.activity ?? 'starting…') : status;
+  const n = `${a.tools} tool${a.tools === 1 ? '' : 's'} · ${took((a.endedAt ?? now) - a.startedAt)}`;
+  return `<li class="agent" data-status="${esc(status)}"><button type="button" class="agent-open" data-chat="inspect" data-tool="${esc(a.id)}" data-agent="${esc(a.agentId ?? '')}" title="Show what it does"><span class="dot" aria-hidden="true"></span><span class="agent-main"><span class="agent-head"><strong>${esc(a.type)}</strong><span class="agent-desc">${esc(a.description)}</span></span><span class="agent-now mono">${esc(what)}</span></span><span class="agent-n muted">${esc(n)}</span><span class="agent-go" aria-hidden="true">&#8250;</span></button></li>`;
+}
+
 // The subagents of the active tab behind the chevron of the tab bar: one row each with status,
 // type, task, current tool call, tool calls so far and time taken. A row opens the subagent.
-export function renderAgents(tab: ChatTab | null, now = Date.now()): string {
+// The done ones sit in a folder row; folder = the list inside it.
+export function renderAgents(tab: ChatTab | null, now = Date.now(), folder = false): string {
   const agents = tab?.agents ?? [];
+  const done = doneAgents(tab);
+  if (folder)
+    return done.length
+      ? `<ul>${done.map((a) => agentRow(a, now)).join('')}</ul>`
+      : '<p class="muted chat-agents-empty">No done subagents.</p>';
   if (!agents.length) return '<p class="muted chat-agents-empty">No subagents in the last run of this chat.</p>';
+  const folderRow = done.length
+    ? `<li class="agent agent-folder" data-status="done"><button type="button" class="agent-open" data-chat="agents-done" title="Show the done subagents"><span class="folder" aria-hidden="true">&#128193;</span><span class="agent-main"><span class="agent-head"><strong>Done</strong></span></span><span class="agent-n muted">${done.length} subagent${done.length === 1 ? '' : 's'}</span><span class="agent-go" aria-hidden="true">&#8250;</span></button></li>`
+    : '';
   return `<ul>${agents
-    .map((a) => {
-      const status = AGENT_STATUS.includes(a.status) ? a.status : 'done';
-      const what = a.status === 'running' ? (a.activity ?? 'starting…') : status;
-      const n = `${a.tools} tool${a.tools === 1 ? '' : 's'} · ${took((a.endedAt ?? now) - a.startedAt)}`;
-      return `<li class="agent" data-status="${esc(status)}"><button type="button" class="agent-open" data-chat="inspect" data-tool="${esc(a.id)}" data-agent="${esc(a.agentId ?? '')}" title="Show what it does"><span class="dot" aria-hidden="true"></span><span class="agent-main"><span class="agent-head"><strong>${esc(a.type)}</strong><span class="agent-desc">${esc(a.description)}</span></span><span class="agent-now mono">${esc(what)}</span></span><span class="agent-n muted">${esc(n)}</span><span class="agent-go" aria-hidden="true">&#8250;</span></button></li>`;
-    })
-    .join('')}</ul>`;
+    .filter((a) => a.status !== 'done')
+    .map((a) => agentRow(a, now))
+    .join('')}${folderRow}</ul>`;
 }
 
 // a step of a session or subagent (cli/src/chat/transcript.js createCondenser)

@@ -1673,6 +1673,15 @@ dialog.chat::backdrop {
   font-size: 18px;
   line-height: 1;
 }
+/* the folder row of the done subagents */
+.chat-agents .agent-folder .agent-open {
+  align-items: center;
+}
+.chat-agents .agent-folder .folder {
+  flex: none;
+  font-size: 14px;
+  line-height: 1;
+}
 .chat-agents .agent .dot,
 .chat-inspect-what .dot {
   width: 7px;

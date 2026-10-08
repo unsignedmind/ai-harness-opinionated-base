@@ -309,13 +309,29 @@ test('renderAgents: escaped, status, current tool, tool count and time', () => {
     12000,
   );
   expect(box.querySelector('img')).toBeNull();
-  const [run, done] = box.querySelectorAll<HTMLElement>('.agent');
+  const [run, folder] = box.querySelectorAll<HTMLElement>('.agent');
   expect(run.dataset.status).toBe('running');
   expect(run.querySelector('.agent-desc')!.textContent).toBe('<img src=x>');
   expect(run.querySelector('.agent-now')!.textContent).toBe('Grep: route');
   expect(run.querySelector('.agent-n')!.textContent).toBe('3 tools · 12s');
-  expect(done.querySelector('.agent-now')!.textContent).toBe('done');
-  expect(done.querySelector('.agent-n')!.textContent).toBe('1 tool · 1m 15s');
+  // the done ones sit in a folder row
+  expect(folder.classList.contains('agent-folder')).toBe(true);
+  expect(folder.querySelector<HTMLElement>('[data-chat="agents-done"]')).not.toBeNull();
+  expect(folder.querySelector('.agent-n')!.textContent).toBe('1 subagent');
+  box.innerHTML = renderAgents(tabOf(A, { agents: [agent('2')] }), 0);
+  expect(box.querySelector('.agent-folder')).toBeNull();
+});
+
+test('renderAgents folder: only the done ones', () => {
+  const box = document.createElement('div');
+  const agents = [agent('2'), agent('1', { status: 'done', activity: null, tools: 1, endedAt: 75000 })];
+  box.innerHTML = renderAgents(tabOf(A, { agents }), 12000, true);
+  const rows = box.querySelectorAll<HTMLElement>('.agent');
+  expect(rows.length).toBe(1);
+  expect(rows[0].querySelector('.agent-now')!.textContent).toBe('done');
+  expect(rows[0].querySelector('.agent-n')!.textContent).toBe('1 tool · 1m 15s');
+  box.innerHTML = renderAgents(tabOf(A, { agents: [agent('2')] }), 0, true);
+  expect(box.textContent).toContain('No done subagents');
 });
 
 test('subagents: the chevron counts the running ones and expands their list', async () => {
@@ -655,6 +671,44 @@ test('a subagent in view: back button instead of the tabs, its own steps, messag
   expect(dialog.querySelector<HTMLElement>('.chat-tabs-row')!.hidden).toBe(false);
   expect(sub.closed).toBe(true);
   expect(textarea.placeholder).toBe('Message Claude…');
+});
+
+test('done subagents folder: back button instead of the tabs, a subagent opened from it goes back to it', async () => {
+  const { toggle, dialog } = setup({ state: { key: A, server: true, runner: true, tabs: [tabOf(A)] } });
+  await tick();
+  const run = agent('toolu_1', { agentId: 'a1' });
+  const done = agent('toolu_2', { agentId: 'a2', type: 'Plan', status: 'done', endedAt: 1000 });
+  FakeES.last!.emit('sessions', { sessions: [tabOf(A, { running: true, agents: [run, done] })], runner: true });
+  toggle.click();
+  dialog.querySelector<HTMLElement>('[data-chat="agents"]')!.click();
+  const box = dialog.querySelector<HTMLElement>('.chat-agents')!;
+  const bar = dialog.querySelector<HTMLElement>('.chat-inspect')!;
+  const tabsRow = dialog.querySelector<HTMLElement>('.chat-tabs-row')!;
+  expect(box.querySelectorAll('[data-chat="inspect"]').length).toBe(1);
+
+  box.querySelector<HTMLElement>('[data-chat="agents-done"]')!.click();
+  expect(tabsRow.hidden).toBe(true);
+  expect(bar.hidden).toBe(false);
+  expect(box.hidden).toBe(false);
+  expect(bar.querySelector('.lbl')!.textContent).toBe('Chat');
+  expect(bar.querySelector('.type')!.textContent).toBe('Done');
+  expect(bar.querySelector('.desc')!.textContent).toBe('1 subagent');
+  const rows = box.querySelectorAll<HTMLElement>('[data-chat="inspect"]');
+  expect([...rows].map((r) => r.dataset.agent)).toEqual(['a2']);
+
+  rows[0].click();
+  expect(box.hidden).toBe(true);
+  expect(bar.querySelector('.type')!.textContent).toBe('Plan');
+  expect(bar.querySelector('.lbl')!.textContent).toBe('Done');
+  dialog.querySelector<HTMLElement>('[data-chat="back"]')!.click();
+  // the folder again
+  expect(box.hidden).toBe(false);
+  expect(tabsRow.hidden).toBe(true);
+  expect(bar.querySelector('.type')!.textContent).toBe('Done');
+  dialog.querySelector<HTMLElement>('[data-chat="back"]')!.click();
+  expect(bar.hidden).toBe(true);
+  expect(tabsRow.hidden).toBe(false);
+  expect(box.querySelector('[data-chat="agents-done"]')).not.toBeNull();
 });
 
 test('a subagent opened from its step; one that cannot be resumed has no composer; nested ones go back one level', async () => {
