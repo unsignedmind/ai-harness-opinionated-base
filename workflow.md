@@ -224,7 +224,7 @@
     </step2>
     <step3>Mode given (e.g. by quick-step) → skip
         <question>How should the plan run?
-            <choice key="AUTO">Autonomous. Stops only for problems or human validation</choice>
+            <choice key="AUTO">Autonomous. Stops only for human validation. Mention encountered problems that would stop a run (but don't stop) and name the assumptions made to overcome the problems autonomously</choice>
             <choice key="MANUAL">Stops after each specification, implementation and review for your go</choice>
         </question>
     </step3>
