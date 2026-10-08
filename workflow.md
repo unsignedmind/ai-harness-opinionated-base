@@ -21,40 +21,42 @@
     <rule>Token: "nos run start" prints the run token. Remember it (it stays in this transcript) and pass --token <token> to every "nos run" command. Fresh session without the token → only --take-over, and only after the user chose TAKEOVER. State run id and token in every park report, so they survive a compacted context</rule>
     <rule>Specs commits: only you commit <specs>, only with "nos specs commit". Subagents never run git against <specs>. Inside a run, after every ability returns: nos specs commit --run <run> -m "step-<id>: <ability>" (phase abilities: "phase-<id>: <ability>"). specify and spec-review are one unit: one commit after spec-review reports done, -m "step-<id>: specify, spec-review". Outside a run (idea, plan, quick step creation): nos specs commit --domain <domain> -m "<ability>: <domain>" or "<ability>: <what>". Never --domain for a domain with a run file in <specs>/.runs: it would commit that run's spec edits; check first. Only <specs>/config.json changed (e.g. chat settings): nos specs commit --config -m "<ability>: <what>". Status changes are picked up by the next specs commit. Exception: the architect run by block "proposals" (no specs commit). POC: no specs commit after its turns; only its result file, with nos specs commit --run poc-<slug> -m "poc-<slug>: result" or "poc-<slug>: processed" (commits only <specs>/pocs/poc-<slug>-result.md, also when the run file is gone)</rule>
     <rule>Code commits: develop, review-fixing, integrate and architect commit code and docs themselves in their cwd, subject prefix "step-<id>: ", "phase-<id>: " or "architect: " (colon included, matched exactly). The ability "poc" commits "poc: " on its throwaway branch. Commit form: rule "Shell" (git add -- <files>, then git commit -m "<subject>" [-m "<body>"]; never a heredoc, $(cat …) or -F -). Never a spec file, never a push</rule>
-    <rule>Exit codes of nos commands, react by the table <exitCodes>
-    <code n="0">ok</code>
-    <code n="1">failed → park, report the error. From "nos run finish" → cycle "finish" step2</code>
-    <code n="2">usage → fix the call. Never guess around it</code>
-    <code n="3">rebase conflict (sync, finish) → run ability "integrate" with the run file and the conflict list.
-        <do>pass → nos specs commit --run <run> -m "<run>: integrate", then repeat the same command</do>
-        <do>blocked → stop, report both specs it cites. Ask only this question (not the question of park step2)
-            <question>The two specs contradict each other. How do you want to continue?
-                <choice key="DECIDE">Say which intent wins → rerun ability "integrate" with that decision (it overrides the contradiction), then repeat the command</choice>
-                <choice key="PAUSE">Pause → park choice PAUSE</choice>
-                <choice key="ABANDON">Drop the run → park choice ABANDON</choice>
-            </question>
-        </do>
-    </code>
-    <code n="4" from="run start, sync, finish, cleanup, abandon" when="details without lock">run held by another token → report holder and age ("seen", "ageSec" in the details)
-        <question>The run is held by another session. How do you want to continue?
-            <choice key="TAKEOVER">Take the run over: "nos run start --domain <domain> --plan|--quick <step id> --take-over" (POC: "nos run start --poc <slug> --take-over"), keep the new token. Came from run start → continue option "run" step2 (POC: option "poc" step7) with the new token (EnterWorktree, nos roots, …). Came from another nos run command → repeat it with the new token. Only when the other session is gone</choice>
-            <choice key="STOP">Stop here</choice>
-        </question>
-    </code>
-    <code n="4" from="run start --take-over" when="details.lock merge, pidAlive true">a finish of the old holder still runs → wait 60s, repeat the take-over. Up to 10 times, then park and report</code>
-    <code n="4" when="details.lock ids or runs">a short CLI-internal lock stayed held 10s → wait 60s, repeat the command. Twice more held → park, report holder and age ("nos lock release <lock> --break" is the user's call)</code>
-    <code n="4" from="run finish" when="details.lock merge">merge lock held by another run → wait 60s (Monitor tool or sleep), repeat finish. Up to 10 times, then park and report holder and age. A stale holder is never broken by you: "nos lock release merge --break" is the user's call</code>
-    <code n="6">another run is active in the domain → report that run, holder and age
-        <question>Another run is active in this domain. How do you want to continue?
-            <choice key="SWITCH" when="plan start">Continue that run instead → option "run" step2 with it</choice>
-            <choice key="WAIT" when="quick step start">Stop now. Start this quick step via QUICK or RUN after that run is merged</choice>
-            <choice key="STOP">Stop here</choice>
-        </question>
-    </code>
-    <code n="5">dirty worktree → show the file list. Tracked modified files and untracked files named in the Task List or Dev Log of the current step (at finish: the last done step) → in <work>: git add -- <those files>, git commit -m "step-<id>: leftovers" (phase: "phase-<id>: leftovers"), repeat the command. docs/guardrails.xml modified (an interrupted proposals architect) → rerun ability "architect" (resume) with the same task and proposals, then repeat the command. Files changed by an interrupted docs-update architect (architecture docs, a helper's own files) → rerun ability "architect" UPDATE-DOCS (resume) with the same mode and entries, then repeat the command. Anything else (generated output, lockfile churn, env files, unknown) → park, report "add to .gitignore or delete". Never git add -A</code>
-    <code n="5" from="run cleanup">modified tracked files block the removal of a merged run's worktree (they are not in main) → park, report the file list: the user reverts or deletes them. GO → repeat "nos run cleanup --token <token>"</code>
-    <code n="7">no slot within slotWait → park, report: other runs hold every slot (e2e or dev server)</code>
-</exitCodes></rule>
+    <rule>Exit codes of nos commands, react by the table 
+        <exitCodes>
+            <code n="0">ok</code>
+            <code n="1">failed → park, report the error. From "nos run finish" → cycle "finish" step2</code>
+            <code n="2">usage → fix the call. Never guess around it</code>
+            <code n="3">rebase conflict (sync, finish) → run ability "integrate" with the run file and the conflict list.
+                <do>pass → nos specs commit --run <run> -m "<run>: integrate", then repeat the same command</do>
+                <do>blocked → stop, report both specs it cites. Ask only this question (not the question of park step2)
+                    <question>The two specs contradict each other. How do you want to continue?
+                        <choice key="DECIDE">Say which intent wins → rerun ability "integrate" with that decision (it overrides the contradiction), then repeat the command</choice>
+                        <choice key="PAUSE">Pause → park choice PAUSE</choice>
+                        <choice key="ABANDON">Drop the run → park choice ABANDON</choice>
+                    </question>
+                </do>
+            </code>
+            <code n="4" from="run start, sync, finish, cleanup, abandon" when="details without lock">run held by another token → report holder and age ("seen", "ageSec" in the details)
+                <question>The run is held by another session. How do you want to continue?
+                    <choice key="TAKEOVER">Take the run over: "nos run start --domain <domain> --plan|--quick <step id> --take-over" (POC: "nos run start --poc <slug> --take-over"), keep the new token. Came from run start → continue option "run" step2 (POC: option "poc" step7) with the new token (EnterWorktree, nos roots, …). Came from another nos run command → repeat it with the new token. Only when the other session is gone</choice>
+                    <choice key="STOP">Stop here</choice>
+                </question>
+            </code>
+            <code n="4" from="run start --take-over" when="details.lock merge, pidAlive true">a finish of the old holder still runs → wait 60s, repeat the take-over. Up to 10 times, then park and report</code>
+            <code n="4" when="details.lock ids or runs">a short CLI-internal lock stayed held 10s → wait 60s, repeat the command. Twice more held → park, report holder and age ("nos lock release <lock> --break" is the user's call)</code>
+            <code n="4" from="run finish" when="details.lock merge">merge lock held by another run → wait 60s (Monitor tool or sleep), repeat finish. Up to 10 times, then park and report holder and age. A stale holder is never broken by you: "nos lock release merge --break" is the user's call</code>
+            <code n="6">another run is active in the domain → report that run, holder and age
+                <question>Another run is active in this domain. How do you want to continue?
+                    <choice key="SWITCH" when="plan start">Continue that run instead → option "run" step2 with it</choice>
+                    <choice key="WAIT" when="quick step start">Stop now. Start this quick step via QUICK or RUN after that run is merged</choice>
+                    <choice key="STOP">Stop here</choice>
+                </question>
+            </code>
+            <code n="5">dirty worktree → show the file list. Tracked modified files and untracked files named in the Task List or Dev Log of the current step (at finish: the last done step) → in <work>: git add -- <those files>, git commit -m "step-<id>: leftovers" (phase: "phase-<id>: leftovers"), repeat the command. docs/guardrails.xml modified (an interrupted proposals architect) → rerun ability "architect" (resume) with the same task and proposals, then repeat the command. Files changed by an interrupted docs-update architect (architecture docs, a helper's own files) → rerun ability "architect" UPDATE-DOCS (resume) with the same mode and entries, then repeat the command. Anything else (generated output, lockfile churn, env files, unknown) → park, report "add to .gitignore or delete". Never git add -A</code>
+            <code n="5" from="run cleanup">modified tracked files block the removal of a merged run's worktree (they are not in main) → park, report the file list: the user reverts or deletes them. GO → repeat "nos run cleanup --token <token>"</code>
+            <code n="7">no slot within slotWait → park, report: other runs hold every slot (e2e or dev server)</code>
+        </exitCodes>
+    </rule>
 </rules>
 
 <start>
