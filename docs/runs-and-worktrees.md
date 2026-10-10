@@ -46,7 +46,9 @@ In short: the words used everywhere below.
 | **ability / subagent** | A role file in `abilities/` (specify, develop, integrate, …). Runs in a fresh background subagent (Agent tool, `run_in_background`), except `chat`. Inherits the session's cwd. |
 | **quick step vs plan** | Quick step: single step, no phases, in `quick-steps/quick-steps.json`; finish is automatic after `done`. Plan: phases → steps in `plan.json`; finish only after the user says YES. |
 | **integrate** | The merge-agent ability. Resolves a stopped rebase by the intent of both specs, then runs the gate. |
-| **park** | The orchestrator stops and asks the user (GO / mode switch / REJECT / PAUSE / ABANDON). |
+| **park** | The orchestrator stops and asks the user (GO / mode switch / REJECT / PAUSE / ABANDON). In AUTO only for human validation and irreversible actions (plan INTEGRATE, ABANDON, deleting files with user work). |
+| **auto decision** | AUTO solved a problem without the user (most reasonable solution, smallest reversible change, never skipping a test, review or human validation): one line in `<specs>/<domain>/auto-decisions.md` (`## <run> — <date>`, `- <where> — problem: … — applied: … — revert: …`), committed with the run's next specs commit, shown in every park and final report (`auto decisions this run: <n>`). |
+| **auto end** | AUTO hit a technical limit (lock, slot, permission, EnterWorktree denied, process holding the worktree, main busy) after its bounded wait/retry, or a dead end (bounded fix tries used up): recorded, specs commit `<run>: auto end`, final report with blocker and tries, no question, no status change; RUN resumes. Not a park. |
 
 ---
 
@@ -303,16 +305,16 @@ Errors: one line on stderr `nos: <message>`. Exit 3–7 and some exit 1 (`run fi
 | Code | Name (`exit-codes.js`) | Meaning | Orchestrator does |
 |---|---|---|---|
 | 0 | OK | ok | continue |
-| 1 | FAILED | failed | park, report. From `run finish` → cycle finish step2: gate fail → FIX (develop resume, commit `step-<id>: gate fix`, specs commit, repeat) / PAUSE / ABANDON; main busy / dirty / other branch / ff refused twice → park, GO repeats after user fixed main. From `run cleanup` "a process … still uses <wt>" → user stops it, repeat |
+| 1 | FAILED | failed | park, report (AUTO: transient → retry once, then auto end). From `run finish` → cycle finish step2: gate fail → FIX (develop resume, commit `step-<id>: gate fix`, specs commit, repeat) / PAUSE / ABANDON (AUTO: FIX by itself, max 2 rounds, then auto end unmerged); main busy / dirty / other branch / ff refused twice → park, GO repeats after user fixed main (AUTO: wait 60 s, repeat once, then auto end). From `run cleanup` "a process … still uses <wt>" → user stops it, repeat (AUTO: stop own dev server, 3 × 60 s retries, then auto end "cleanup pending") |
 | 2 | USAGE | bad call | fix the call, never guess |
-| 3 | CONFLICT | rebase conflict (sync, finish) | ability integrate → pass: `nos specs commit --run <run> -m "<run>: integrate"`, repeat command; blocked → DECIDE (rerun integrate with decision) / PAUSE / ABANDON |
-| 4 | HELD | run held (no `details.lock`) | report holder + age → TAKEOVER (`run start … --take-over`, POC: `run start --poc <slug> --take-over`; keep new token, repeat) / STOP |
-| 4 | | `--take-over`, `details.lock merge`, `pidAlive true` | wait 60 s, repeat, max 10×, then park |
-| 4 | | `details.lock ids` or `runs` | wait 60 s, repeat; twice more → park (`--break` is the user's) |
-| 4 | | from `run finish`, `details.lock merge` | wait 60 s (Monitor or sleep), repeat finish, max 10×, then park |
-| 5 | DIRTY | dirty worktree | tracked modified + untracked files named in current step's Task List / Dev Log → `git add -- <files>`, `git commit -m "step-<id>: leftovers"` (phase: `phase-<id>: leftovers`), repeat. Anything else → park "add to .gitignore or delete". Never `git add -A`. From `run cleanup` → park, user reverts/deletes, GO repeats |
+| 3 | CONFLICT | rebase conflict (sync, finish) | ability integrate → pass: `nos specs commit --run <run> -m "<run>: integrate"`, repeat command; blocked → DECIDE (rerun integrate with decision) / PAUSE / ABANDON. AUTO: integrate decides itself (main wins unless the own spec explicitly replaces it, recorded); gate fail after the rebase → max 2 fix rounds; rebase still open or rounds used up → auto end |
+| 4 | HELD | run held (no `details.lock`) | report holder + age → TAKEOVER (`run start … --take-over`, POC: `run start --poc <slug> --take-over`; keep new token, repeat) / STOP. AUTO mid-run (sync, finish, cleanup: another session took over) → auto end, no take-back |
+| 4 | | `--take-over`, `details.lock merge`, `pidAlive true` | wait 60 s, repeat, max 10×, then park (AUTO: auto end) |
+| 4 | | `details.lock ids` or `runs` | wait 60 s, repeat; twice more → park (AUTO: auto end; `--break` is the user's) |
+| 4 | | from `run finish`, `details.lock merge` | wait 60 s (Monitor or sleep), repeat finish, max 10×, then park (AUTO: auto end) |
+| 5 | DIRTY | dirty worktree | tracked modified + untracked files named in current step's Task List / Dev Log → `git add -- <files>`, `git commit -m "step-<id>: leftovers"` (phase: `phase-<id>: leftovers`), repeat. AUTO: untracked generated output (build, test results, coverage, caches) → pattern in `.gitignore`, commit `step-<id>: ignore generated <path>`, recorded, repeat. Anything else → park "add to .gitignore or delete" (also AUTO: deleting is irreversible). Never `git add -A`. From `run cleanup` → park (also AUTO), user reverts/deletes, GO repeats |
 | 6 | DOMAIN_RUNNING | another run in the domain | plan start: SWITCH / STOP; quick start: WAIT / STOP |
-| 7 | SLOT_TIMEOUT | no slot within `slotWait` | park "other runs hold every slot" (develop: report blocked) |
+| 7 | SLOT_TIMEOUT | no slot within `slotWait` | park "other runs hold every slot" (develop: report blocked). AUTO: repeat once (one more `slotWait`), then auto end |
 
 ---
 
@@ -350,12 +352,12 @@ In short: start → enter → work (sync before every develop) → done → fini
 
 Details (`workflow.md` option "run" step2, cycles "step"/"finish"):
 1. **Start**: `nos run start --domain <d> --plan|--quick <id>` (+ `--token` if the session holds one). `install` failure or `warnings` (e.g. worktree not ignored) → report, continue.
-2. **Enter**: cwd not main → `cd <main>` (own call). `EnterWorktree path=<run.worktree>`. Denied → `cd <main>`, retry once → denied again → park with run id + token. Never continue outside. `enter` ≠ worktree (offset) → `cd <enter>`, pass as work.
+2. **Enter**: cwd not main → `cd <main>` (own call). `EnterWorktree path=<run.worktree>`. Denied → `cd <main>`, retry once → denied again → park with run id + token (AUTO already known, e.g. from quick-step: auto end). Never continue outside. `enter` ≠ worktree (offset) → `cd <enter>`, pass as work.
 3. **Roots + run file**: `nos roots` → home, work, specs; read `mainBranch`, `base`.
 4. **Rebase check** (phase develop): `nos run sync`. 3 → integrate, sync again. 5 → continue, commit nothing (an interrupted ability finishes its own work).
 5. **Steps**: as before, in the worktree. Before every develop (`cycle step` step3, not when resuming at `in-progress`): `nos run sync`. Conflicts surface early, per step, small.
 6. **Done**: code only on the branch.
-7. **Finish**: `nos run finish --token`. Quick step: automatic after done. Plan: question "Integrate it into main now?" YES/NO (NO: run stays, RUN offers it again). Before it, still in the worktree: block "proposals", then block "docs-update": the run's `(architecture)` Dev Log entries → architect UPDATE-DOCS (run mode + entries), one question per change, relayed; AUTO + a matching orchestrator standing answer answers it, else the user. Commits `architect: …` on the run branch, merged with it; no specs commit. Commit `architect: docs <section> from step-<id> (architecture)`, helper working files included (else exit 5 → rerun UPDATE-DOCS resume). No entries → skip; discarded steps skipped. A repeated finish (after integrate / gate FIX) skips steps in the report line "docs update: <step ids> handled, <n> committed" (kept in every later park/final report), the architect skips step ids that already have such a commit. Not on a crashed-finish resume (status merged). Plan and quick-step never plan code-docs update steps for this reason.
+7. **Finish**: `nos run finish --token`. Quick step: automatic after done. Plan: question "Integrate it into main now?" YES/NO (NO: run stays, RUN offers it again). Before it, still in the worktree: block "proposals" (MANUAL; AUTO asks them once after merge and cleanup, the architect then commits on main), then block "docs-update": the run's `(architecture)` Dev Log entries → architect UPDATE-DOCS (run mode + entries), one question per change; AUTO: a matching orchestrator standing answer, else the orchestrator answers it itself (yes when it matches code and entry and breaks no guardrail), recorded; MANUAL: the user. Commits `architect: …` on the run branch, merged with it; no specs commit. Commit `architect: docs <section> from step-<id> (architecture)`, helper working files included (else exit 5 → rerun UPDATE-DOCS resume). No entries → skip; discarded steps skipped. A repeated finish (after integrate / gate FIX) skips steps in the report line "docs update: <step ids> handled, <n> committed" (kept in every later park/final report), the architect skips step ids that already have such a commit. Not on a crashed-finish resume (status merged). Plan and quick-step never plan code-docs update steps for this reason.
 8. **Leave + cleanup**: `ExitWorktree action=keep`, `nos run cleanup --token`, `nos roots`.
 
 Pause/resume: run, worktree, branch stay. RUN/QUICK list shows "running" + phase + age, "cleanup pending" for merged/abandoned phases. Statuses are never reset on resume; a resumed session inside its worktree skips `run start`, always runs roots + run file + rebase check.
@@ -461,7 +463,7 @@ ExitWorktree keep; nos run cleanup
 
 ## 12. Integrate ability
 
-In short: when a rebase stops on conflicts, this agent reads the specs of both sides and resolves by intent; contradiction → asks you.
+In short: when a rebase stops on conflicts, this agent reads the specs of both sides and resolves by intent; contradiction → asks you (MANUAL), or in AUTO main wins unless the own spec explicitly replaces it, recorded.
 
 `abilities/integrate.md`. Only ability that continues a rebase. Input: home, work, specs, the run file (kind, id, domain, branch, base, mainBranch). Optional: conflict list from the nos output (else `git diff --name-only --diff-filter=U`), the user's decision which intent wins.
 
@@ -469,7 +471,7 @@ Workflow:
 1. Rebase check, two plain calls: `git rev-parse --absolute-git-dir` → then `ls -d <path>/rebase-merge <path>/rebase-apply` (path typed literally). Neither → "no rebase in progress", done. Not `REBASE_HEAD` (git leaves it after a finished rebase).
 2. Their side: `git log <base>..<mainBranch> --format=%s` → prefixes. `step-<id>:` → `nos specs find-step <id>` → spec file. `phase-<id>:` → phase in `<specs>/domain-*/plan.json` (Grep with path `<specs>`). `architect:` / `setup:` → no spec, message + diff are the intent.
 3. Own side: `git log -1 --format=%s REBASE_HEAD` → same prefix handling. Read Description, ACs, Dev Log of both.
-4. Resolve each file by both intents. User decision given → wins. Contradicting specs, no decision → stop, rebase left open, report blocked citing both spec files and ACs.
+4. Resolve each file by both intents. User decision given → wins. Contradicting specs, no decision → MANUAL: stop, rebase left open, report blocked citing both spec files and ACs. AUTO: the behavior already on main wins unless the own step's spec explicitly replaces it; adapt the own side, the `(merge)` entry cites both spec paths and the choice, marked `(auto decision)`.
 5. `git add` resolved files, `git -c core.editor=true rebase --continue`. Next stop → step 3 again.
 6. `nos gate` (`--e2e` if an involved Test Strategy names e2e). Merge-caused fail → fix (failing test first where behavior changes), commit code only `<prefix> merge fix` (prefix of the step whose code the fix changes, else of the last replayed commit). Not fixable → blocked.
 7. Dev Log of own step, under `### What I did`: one entry per conflict marked `(merge)`: file, both intents, resolution, other step id.

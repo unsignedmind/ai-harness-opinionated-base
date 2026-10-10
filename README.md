@@ -137,7 +137,7 @@ Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
 3. **RUN**: choose a mode:
    ```
    How should the plan run?
-   A - Autonomous. Stops only for problems or human validation [AUTO]
+   A - Autonomous. Stops only for human validation and irreversible actions (merging a plan into main, deleting files with your work). Solves every other problem with the most reasonable solution and records problem and solution in auto-decisions.md of the domain. A technical limit (lock, slot, permission) or a dead end ends the run with a report, without a question [AUTO]
    B - Stops after each specification, implementation and review for your go [MANUAL]
    ```
    nos creates the branch and worktree of the run (`plan-<domain id>`), moves the session into it and works through every step and phase there.
@@ -197,7 +197,7 @@ After each task the menu comes back. Every change is proposed first (handed-over
 
 nos never saves a Claude Code memory or a CLAUDE.md/AGENTS.md entry for a project lesson, and neither does any ability: guardrail proposals are the single channel. Abilities put their lessons into their report, the orchestrator collects them with its own. When you correct it, decide something for the project, or the same failure keeps coming back, the orchestrator writes it down as a **guardrail proposal**: the section (`coding`, `review`, `specify`, `plan`, `architect` or `orchestrator`), the wording, the reason (your words and the date, or the failure with its step, park, Dev Log entry or review finding) and why it does not block valid work. Guesses, one-offs and things already in a guardrail or the docs get no proposal. A lesson about nos itself is just reported to you.
 
-It tells you in one line when it notes one (`Noted guardrail proposal P1: …`) but never interrupts a step for the question. It asks at the next park or final report, or before the session ends (pause, stop, abandon), also in AUTO, as its own question:
+It tells you in one line when it notes one (`Noted guardrail proposal P1: …`) but never interrupts a step for the question. It asks at the next park or final report, or before the session ends (pause, stop, abandon), also in AUTO, as its own question. In AUTO it never asks before the finish: the proposals come once at the very end, after merge and cleanup (the architect then commits on main), or at the end of a run that ended at a technical limit or dead end:
 
 ```
 Lessons from this work, proposed as guardrails. Which should the architect add?
@@ -216,16 +216,23 @@ Accepted ones go to the architect (task ADD-GUARDRAILS). It checks each (section
 | After a step is specified | continues | stops, shows the spec in simple words, waits for your go |
 | After a step or phase is implemented | continues | stops, waits for your go |
 | After a step or phase is reviewed | continues | stops, waits for your go |
-| Develop or review is blocked | stops | stops |
+| Develop or review is blocked | solves it: develop reruns once with the problems as feedback, review-fixing decides open questions by the specs; what is left goes on, recorded; the finish gate decides | stops |
+| A subagent asks a question | answers it with the most reasonable choice, recorded (asks you only about look and feel or irreversible actions) | asks you |
+| Gate fails at integration | fixes it, at most 2 rounds, then ends the run unmerged with a report | asks: FIX, PAUSE or ABANDON |
+| Contradicting specs at a rebase | what is already on main wins, unless the step's spec explicitly replaces it; recorded | asks you (DECIDE) |
+| Irreversible action: plan INTEGRATE, ABANDON, deleting files with your work | stops | stops |
+| Technical limit (lock, slot, permission, a process holding the worktree) | waits and retries a bounded time, then ends the run with a report; RUN resumes it | stops |
 | `human-validation-needed: true` | stops at reviewed | stops at reviewed |
 | `review-needed: false` | skips the review, implemented → done | skips the review, implemented → done |
 | both of the above | stops at implemented | stops at implemented |
 
-You can switch modes at every stop. In AUTO an orchestrator guardrail may answer one named question of a subagent for you (a standing answer, see Templates → guardrails.xml); MANUAL always asks you.
+You can switch modes at every stop. In AUTO an orchestrator guardrail may answer one named question of a subagent for you (a standing answer, see Templates → guardrails.xml); it wins over nos's own choice. MANUAL always asks you.
+
+**AUTO decisions.** Every problem AUTO solves without you is written to `<specs>/<domain>/auto-decisions.md` (template `templates/auto-decisions.md`): one section per run (`## <run> — <date>`), one line per decision (`- <where> — problem: … — applied: … — revert: …`), committed with the run's next specs commit. The details stay where the abilities write them (Spec Log, Dev Log, review Fixes marked `(auto decision)`). Every park and the final report show `auto decisions this run: <n>` with the lines, plus follow-ups (out-of-scope review findings). Ending a run at a technical limit or dead end is no park: nothing waits for you, the status stays and RUN continues it; the report names the blocker and what was tried.
 
 ### When nos stops (a "park")
 
-nos tells you what it stopped at, its status and why. For human validation it explains in simple steps what to check, so you don't need to know the code. Then:
+nos tells you what it stopped at, its status and why. In AUTO it parks only for human validation and irreversible actions; every park report lists the auto decisions of the run. For human validation it explains in simple steps what to check, so you don't need to know the code. Then:
 
 ```
 How do you want to continue?
@@ -257,22 +264,22 @@ A resumed session (`claude --resume`, a restarted chat) is back in the run's wor
 - A **run** is one plan (`plan-<domain id>`), one quick step (`quick-<step id>`) or one POC (`poc-<slug>`) in its own branch and git worktree under `.claude/worktrees/<run>`. The session works inside it; subagents, tests and code commits land there. One run per domain, one run per session; run several in parallel from several terminals or chat tabs. A POC has no domain and no statuses, runs next to anything, is never merged and is deleted with `nos run abandon`.
 - The specs are not in the worktrees. They live once in `<specs>/` (its own git repo next to the project checkout, default `../<project>.specs`), shared by every run and live in the Spec UI. Only the orchestrator commits them (`nos specs commit`, after every ability; specify and spec-review count as one).
 - Why outside the checkout: Claude Code's worktree isolation (after `EnterWorktree`) refuses edits to the main checkout from the worktree session and its subagents, also through junctions, and blocks git redirected into it (`git -C <main>`, `cd <main> && git`). So the specs live outside, nos is always called as the literal `node <home>/cli/bin/nos.js …` (never via a variable or alias: computed command names are refused too), and git against main runs only inside nos commands.
-- Live-run rules that follow from it (workflow.md `<rules>`, repeated in every ability that needs them): never `cd` into `<specs>` or anywhere outside the work folder (the Bash cwd persists; `EnterWorktree` from outside the repo needs an approval auto mode and the chat cannot give, so a denied enter retries once from `<main>`, then parks); files in `<specs>` are written only with Write/Edit (auto mode refuses shell writes outside the cwd; `<specs>` is an added directory); shell commands that run git or change files stay literal (no `$(…)`, backticks, variables or `cd x && git`), one plain git command per call.
+- Live-run rules that follow from it (workflow.md `<rules>`, repeated in every ability that needs them): never `cd` into `<specs>` or anywhere outside the work folder (the Bash cwd persists; `EnterWorktree` from outside the repo needs an approval auto mode and the chat cannot give, so a denied enter retries once from `<main>`, then parks; AUTO ends the run instead); files in `<specs>` are written only with Write/Edit (auto mode refuses shell writes outside the cwd; `<specs>` is an added directory); shell commands that run git or change files stay literal (no `$(…)`, backticks, variables or `cd x && git`), one plain git command per call.
 - nos never pushes code; you push. Only the specs repo is pushed, by `nos specs commit`, when you set `specs.remote` as backup.
 - Lifecycle: `nos run start` → enter the worktree → steps as usual, with `nos run sync` (rebase onto main) before every develop → docs update (architect UPDATE-DOCS from the run's `(architecture)` Dev Log notes, commits on the run branch; skipped when there are none) → `nos run finish` (merge lock, main checks, sync, full gate incl. e2e, `merge --ff-only`, statuses `merged`) → leave the worktree → `nos run cleanup`. Or `nos run abandon` (status `discarded`).
 - Merges serialize, developing does not: first done, first merged. The others pick up main at their next sync.
-- A rebase conflict starts the **integrate** ability: it reads both specs (its own and the ones of the commits already on main), resolves by intent, continues the rebase and runs the gate. When both specs want contradicting things it stops and shows you both.
-- Dirty worktrees are never stashed. Leftover work is committed with the step prefix, or nos stops and shows the files.
+- A rebase conflict starts the **integrate** ability: it reads both specs (its own and the ones of the commits already on main), resolves by intent, continues the rebase and runs the gate. When both specs want contradicting things it stops and shows you both (MANUAL); in AUTO what is already on main wins unless its own spec explicitly replaces it, recorded.
+- Dirty worktrees are never stashed. Leftover work is committed with the step prefix, or nos stops and shows the files. In AUTO generated output (build, test results, coverage) gets an ignore pattern in `.gitignore` (commit `step-<id>: ignore generated <path>`); anything else still stops: deleting it would be irreversible.
 - Slots: e2e runs and dev servers take a slot (port set, `NOS_SLOT`) only while they run. With `slots: 1` parallel e2e runs queue instead of colliding.
 
 | nos exit code | Meaning | nos does |
 | --- | --- | --- |
-| 3 | rebase conflict | integrate, then the same command again. Contradicting specs: you decide which intent wins (`DECIDE`), pause or abandon |
-| 4 | held by another session (run token or merge lock) | run: shows holder and age, you decide: take over or stop. Merge lock: waits and retries, then stops |
-| 5 | dirty worktree | commits the step's own leftover files (never `git add -A`), or stops and asks you to ignore or delete the rest. At cleanup (modified files in a merged worktree): stops, you revert or delete them |
+| 3 | rebase conflict | integrate, then the same command again. Contradicting specs: you decide which intent wins (`DECIDE`), pause or abandon. AUTO: main wins unless the own spec replaces it; a gate fail after the rebase gets up to 2 fix rounds, then the run ends |
+| 4 | held by another session (run token or merge lock) | run start: shows holder and age, you decide: take over or stop. Mid-run in AUTO (taken over by another session): the run ends. Merge lock: waits and retries, then stops (AUTO: ends the run) |
+| 5 | dirty worktree | commits the step's own leftover files (never `git add -A`), or stops and asks you to ignore or delete the rest (AUTO: generated output → `.gitignore` commit; the rest still stops). At cleanup (modified files in a merged worktree): stops, you revert or delete them, also in AUTO |
 | 6 | another run in the domain | shows it, you decide |
-| 7 | no free slot in time | stops |
-| 1 | failed (gate, main busy, dirty or on another branch, ff merge refused twice) | stops and reports; GO repeats the integration once you fixed main. Gate fail at integration: `FIX` runs develop for the last step with the failures |
+| 7 | no free slot in time | stops. AUTO: waits one more `slotWait`, then ends the run |
+| 1 | failed (gate, main busy, dirty or on another branch, ff merge refused twice) | stops and reports; GO repeats the integration once you fixed main. Gate fail at integration: `FIX` runs develop for the last step with the failures. AUTO: gate fail → FIX by itself, at most 2 rounds, then the run ends unmerged; main busy/dirty → waits 60 s, retries once, then the run ends; other failures → one retry when transient, then the run ends |
 
 ### Controlling human validation
 
@@ -349,6 +356,7 @@ The easier way to see all of this is the **Spec UI**. Open `ui/index.html` in Ch
 │   ├── status.xml                  valid statuses
 │   ├── step-spec-template.md       structure of a step spec file
 │   ├── review-template.md          structure and rules of a review (step Review section, phase review.md)
+│   ├── auto-decisions.md           structure of <specs>/<domain>/auto-decisions.md (what AUTO solved without you)
 │   ├── architecture-sections.md    section catalog for a project's architecture template
 │   ├── quality-tools.md            config keys and the quality check
 │   ├── test-types.md               test groups and architecture rule ideas
@@ -372,8 +380,8 @@ Step:
 ```
 open ──► in-specification ──► specified ──► in-progress ──► implemented ──► in-review ──► reviewed ──► done
          specify              park: MANUAL  develop         park: MANUAL    pessimistic   park: MANUAL
-                                            park: blocked                   fixing        park: human validation
-                                                                            park: blocked
+                                            park: blocked (MANUAL)          fixing        park: human validation
+                                                                            park: blocked (MANUAL)
 ```
 
 Phase (no specification stage):
@@ -381,7 +389,7 @@ Phase (no specification stage):
 open ──► in-progress ──► implemented ──► in-review ──► reviewed ──► done
          all steps       park: MANUAL    pessimistic   park: MANUAL
                                          fixing        park: human validation
-                                         park: blocked
+                                         park: blocked (MANUAL)
 ```
 
 - `review-needed: false` (step or phase): `implemented ──► done`. No review, and the human-validation park moves to `implemented`.
@@ -429,14 +437,14 @@ Reads `docs/architecture.md` if it exists and respects its structure and rules. 
 
 ### abilities/develop.md: developer 🪛
 
-Input: domain, phase id, step id, optional feedback and resume flag. For one step it:
+Input: domain, phase id, step id, run mode, optional feedback and resume flag. For one step it:
 1. Reads `plan.json` and the step spec file. A spec without ACs → `blocked` (step not specified).
 2. Writes a detailed implementation plan into the Task List, with a test task before each implementation task, plus tasks for the integration/e2e tests and existing-test changes from the Test Strategy. It changes an existing test only when the Test Strategy lists it. On feedback it changes or extends the tasks. On resume it checks every task and AC against the code.
 3. Works through the tasks with TDD: test → see it fail → implement → green. It ticks tasks and met ACs with `(x)`.
 4. Runs `nos gate` (with `--e2e` when the Test Strategy names e2e). It fixes what it can and marks what it can't with `(!)`.
 5. Fills the Dev Log. It never changes the Spec Log.
 6. Commits code only with `step-<id>: <what>` in the worktree, never pushes (you push). The spec file lives in `<specs>` and is committed by the orchestrator.
-7. Reports `pass` or `blocked`.
+7. Reports `pass` or `blocked`. In AUTO it asks nothing the specs, guardrails, architecture or code answer: it decides, notes it in the Dev Log marked `(auto decision)` and reports it. A blocked verdict in AUTO: no ACs → specify and spec-review run again; `(!)` tasks → one rerun with the reasons as feedback; still `(!)` → recorded, the step goes on to review and the finish gate decides.
 
 It never changes the Description, ACs, Spec Log or Test Strategy. Changing a test to make it pass is strictly forbidden.
 
@@ -488,7 +496,7 @@ It writes the review file (step: `## Review` in the spec, phase: `review.md` in 
 
 ### abilities/review-fixing/SKILL.md: second reviewer and fixer 🕵🏼🛠️
 
-Runs in a new context and does its **own review first, without reading the review file**, including tests, lint and format. Then it reads the pessimistic review, compares, removes invalid findings and adds missing ones. It fixes the findings with TDD and marks each one `(x)` fixed or `(!)` (not fixable, out of scope, or needs your decision). It reruns `nos gate`, writes its fixes into the Dev Log marked `(reviewer)`, and commits the code with `step-<id>: `/`phase-<id>: `. Then it fills `### Fixes` in the review with that prefix (never a sha, shas change on rebase) and updates Criteria and Result when they changed. No second commit: the review lives in `<specs>`. It reports `pass` or `blocked`. When human validation is needed, it adds simple verification steps that the orchestrator shows you.
+Runs in a new context and does its **own review first, without reading the review file**, including tests, lint and format. Then it reads the pessimistic review, compares, removes invalid findings and adds missing ones. It fixes the findings with TDD and marks each one `(x)` fixed or `(!)` (not fixable, out of scope, or needs your decision). It reruns `nos gate`, writes its fixes into the Dev Log marked `(reviewer)`, and commits the code with `step-<id>: `/`phase-<id>: `. Then it fills `### Fixes` in the review with that prefix (never a sha, shas change on rebase) and updates Criteria and Result when they changed. No second commit: the review lives in `<specs>`. It reports `pass` or `blocked`. In AUTO it decides "needs your decision" findings itself by the specs and ACs (only look and feel is asked), marks them `(x)` with `(auto decision)` in Fixes; out-of-scope findings become follow-ups in the final report; the run continues and the finish gate decides. When human validation is needed, it adds simple verification steps that the orchestrator shows you.
 
 Both reviewers read the review guardrails in `docs/guardrails.xml` and the architecture in `docs/architecture.md` if they exist. Like develop, review-fixing never changes the architecture docs and notes needed changes in the Dev Log marked `(architecture)`.
 
@@ -496,7 +504,7 @@ Both work standalone too: tell Claude to follow `abilities/review-pessimistic/SK
 
 ### abilities/integrate.md: merge agent 🔀
 
-Runs only when `nos run sync` or `nos run finish` stops with a rebase conflict (exit 3), or a resumed run has a rebase in progress. It is the only ability that continues a rebase. It reads the commits already on main since the run's base (`step-<id>:` prefixes → `nos specs find-step`) and its own step spec, resolves each conflict by the intent of both, continues the rebase commit by commit and runs `nos gate`. It notes each resolution in the Dev Log marked `(merge)`. When the two specs contradict each other it stops and cites both. The orchestrator then repeats the command that stopped.
+Runs only when `nos run sync` or `nos run finish` stops with a rebase conflict (exit 3), or a resumed run has a rebase in progress. It is the only ability that continues a rebase. It reads the commits already on main since the run's base (`step-<id>:` prefixes → `nos specs find-step`) and its own step spec, resolves each conflict by the intent of both, continues the rebase commit by commit and runs `nos gate`. It notes each resolution in the Dev Log marked `(merge)`. When the two specs contradict each other it stops and cites both (MANUAL). In AUTO the behavior already on main wins unless its own step's spec explicitly replaces it; it adapts its side and notes both spec paths and the choice in the `(merge)` entry, marked `(auto decision)`. The orchestrator then repeats the command that stopped.
 
 ### abilities/poc.md: prototyper 🧪
 
@@ -504,7 +512,7 @@ Not part of the run cycle. Started from the menu (POC), inside the POC's worktre
 
 ### abilities/architect.md: quality and docs architect 🏗️🕵🏼
 
-Started from the menu (ARCHITECT) and works with you. Inside a run: the docs update at its end, before `nos run finish` (UPDATE-DOCS with the run's `(architecture)` notes and mode; one approval question per change, also a helper's, relayed to you or answered by a standing answer in AUTO), and accepted guardrail proposals at any park or report. Its core rules come from harness engineering: harden only in response to observed failures, change one thing at a time and measure it, don't trust a rule just because it exists, and test both "should happen" and "should NOT happen". It never changes production code, and it is the only role that changes the architecture docs.
+Started from the menu (ARCHITECT) and works with you. Inside a run: the docs update at its end, before `nos run finish` (UPDATE-DOCS with the run's `(architecture)` notes and mode; one approval question per change, also a helper's; MANUAL relays it to you, AUTO answers it by a standing answer or by itself, recorded), and accepted guardrail proposals at any park or report. Its core rules come from harness engineering: harden only in response to observed failures, change one thing at a time and measure it, don't trust a rule just because it exists, and test both "should happen" and "should NOT happen". It never changes production code, and it is the only role that changes the architecture docs.
 
 It shows its task menu first and analyzes nothing before you pick. Every change is proposed, applied only after you agree, and committed on its own with prefix `architect: ` (code, docs, `nos.config.json`; never specs). New test tools go into `quality-tools` of `nos.config.json`.
 
@@ -534,7 +542,8 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
   - `merged` (branch is on main) and `discarded` (abandoned) are set only by `nos run finish` / `nos run abandon` for the whole run. Phases get none: a merged plan shows via the plan.
   - Three sections, `<plans>`, `<phases>` and `<steps>`, so a status can be valid for steps only.
 - **step-spec-template.md**: sections Description, Acceptance Criteria, Spec Log (`(specify)` / `(spec-review)` entries), Test Strategy (integration, e2e, existing tests to change), Task List, Dev Log (What I did / What I didn't do and why), and Review.
-- **review-template.md**: the Review section and phase `review.md`. It has a Date and Result line, a short summary, Criteria (one line per AC), Findings (`( )` with id, weight, category, location, evidence, fix and fix kind) and Fixes (written by review-fixing, referencing the commit prefix). Rules for weights and fix kinds are at the bottom.
+- **review-template.md**: the Review section and phase `review.md`. It has a Date and Result line, a short summary, Criteria (one line per AC), Findings (`( )` with id, weight, category, location, evidence, fix and fix kind) and Fixes (written by review-fixing, referencing the commit prefix; a decision AUTO took ends with `(auto decision)`). Rules for weights and fix kinds are at the bottom.
+- **auto-decisions.md**: structure of `<specs>/<domain>/auto-decisions.md`, the record of what an AUTO run solved without you: one section per run (`## <run> — <date>`), one line per decision (`- <where> — problem: … — applied: … — revert: …`). Written by the orchestrator, committed with the run's specs commits.
 - **architecture-sections.md**: catalog for a project's architecture template. Core sections (Overview, Stack & commands, Structure, Rules, Testing, Decisions, Tech debt), optional sections with "include when", profiles per project type, and the template format.
 - **test-types.md**: test groups with when they add value and tooling examples, architecture rule ideas, enforcement mechanisms (lint rule, dependency graph, test) and pitfalls.
 - **poc-result.md**: the result of a POC: front matter (`poc`, `created`, `processed`: `no` | `quick <step id>` | `idea <domain>` | `dropped`, set by `nos poc processed`), a note that it holds POC insights and no spec, numbered Requirements, Technical details per requirement, Tried and dropped.
@@ -548,7 +557,7 @@ Used in ACs, the Task List and review findings:
 | --- | --- |
 | `( )` | open |
 | `(x)` | done / met / fixed |
-| `(!)` | problem, not fixable → verdict blocked |
+| `(!)` | problem, not fixable → verdict blocked (MANUAL parks; AUTO solves or records it and goes on) |
 
 ### nos CLI commands used
 
@@ -599,20 +608,22 @@ Used in ACs, the Task List and review findings:
 
 | Block | Purpose |
 | --- | --- |
-| `<rules>` | Invocation and roots. Runs, token, specs commits after every ability, code commit prefixes. Orchestrator guardrails; lessons become guardrail proposals, never memories. Every ability runs in a new background subagent; a user message mid-run is answered first. Statuses change only via `nos set-status`. Questions from subagents are relayed to you and the answers sent back to the same subagent (in AUTO an orchestrator guardrail may hold a standing answer). Reports use simple language. Every question uses the `A - text [KEY]` format |
-| `<exitCodes>` | What to do on each nos exit code: 3 integrate (blocked → DECIDE), 4 take over or stop (merge lock: wait and retry), 6 switch, wait or stop, 5 commit the step's leftover files or park, 7 and 1 park |
+| `<rules>` | Invocation and roots. Runs, token, specs commits after every ability, code commit prefixes. Orchestrator guardrails; lessons become guardrail proposals, never memories. Every ability runs in a new background subagent; a user message mid-run is answered first. Statuses change only via `nos set-status`. Questions from subagents are relayed to you and the answers sent back to the same subagent (in AUTO a standing answer, else nos answers itself unless only you can answer). Rule "AUTO decisions": AUTO stops only for human validation and irreversible actions, solves the rest and records it, ends the run at a technical limit or dead end. Reports use simple language. Every question uses the `A - text [KEY]` format |
+| `<exitCodes>` | What to do on each nos exit code: 3 integrate (blocked → DECIDE; AUTO: main wins, gate fix rounds), 4 take over or stop (merge lock: wait and retry; AUTO mid-run: end the run), 6 switch, wait or stop, 5 commit the step's leftover files or park (AUTO: ignore generated output), 7 and 1 park (AUTO: one retry, then end the run) |
 | `<start>` | `nos roots`, the setup check, resume of a run when the session sits in its worktree, and the IDEA / PLAN / RUN / QUICK / ARCHITECT / SETUP / CHAT menu |
 | `<option name="idea">` | Runs idea, then offers PLAN |
 | `<option name="architect">` | Runs architect. Tech debt handed over → offers an idea for all bugs or one per bug |
 | `<option name="plan">` | Picks a domain without a plan, runs plan (create), then offers RUN |
 | `<option name="quick">` | Continues an unfinished quick step or runs quick-step for a new one, then runs the step cycle for it |
-| `<modes>` | Defines AUTO and MANUAL through the `mode` attribute on each `<park>` |
+| `<modes>` | Defines AUTO and MANUAL through the `mode` attribute on each `<park>` (AUTO only on human-validation parks) and on a `do` element that runs in one mode only (`mode="auto"` or `mode="manual"`) |
 | `<option name="run">` | Picks a plan or quick step, starts or resumes its run (`nos run start`, enter the worktree) and a mode. Quick step → step cycle, then finish. Plan → sets the plan `in-progress`, runs every unfinished phase, sets the plan `done`, asks to integrate |
-| `<cycle name="finish">` | Proposals, docs update, `nos run finish`, leave the worktree, `nos run cleanup` |
+| `<cycle name="finish">` | Proposals (AUTO: after cleanup), docs update, `nos run finish` (AUTO: up to 2 gate fix rounds), leave the worktree, `nos run cleanup` |
 | `<cycle name="phase">` | Runs all steps, then reviews the phase as a whole |
 | `<cycle name="step">` | specify → spec-review → develop → review-pessimistic → review-fixing |
 | `<proposals>` | Asks pending guardrail proposals (P1… / ALL / NO) at a park or final report; accepted ones go to architect ADD-GUARDRAILS |
-| `<docs-update>` | At finish, before `nos run finish`: the run's `(architecture)` Dev Log entries → architect UPDATE-DOCS with the run mode; its questions relayed (standing answer in AUTO); commits on the run branch |
+| `<docs-update>` | At finish, before `nos run finish`: the run's `(architecture)` Dev Log entries → architect UPDATE-DOCS with the run mode; its questions relayed (AUTO: a standing answer or nos answers itself); commits on the run branch |
+| `<auto-decisions>` | AUTO: the record `<specs>/<domain>/auto-decisions.md` and the report line `auto decisions this run: <n>` |
+| `<auto-end>` | AUTO: end the run at a technical limit or dead end, without a question: record, specs commit, final report, proposals |
 | `<park>` | Stop, explain, ask pending proposals, then GO / switch mode / REJECT / PAUSE / ABANDON |
 | `<resume>` | How to continue after an interruption |
 
@@ -684,7 +695,7 @@ Most changes touch more than one file. Before you finish a change, check these c
 | --- | --- |
 | an ability name or file | the `<abilities>` list in `SKILL.md` and every `Run ability "..."` in `workflow.md` |
 | a status | the right section (`<plans>`, `<phases>`, `<steps>`) of `templates/status.xml` (nos validates against it), every `<status from to>` in `workflow.md`, the `resume-at` attributes, `ui/src/status.ts` and the colours in `ui/styles.css` |
-| what an ability reports (e.g. `pass`/`blocked`) | the `<park when="...">` that reacts to it in `workflow.md` |
+| what an ability reports (e.g. `pass`/`blocked`) | the `<park when="...">` and the `do` element with `mode="auto" when="..."` that react to it in `workflow.md` |
 | spec sections | `step-spec-template.md` and every skill that reads or writes that section |
 | review layout (weights, fix kinds, Result) | `review-template.md`, the `<passes>` of review-pessimistic, review-fixing |
 | inputs of an ability | what the caller passes in `workflow.md` |
@@ -712,7 +723,7 @@ The files are plain text, so no tools are needed.
 
 **Add a stop point.** Example: always stop before a phase review. Add `<park mode="auto,manual"/>` to step2 of the phase cycle.
 
-**Change when AUTO stops.** Add or remove `auto` in a park's `mode` attribute.
+**Change when AUTO stops.** Add or remove `auto` in a park's `mode` attribute. Keep `auto` only on parks for human validation or irreversible actions (rule "AUTO decisions"); for any other problem give AUTO a `do` element with `mode="auto"` and a bounded solution that is recorded.
 
 **Add a status.** Add it to `status.xml`, then add a cycle step with `<status from to>` and `resume-at` in `workflow.md`, and adjust the `from` of the next step. Every status must be set by exactly one step, or resume breaks.
 

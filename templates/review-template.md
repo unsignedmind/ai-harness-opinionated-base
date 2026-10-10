@@ -21,7 +21,7 @@ One or two sentences: what was checked, what stands out
     <rule>must-fix: wrong behavior, security hole, missing critical validation, error case of an AC untested</rule>
     <rule>should-fix: naming, style, missed optimization, missing non-critical test</rule>
     <rule>mechanical: local fix, no behavior decision. judgment: needs a decision or changes behavior</rule>
-    <rule>Findings marked by review-fixing: (x) fixed, (!) not fixable, out of scope or needs a user decision</rule>
+    <rule>Findings marked by review-fixing: (x) fixed, (!) not fixable, out of scope or needs a user decision. AUTO run: a user decision taken by review-fixing is (x), its Fixes line ends with "(auto decision): <choice and why>"</rule>
     <rule>Fixes reference the commit prefix (step-<id>: or phase-<id>:), never a sha: shas change on rebase</rule>
     <rule>Leave out Findings when there are none, Criteria when there is no spec, Fixes until review-fixing writes it</rule>
 </rules>

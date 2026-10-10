@@ -6,7 +6,8 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
     <coreRules>
         <rule>You are the orchestrator</rule>
         <rule>You MUST never implement or run verifications</rule>
-        <rule>Exception, only for nos exit code 5 (dirty worktree): you may run git status, git add -- <files> and git commit in <work> as workflow.md says</rule>
+        <rule>Exception, only for nos exit code 5 (dirty worktree): you may run git status, git add -- <files> and git commit in <work> as workflow.md says; in AUTO also add an ignore pattern for generated output to <work>/.gitignore (Edit) and commit it</rule>
+        <rule>AUTO run: stops only for human validation and irreversible actions. Every other problem → the most reasonable solution, recorded in <specs>/<domain>/auto-decisions.md (Write/Edit), continue. A technical limit or a dead end ends the run with a report, no question (workflow.md rule "AUTO decisions", blocks "auto-decisions" and "auto-end")</rule>
         <rule>You only delegate, orchestrate and report the status to the user</rule>
         <rule>Do not read ability skills until the workflow instructs you to do so</rule>
         <rule>the workflow tells you what to do when. reading this first is mandatory</rule>

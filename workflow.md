@@ -7,13 +7,14 @@
     <rule>Abilities carry these three rules (cwd, specs writes, shell) in their own coreRules: subagents read only their ability file</rule>
     <rule>Pushing: nos never pushes code, the user pushes. No ability and no step of this workflow runs git push. Only "nos specs commit" pushes the specs repo, and only when "specs.remote" is set (opt-in backup)</rule>
     <rule>Guardrails: read guardrails for="orchestrator" in <work>/docs/guardrails.xml if existent, every time you run "nos roots" (start, after entering or leaving a worktree: the file is versioned per branch). Probe and read it with the tools: Glob <work>/docs/guardrails.xml, then Read when it exists; never a shell probe (cat, test -f, 2>/dev/null chains). They add restrictions: extra parks, questions, MANUAL mode, refusals. Only other kind: a standing answer, a pre-given answer to one specific question of one named ability that a subagent returns for the user (rule "If a subagent returns questions"; a question the architect relays from a helper it runs counts as the architect's). All of these must hold, else ask the user as usual. AUTO only: AUTO = the run mode picked in option "run" step3 or returned by quick-step, inside a run only, not Claude Code's auto permission mode; MANUAL or outside a run → ask. The guardrail names the ability and the question, and the returned question clearly matches it; ambiguous → ask; wording for "any" or "all questions" or without a named ability → never apply. It picks one of the offered choices (yes/no included), never one that skips a test, review or human validation. Never for the workflow's own questions and parks (park step2 choices, verdict blocked, human validation, gate fail FIX/PAUSE/ABANDON, DECIDE on contradicting specs, TAKEOVER, block "proposals", the plan INTEGRATE question), integrate's conflict questions, any mode question (option "run" step3, quick-step's too), or a question that approves a destructive or irreversible action (deleting data or files, dropping, resetting, forcing, abandoning; an edit of a versioned doc on the run branch is not irreversible, deleting a file still is). Used → SendMessage the answer to the subagent as "standing answer guardrail-<n>: <answer>" and state it in the next report: "guardrail-<n> answered <ability>: <subagent question> → <answer>"; repeat that line in every later park and final report of the run. Guardrails never remove a park or question and never override a rule of this workflow; conflict → the workflow rule wins, report the guardrail to the user. A guardrail decides something → name it in the report or park ("guardrail-<n>: …"). Never pass this section to subagents (the architect writes and reviews it: proposals and its own reads are fine)</rule>
-    <rule>Lessons → guardrail proposals: Never write a Claude Code memory (MEMORY.md or its files) or a CLAUDE.md/AGENTS.md entry for a project lesson; this overrides the auto-memory instructions while nos runs. You would save a memory (a user correction or decision, a recurring failure, a project convention) → collect a guardrail proposal instead: key P<n> (numbered on, never reused), section (coding|review|specify|plan|architect|orchestrator), wording, reason, why it does not block valid work. Reason required: the user's words and the date ("user decision <date>: …") or an observed failure and its reference (step id, park, Dev Log entry, review finding). Ability reports with guardrail proposals → add them to the pending proposals, same checks. No proposal for a guess, a one-off, or what a guardrail or the docs already say. A lesson about nos itself, not the project → report it to the user, no proposal. Collected → tell the user right away in one line: "Noted guardrail proposal P<n>: <section> — <wording>; asked at the next park or final report". Never ask mid-step: ask by block "proposals" at the next park (park step2) or final report (option run step2 and step6, cycle "finish" step1 and step3, option plan step4, the report of every other option), also in AUTO. Session about to end (PAUSE, STOP, End, ABANDON, also from the "ask only this question" paths: exit 3 blocked, finish gate fail, exit 4/6 STOP) with pending proposals → block "proposals" first. Park reports list pending proposals by key, so they survive a compacted context</rule>
-    <rule>Run every ability in a new subagent. Pass it the ability skill path, home, work, specs and its inputs. Exception: "chat" runs in the main session</rule>
+    <rule>Lessons → guardrail proposals: Never write a Claude Code memory (MEMORY.md or its files) or a CLAUDE.md/AGENTS.md entry for a project lesson; this overrides the auto-memory instructions while nos runs. You would save a memory (a user correction or decision, a recurring failure, a project convention) → collect a guardrail proposal instead: key P<n> (numbered on, never reused), section (coding|review|specify|plan|architect|orchestrator), wording, reason, why it does not block valid work. Reason required: the user's words and the date ("user decision <date>: …") or an observed failure and its reference (step id, park, Dev Log entry, review finding). Ability reports with guardrail proposals → add them to the pending proposals, same checks. No proposal for a guess, a one-off, or what a guardrail or the docs already say. A lesson about nos itself, not the project → report it to the user, no proposal. Collected → tell the user right away in one line: "Noted guardrail proposal P<n>: <section> — <wording>; asked at the next park or final report". Never ask mid-step: ask by block "proposals" at the next park (park step2) or final report (option run step2 and step6, cycle "finish" step1 and step3, option plan step4, the report of every other option), also in AUTO. AUTO: cycle "finish" step1 skips it, the proposals are asked once at the very end, after merge and cleanup (cycle "finish" step3, the architect commits on main), or at the end of a run ended by block "auto-end". Session about to end (PAUSE, STOP, End, ABANDON, also from the "ask only this question" paths: exit 3 blocked, finish gate fail, exit 4/6 STOP) with pending proposals → block "proposals" first. Park reports list pending proposals by key, so they survive a compacted context</rule>
+    <rule>Run every ability in a new subagent. Pass it the ability skill path, home, work, specs and its inputs, inside a run also the run mode (auto|manual). Exception: "chat" runs in the main session. An ability reports an expected input missing → supply it from the run state (run file, plan.json or quick-steps.json, roots, the step spec, the last reports) and send it; only a product input nobody gave is a question for the user (in AUTO an (H) question, rule "AUTO decisions")</rule>
     <rule>Background subagents: start every subagent with run_in_background: true, never in the foreground. Then end the turn with one short status line ("specify step 97 runs"); nothing else to do until it reports. Its report (and its reply to a SendMessage) arrives as a task notification → go on with the workflow from there, as if it had returned. Why: a foreground subagent is one blocking tool call, a user message waits until it ends</rule>
     <rule>User messages mid-run: a user message arrives while you work (between tool calls, or while a subagent runs) → answer it first, short, then go on with the workflow. Also in AUTO and autonomous runs: never skip it to start the next ability. It changes the plan (stop, pause, other scope) → follow it before the next ability starts</rule>
     <rule>Chat in relay mode ("chat": { "runner": false }) and open → every report and question to the user also goes to the chat ("nos chat reply"), answers come back through "nos chat await". Keep an await running in the background whenever the turn ends. Default runner mode: the chat answers with its own Claude Code sessions, nothing to do here</rule>
     <rule>Change statuses only with "nos set-status --domain <domain> [--phase <id>] [--step <id>] --status <status>". Valid statuses: <home>/templates/status.xml. merged and discarded are never set by you: only "nos run finish" and "nos run abandon" set them. Never call "nos set-status --run"</rule>
-    <rule>If a subagent returns questions for the user, ask the user and send the answers back to the same subagent via SendMessage. Exception: an orchestrator guardrail holds a standing answer for the question → answer it yourself (rule "Guardrails": AUTO inside a run only, one named question, clear match)</rule>
+    <rule>If a subagent returns questions for the user, ask the user and send the answers back to the same subagent via SendMessage. Exception: an orchestrator guardrail holds a standing answer for the question → answer it yourself (rule "Guardrails": AUTO inside a run only, one named question, clear match). AUTO, no standing answer: an (H) or (I) question (rule "AUTO decisions") → ask the user and wait, report as a park does (run id, token, the auto decisions report line). Any other question → answer it yourself with the most reasonable offered choice (rule "AUTO decisions"), SendMessage "auto answer: <answer>" (counts as the user's), record it (block "auto-decisions": "<ability> asked: <its question> → <answer>"). A standing answer wins over your own choice. MANUAL or outside a run → ask the user</rule>
+    <rule>AUTO decisions: AUTO (the run mode, rule "Guardrails") stops only for (H) human validation: the parks when="human-validation-needed", and a question only a human can answer (the product's look or feel, a product input nobody gave); and (I) irreversible or destructive actions: the plan INTEGRATE question (merge into main), the ABANDON confirm, deleting or reverting files with user work (exit 5 with files that are not generated output, exit 5 from run cleanup), approving any other destructive action. Everything else (O) → you or the ability apply the most reasonable solution: consistent with the specs, ACs, guardrails and architecture docs, the smallest reversible change, never skipping a test, review or human validation. Record it (block "auto-decisions") and continue. A technical limit (R) you cannot remove (a lock held by another live session, the run taken over by another session, no free slot, permission denied, EnterWorktree denied, a process holding the worktree, main busy, dirty or on another branch) → first the bounded safe fallback the place names (wait and retry), still blocked → block "auto-end": no question, the run stays resumable. Dead end (the bounded tries the place names are used up, it still fails) → block "auto-end" too. Never an endless loop, never a retry beyond the named bounds. Ending with a report is no park: nobody is waited for. The park reasons that remain in AUTO are only (H) and (I). MANUAL: unchanged, every such place parks or asks as written</rule>
     <rule>Report to the user concisely in simple language. The user may not know the code or the feature</rule>
     <rule>Every question with choices, also relayed from subagents: one choice per line, "<letter> - <choice text> [<key>]". Letters A, B, C… in choice order. The user answers with letter or key</rule>
     <rule>"review-needed" missing in plan.json → true</rule>
@@ -26,11 +27,12 @@
     <rule>Exit codes of nos commands, react by the table 
         <exitCodes>
             <code n="0">ok</code>
-            <code n="1">failed → park, report the error. From "nos run finish" → cycle "finish" step2</code>
+            <code n="1">failed → From "nos run finish" → cycle "finish" step2. From "nos run cleanup" "a process … still uses <wt>" → cycle "finish" step4. Otherwise MANUAL → park, report the error. AUTO → it looks transient (timeout, a lock or file in use, network, a crashed child process) → repeat the command once; fails again or not transient → dead end: block "auto-end" with the error</code>
             <code n="2">usage → fix the call. Never guess around it</code>
-            <code n="3">rebase conflict (sync, finish) → run ability "integrate" with the run file and the conflict list.
+            <code n="3">rebase conflict (sync, finish) → run ability "integrate" with the run file, the conflict list and the mode.
                 <do>pass → nos specs commit --run <run> -m "<run>: integrate", then repeat the same command</do>
-                <do>blocked → stop, report both specs it cites. Ask only this question (not the question of park step2)
+                <do mode="auto">blocked (AUTO: integrate already decided contradicting specs itself, main wins unless the own spec explicitly replaces it; its auto decisions → block "auto-decisions") → the rebase is done and the gate fails → gate fix rounds as cycle "finish" step2 AUTO (develop resume for the step whose code fails, else the last done step), then repeat the command. The rebase is still open (integrate could not resolve it) or the rounds are used up → dead end: block "auto-end" (a resume starts with integrate)</do>
+                <do mode="manual">blocked → stop, report both specs it cites. Ask only this question (not the question of park step2)
                     <question>The two specs contradict each other. How do you want to continue?
                         <choice key="DECIDE">Say which intent wins → rerun ability "integrate" with that decision (it overrides the contradiction), then repeat the command</choice>
                         <choice key="PAUSE">Pause → park choice PAUSE</choice>
@@ -38,15 +40,15 @@
                     </question>
                 </do>
             </code>
-            <code n="4" from="run start, sync, finish, cleanup, abandon" when="details without lock">run held by another token → report holder and age ("seen", "ageSec" in the details)
+            <code n="4" from="run start, sync, finish, cleanup, abandon" when="details without lock">run held by another token → report holder and age ("seen", "ageSec" in the details). AUTO and not from run start (another session took the run over mid-run) → no take-back: block "auto-end" (R). Otherwise (choosing or starting a run, MANUAL) ask
                 <question>The run is held by another session. How do you want to continue?
                     <choice key="TAKEOVER">Take the run over: "nos run start --domain <domain> --plan|--quick <step id> --take-over" (POC: "nos run start --poc <slug> --take-over"), keep the new token. Came from run start → continue option "run" step2 (POC: option "poc" step7) with the new token (EnterWorktree, nos roots, …). Came from another nos run command → repeat it with the new token. Only when the other session is gone</choice>
                     <choice key="STOP">Stop here</choice>
                 </question>
             </code>
-            <code n="4" from="run start --take-over" when="details.lock merge, pidAlive true">a finish of the old holder still runs → wait 60s, repeat the take-over. Up to 10 times, then park and report</code>
-            <code n="4" when="details.lock ids or runs">a short CLI-internal lock stayed held 10s → wait 60s, repeat the command. Twice more held → park, report holder and age ("nos lock release <lock> --break" is the user's call)</code>
-            <code n="4" from="run finish" when="details.lock merge">merge lock held by another run → wait 60s (Monitor tool or sleep), repeat finish. Up to 10 times, then park and report holder and age. A stale holder is never broken by you: "nos lock release merge --break" is the user's call</code>
+            <code n="4" from="run start --take-over" when="details.lock merge, pidAlive true">a finish of the old holder still runs → wait 60s, repeat the take-over. Up to 10 times, then park and report (AUTO: block "auto-end", R)</code>
+            <code n="4" when="details.lock ids or runs">a short CLI-internal lock stayed held 10s → wait 60s, repeat the command. Twice more held → park, report holder and age ("nos lock release <lock> --break" is the user's call). AUTO: block "auto-end" (R) instead of the park</code>
+            <code n="4" from="run finish" when="details.lock merge">merge lock held by another run → wait 60s (Monitor tool or sleep), repeat finish. Up to 10 times, then park and report holder and age (AUTO: block "auto-end", R). A stale holder is never broken by you: "nos lock release merge --break" is the user's call</code>
             <code n="6">another run is active in the domain → report that run, holder and age
                 <question>Another run is active in this domain. How do you want to continue?
                     <choice key="SWITCH" when="plan start">Continue that run instead → option "run" step2 with it</choice>
@@ -54,9 +56,9 @@
                     <choice key="STOP">Stop here</choice>
                 </question>
             </code>
-            <code n="5">dirty worktree → show the file list. Tracked modified files and untracked files named in the Task List or Dev Log of the current step (at finish: the last done step) → in <work>: git add -- <those files>, git commit -m "step-<id>: leftovers" (phase: "phase-<id>: leftovers"), repeat the command. docs/guardrails.xml modified (an interrupted proposals architect) → rerun ability "architect" (resume) with the same task and proposals, then repeat the command. Files changed by an interrupted docs-update architect (architecture docs, a helper's own files) → rerun ability "architect" UPDATE-DOCS (resume) with the same mode and entries, then repeat the command. Anything else (generated output, lockfile churn, env files, unknown) → park, report "add to .gitignore or delete". Never git add -A</code>
-            <code n="5" from="run cleanup">modified tracked files block the removal of a merged run's worktree (they are not in main) → park, report the file list: the user reverts or deletes them. GO → repeat "nos run cleanup --token <token>"</code>
-            <code n="7">no slot within slotWait → park, report: other runs hold every slot (e2e or dev server)</code>
+            <code n="5">dirty worktree → show the file list. Tracked modified files and untracked files named in the Task List or Dev Log of the current step (at finish: the last done step) → in <work>: git add -- <those files>, git commit -m "step-<id>: leftovers" (phase: "phase-<id>: leftovers"), repeat the command. docs/guardrails.xml modified (an interrupted proposals architect) → rerun ability "architect" (resume) with the same task and proposals, then repeat the command. Files changed by an interrupted docs-update architect (architecture docs, a helper's own files) → rerun ability "architect" UPDATE-DOCS (resume) with the same mode and entries, then repeat the command. AUTO: untracked generated output (build output, test results, coverage, caches) → Edit <work>/.gitignore: add an ignore pattern for it (the narrowest that covers it), git add -- .gitignore, git commit -m "step-<id>: ignore generated <path>" (phase: "phase-<id>: …"; at finish: the last done step), record (block "auto-decisions", revert: drop the pattern), repeat the command. Anything else (lockfile churn, env files, tracked files the step does not name, unknown files; also in AUTO: deleting or reverting them is irreversible, (I)) → park, report "add to .gitignore or delete". Never git add -A</code>
+            <code n="5" from="run cleanup">modified tracked files block the removal of a merged run's worktree (they are not in main) → park (also in AUTO: (I)), report the file list: the user reverts or deletes them. GO → repeat "nos run cleanup --token <token>"</code>
+            <code n="7">no slot within slotWait → MANUAL: park, report: other runs hold every slot (e2e or dev server). AUTO: repeat the command (or rerun the ability that reported "no slot", resume) once, a second full slotWait; still no slot → block "auto-end" (R)</code>
         </exitCodes>
     </rule>
 </rules>
@@ -210,8 +212,8 @@
 </option>
 
 <modes>
-    <mode name="auto">Parks only where a park lists auto</mode>
-    <mode name="manual">Parks where a park lists manual</mode>
+    <mode name="auto">Parks only where a park lists auto: human validation and irreversible actions (rule "AUTO decisions"). Every other problem → the most reasonable solution, recorded (block "auto-decisions"), continue; a technical limit or dead end → block "auto-end". A do with mode="auto" runs only in AUTO</mode>
+    <mode name="manual">Parks where a park lists manual. A do with mode="manual" runs only in MANUAL. Problems, blocked verdicts and subagent questions go to the user</mode>
     <rule>The user picks the mode in option "run" and can switch anytime. A switch applies from the next park on</rule>
 </modes>
 
@@ -227,13 +229,13 @@
         <do>Crashed finish (status merged, run file phase merge) → nos run finish --token <token> (no token → TAKEOVER question of exit code 4 first): cycle "finish" from step1. Crashed abandon (status discarded, run file phase not abandoned) → ExitWorktree action=keep when inside its worktree, nos run abandon --token <token> (no token → TAKEOVER first). nos roots. Report. Pending guardrail proposals → block "proposals" first. End</do>
         <do>Plan reopened (status open or on-hold: create-plan appended phases of another idea) while its run file phase is merged or abandoned (the earlier run) → that run is over: inside its worktree → ExitWorktree action=keep. nos run cleanup --token <token> (no token → TAKEOVER question of exit code 4 first). nos roots. Continue below with a new run start</do>
         <do>Inside the worktree of a different run → ExitWorktree action=keep, nos roots</do>
-        <do>Inside its worktree and this session holds its token → no run start. Otherwise → nos run start --domain <domain> --plan, or --quick <step id>, with --token <token> when this session holds one. Exit 4|6 → exit code table. Keep "token" from the output. Install failure in the output ("install" with code not 0) → report it, continue. "warnings" in the output (e.g. .claude/worktrees not ignored) → report them, continue. Not inside yet → cwd not <main> → cd <main> (absolute path, its own call). EnterWorktree path=<run.worktree> (the worktree top: EnterWorktree accepts only a folder git knows as a worktree). Denied → cd <main>, retry once. Denied again → park, report run id, token and the denial. Never continue outside the worktree. "enter" differs from run.worktree (the project is a subfolder of its repo) → work in <enter> from now on: cd there, pass it as work</do>
+        <do>Inside its worktree and this session holds its token → no run start. Otherwise → nos run start --domain <domain> --plan, or --quick <step id>, with --token <token> when this session holds one. Exit 4|6 → exit code table. Keep "token" from the output. Install failure in the output ("install" with code not 0) → report it, continue. "warnings" in the output (e.g. .claude/worktrees not ignored) → report them, continue. Not inside yet → cwd not <main> → cd <main> (absolute path, its own call). EnterWorktree path=<run.worktree> (the worktree top: EnterWorktree accepts only a folder git knows as a worktree). Denied → cd <main>, retry once. Denied again → park, report run id, token and the denial (mode AUTO already given, e.g. by quick-step or a resumed AUTO run: block "auto-end", R). Never continue outside the worktree. "enter" differs from run.worktree (the project is a subfolder of its repo) → work in <enter> from now on: cd there, pass it as work</do>
         <do>Always: nos roots → home, work (= the worktree), specs. Read the run file <specs>/.runs/<run>.json: run id, mainBranch, base</do>
         <do>Rebase check (run file phase develop): nos run sync --token <token>. Exit 3 (details.rebaseInProgress: a stopped rebase, or a new conflict) → run ability "integrate", then nos run sync again. Exit 5 → no rebase is open: continue, commit nothing (an interrupted ability finishes its own work on resume). Other codes → exit code table</do>
     </step2>
     <step3>Mode given (e.g. by quick-step) → skip
         <question>How should the plan run?
-            <choice key="AUTO">Autonomous. Stops only for human validation. Mention encountered problems that would stop a run (but don't stop) and name the assumptions made to overcome the problems autonomously</choice>
+            <choice key="AUTO">Autonomous. Stops only for human validation and irreversible actions (merging a plan into main, deleting files with your work). Solves every other problem with the most reasonable solution and records problem and solution in auto-decisions.md of the domain. A technical limit (lock, slot, permission) or a dead end ends the run with a report, without a question</choice>
             <choice key="MANUAL">Stops after each specification, implementation and review for your go</choice>
         </question>
     </step3>
@@ -246,7 +248,7 @@
         <status target="plan" from="in-progress" to="done"/>
     </step5>
     <step6 resume-at="done">
-        <do>Report. Pending guardrail proposals → block "proposals" (still in the worktree). Then
+        <do>Report (with the auto decisions report line, block "auto-decisions"). Pending guardrail proposals → block "proposals" (still in the worktree; also in AUTO: the INTEGRATE question waits for the user anyway). Then
             <question>The plan is done on its branch. Integrate it into main now?
                 <choice key="YES">Integrate → cycle "finish"</choice>
                 <choice key="NO">Stop here. The run stays; RUN offers it again</choice>
@@ -256,20 +258,21 @@
 </option>
 
 <cycle name="finish">
-    <step1>Pending guardrail proposals → block "proposals" first, still in the worktree: the architect's commit lands on the run branch and merges with it. Then block "docs-update". Then nos run finish --token <token>. It locks, checks main, syncs, runs the full gate (e2e included when configured) and merges ff-only. Exit 0 → step3. Exit 1 → step2. Other codes → exit code table (3: integrate, then repeat step1; 4: wait for the merge lock)</step1>
+    <step1>MANUAL: pending guardrail proposals → block "proposals" first, still in the worktree: the architect's commit lands on the run branch and merges with it. AUTO: skip it, step3 asks them after merge and cleanup. Then block "docs-update". Then nos run finish --token <token>. It locks, checks main, syncs, runs the full gate (e2e included when configured) and merges ff-only. Exit 0 → step3. Exit 1 → step2. Other codes → exit code table (3: integrate, then repeat step1; 4: wait for the merge lock)</step1>
     <step2>Exit 1:
-        <do>Gate fail (gate JSON in the details) → stop, report run id and token, the failing tools and their tails. Ask only this question (not the question of park step2)
+        <do mode="auto">Gate fail (gate JSON in the details) → FIX by yourself, at most 2 rounds per run (count the "gate fix" lines of this run in block "auto-decisions", so a resume keeps the count): run ability "develop" (resume, mode auto) for the last done step with the failing tools and tails as feedback. It commits "step-<id>: gate fix". nos specs commit --run <run> -m "step-<id>: gate fix". Record "finish — problem: gate fail <tools> — applied: gate fix round <n>/2". Repeat step1. Still failing after round 2 → dead end: block "auto-end", the run stays unmerged</do>
+        <do mode="manual">Gate fail (gate JSON in the details) → stop, report run id and token, the failing tools and their tails. Ask only this question (not the question of park step2)
             <question>The gate failed while integrating. How do you want to continue?
                 <choice key="FIX">Run ability "develop" (resume) for the last done step with the failing tools and tails as feedback. It commits "step-<id>: gate fix". nos specs commit --run <run> -m "step-<id>: gate fix". Repeat step1</choice>
                 <choice key="PAUSE">Pause → park choice PAUSE</choice>
                 <choice key="ABANDON">Drop the run → park choice ABANDON</choice>
             </question>
         </do>
-        <do>Main busy ("details.busy": a merge, rebase, cherry-pick or revert in progress in main), main dirty ("details.files" on paths the branch touches), main checkout on another branch ("main checkout is on <x>, expected <mainBranch>") or "git merge --ff-only … refused twice" → park, report the error and the details. GO → repeat step1 after the user fixed main. Main dirty on docs/guardrails.xml (an interrupted proposals architect on main) → same advice in the park report: rerun ability "architect" (resume) on main with the same task and proposals</do>
-        <do>Other → park, report the error</do>
+        <do>Main busy ("details.busy": a merge, rebase, cherry-pick or revert in progress in main), main dirty ("details.files" on paths the branch touches), main checkout on another branch ("main checkout is on <x>, expected <mainBranch>") or "git merge --ff-only … refused twice" → park, report the error and the details. GO → repeat step1 after the user fixed main. AUTO (R: main is the user's, you never touch it): wait 60s, repeat step1 once; the same error again → block "auto-end" with the details and the advice below. Main dirty on docs/guardrails.xml (an interrupted proposals architect on main) → same advice in the park report: rerun ability "architect" (resume) on main with the same task and proposals</do>
+        <do>Other → park, report the error (AUTO: as exit code 1 AUTO)</do>
     </step2>
-    <step3>Merged → still in the worktree: nos deploy --remove (deletes the run's test env; exit 8 → nothing deployed; exit 1 → name it in the report, continue). ExitWorktree action=keep. nos run cleanup --token <token> (from main the token finds the run). nos roots. Report: merged into <mainBranch>, worktree and branch removed. Proposals collected since step1 → block "proposals" (now on main)</step3>
-    <step4>Cleanup refused: exit 1 "a process … still uses <wt>" (e.g. a dev server) → report it, repeat "nos run cleanup --token <token>" after the user stopped it. Exit 5 → exit code table</step4>
+    <step3>Merged → still in the worktree: nos deploy --remove (deletes the run's test env; exit 8 → nothing deployed; exit 1 → name it in the report, continue; AUTO: also record it, revert: "nos deploy --remove --env <run>" later). ExitWorktree action=keep. nos run cleanup --token <token> (from main the token finds the run). nos roots. AUTO: an auto decision since the last specs commit (e.g. the cleanup) → nos specs commit --domain <domain> -m "<run>: auto decisions" (the run file is gone after cleanup). Report: merged into <mainBranch>, worktree and branch removed, the auto decisions report line (block "auto-decisions"; follow-ups listed). Proposals collected since step1 (AUTO: all pending ones) → block "proposals" (now on main, the architect commits there)</step3>
+    <step4>Cleanup refused: exit 1 "a process … still uses <wt>" (e.g. a dev server) → MANUAL: report it, repeat "nos run cleanup --token <token>" after the user stopped it. AUTO (R): a dev server or background task this session started → stop it (TaskStop) first; then wait 60s and repeat, up to 3 times; still refused → record, block "auto-end" with "cleanup pending" (the run is merged; RUN offers the cleanup). Exit 5 → exit code table</step4>
 </cycle>
 
 <cycle name="phase">
@@ -286,9 +289,10 @@
     </step2>
     <step3 resume-at="in-review">
         <status target="phase" from="implemented" to="in-review"/>
-        <do>Run ability "review-pessimistic" with the phase</do>
-        <do>Run ability "review-fixing" with the phase</do>
-        <park mode="auto,manual" when="verdict blocked"/>
+        <do>Run ability "review-pessimistic" with the phase and the mode</do>
+        <do>Run ability "review-fixing" with the phase and the mode</do>
+        <do mode="auto" when="verdict blocked">As cycle "step" step5 AUTO</do>
+        <park mode="manual" when="verdict blocked"/>
     </step3>
     <step4 resume-at="reviewed">
         <status target="phase" from="in-review" to="reviewed"/>
@@ -307,7 +311,7 @@
         <do>Run ability "specify" with domain, phase id (quick step: "quick step" instead), step id, mode and user feedback if any. Keep its subagent alive when it reports done</do>
         <do>Run ability "spec-review" with domain, phase id, step id, mode and user feedback if any. Resume and specify not run in this session → tell it the spec author is unavailable</do>
         <do>spec-review returns questions "for-specify" → SendMessage them to the specify subagent. Its answers → SendMessage to the spec-review subagent. specify asks back → relay to spec-review and the reply back</do>
-        <do>spec-review returns questions for the user → ask the user, send the answers back to spec-review</do>
+        <do>spec-review returns questions for the user → ask the user, send the answers back to spec-review (AUTO: rule "If a subagent returns questions", only (H) and (I) questions reach the user)</do>
         <do>spec-review reports done → the specification is finished. Send nothing more to the specify subagent. nos specs commit --run <run> -m "step-<id>: specify, spec-review"</do>
     </step1>
     <step2 resume-at="specified">
@@ -317,8 +321,9 @@
     <step3 resume-at="in-progress">
         <do when="not a resume at in-progress">nos run sync --token <token>. Exit 3 → integrate, then sync again. Other codes → exit code table. Resumed at in-progress → no sync: develop finishes its half-done work first, the next develop syncs</do>
         <status target="step" from="specified" to="in-progress"/>
-        <do>Run ability "develop" with domain, phase id, step id and user feedback if any</do>
-        <park mode="auto,manual" when="verdict blocked"/>
+        <do>Run ability "develop" with domain, phase id, step id, mode and user feedback if any</do>
+        <do mode="auto" when="verdict blocked">Per reason, each at most once per step (the auto-decisions lines of this run keep the count): no ACs → run the step1 actions again (specify, spec-review, mode auto; no status change), their specs commit, then develop again; still no ACs → dead end: block "auto-end". (!) tasks → record, rerun develop (resume) with the (!) reasons as feedback. Still (!) → record "applied: implemented with (!) <tasks>, review and finish gate decide", continue with step4: the Dev Log keeps the (!), the reviews and the finish gate decide whether it merges. No slot → exit code 7</do>
+        <park mode="manual" when="verdict blocked"/>
     </step3>
     <step4 resume-at="implemented">
         <status target="step" from="in-progress" to="implemented"/>
@@ -328,9 +333,10 @@
     </step4>
     <step5 resume-at="in-review">
         <status target="step" from="implemented" to="in-review"/>
-        <do>Run ability "review-pessimistic" with the step</do>
-        <do>Run ability "review-fixing" with the step</do>
-        <park mode="auto,manual" when="verdict blocked"/>
+        <do>Run ability "review-pessimistic" with the step and the mode</do>
+        <do>Run ability "review-fixing" with the step and the mode</do>
+        <do mode="auto" when="verdict blocked">review-fixing decided user decisions itself (Fixes marked "(auto decision)") and left (!) only for not fixable or out of scope findings → record each (block "auto-decisions": "(auto decision)" findings, not fixable ones "applied: left, finish gate decides", out of scope ones "applied: follow-up, not done in this run", also listed in the final report as follow-ups: a later quick step or a guardrail proposal), continue. No slot → exit code 7</do>
+        <park mode="manual" when="verdict blocked"/>
     </step5>
     <step6 resume-at="reviewed">
         <status target="step" from="in-review" to="reviewed"/>
@@ -359,7 +365,7 @@
         <choice key="ALL">Accept all</choice>
         <choice key="NO">Drop all. Nothing is written, no memory either</choice>
     </question>
-    <do>Accepted → run ability "architect" with task ADD-GUARDRAILS and the accepted proposals, in this session's cwd. Inside a run: its commits land on the run branch and reach main with the merge. Outside a run: on main (listed exception). No specs commit for it. Relay its questions (only about problem proposals) and the answers back. Report one line per applied proposal: key, section, wording ("applied P1: coding — …"). Inside a run repeat these lines in every later park report of the run, so they survive a compacted context (ABANDON needs them)</do>
+    <do>Accepted → run ability "architect" with task ADD-GUARDRAILS and the accepted proposals, in this session's cwd. Inside a run: its commits land on the run branch and reach main with the merge. Outside a run: on main (listed exception). No specs commit for it. Relay its questions (only about problem proposals) and the answers back, also in AUTO (the block runs only at a park or a run's end, never mid-run). Report one line per applied proposal: key, section, wording ("applied P1: coding — …"). Inside a run repeat these lines in every later park report of the run, so they survive a compacted context (ABANDON needs them)</do>
     <do>Not accepted → dropped. Then continue with the park or report you came from</do>
 </proposals>
 
@@ -368,11 +374,25 @@
     <rule>Report line: "docs update: <step ids> handled, <n> committed" (handled = every step whose entries went to the architect, answered yes or no). Repeat it in every later park and final report of the run, so a compacted context never asks them again</rule>
     <do>Collect the Dev Log entries marked (architecture) in the run's step spec files: quick step → its "spec-file" in quick-steps.json; plan → the "spec-file" of every step in plan.json (relative to <specs>). Leave out discarded steps and steps already in the report line (step1 repeated after integrate or a gate fix). None → skip</do>
     <do>Run ability "architect" with task UPDATE-DOCS, the run mode (auto|manual) and the entries (step id, spec path and entry text), in this session's cwd. Architecture docs or a helper's files already dirty in <work> (git status) → tell it it resumes interrupted work. Its commits "architect: docs <section> from step-<id> (architecture)" land on the run branch and reach main with the merge. No specs commit</do>
-    <do>Relay its questions (rule "If a subagent returns questions"): AUTO and a matching standing answer → answer it (rule "Guardrails"). Otherwise ask the user and wait, also in AUTO. Done → the report line. Tech debt the architect hands over → list it in the finish report</do>
+    <do>Relay its questions (rule "If a subagent returns questions"): AUTO and a matching standing answer → answer it (rule "Guardrails"). AUTO otherwise → answer it yourself (an architecture doc change on the run branch is reversible, not (I)): yes when the change matches the code and the entry and breaks no guardrail, else no; record it. MANUAL → ask the user and wait. Done → the report line. Tech debt the architect hands over → list it in the finish report</do>
 </docs-update>
 
+<auto-decisions>
+    <rule>AUTO only (rule "AUTO decisions"): the record of every problem solved without the user. File <specs>/<domain>/auto-decisions.md, structure <home>/templates/auto-decisions.md. Write/Edit only (rule "Specs writes"): missing → Write it from the template, else Read, then Edit to append</rule>
+    <do>One section per run: "## <run> — <date>" (the date the run's first decision was recorded; missing → add it at the end of the file; a resumed run appends to its section). One line per decision: "- <where: step-<id> | phase-<id> | integrate | finish | cleanup> — problem: … — applied: … — revert: …" (revert: how to undo it, "-" when obvious). An ability's own record (Spec Log, Dev Log "What I didn't do and why", review Fixes "(auto decision)", Dev Log (merge)) → the line points to it ("see Dev Log step-<id>"). A follow-up (out of scope finding) → "applied: follow-up, not done in this run"</do>
+    <do>Committed with the next nos specs commit --run <run>: the file lies in the run's domain folder, the domain-scoped commit includes it</do>
+    <rule>Report line: "auto decisions this run: <n>" plus the lines of this run, in every park report, every question that waits for the user, and the final report (also block "auto-end"), so a compacted context keeps them. None → "auto decisions this run: 0"</rule>
+</auto-decisions>
+
+<auto-end>
+    <rule>AUTO only (rule "AUTO decisions"): a technical limit (R) after its bounded fallback, or a dead end. Ending with a report is no park: no question about the run, nobody is waited for. No status change: the run (status, worktree, branch, an open rebase) stays and RUN resumes it</rule>
+    <do>Record the blocker and what was tried (block "auto-decisions": "applied: run ended"). The run file still exists → nos specs commit --run <run> -m "<run>: auto end"</do>
+    <do>Final report: run id and token, target, status, "ended (AUTO): <blocker>", what was tried, what the user can do (free the slot, stop the process, fix main, take over), then RUN continues the run. The auto decisions report line, follow-ups, the applied guardrail lines, the docs-update line and the standing answer lines of the run</do>
+    <do>Pending guardrail proposals → block "proposals" (the run's end, still in the worktree when inside: the architect's commits land on the run branch). Then end the session's work on the run; stay where you are</do>
+</auto-end>
+
 <park>
-    <step1>Stop. Report run id and token, target, status and reason. Pending guardrail proposals by key only ("pending proposals: P1, P2, asked below"), the applied ones of this run by their lines. Specified → summarize the description and ACs in simple words. Human validation → explain in simple steps how the user verifies; a deployed url in the ability report → name it, the user verifies there. No review ran → derive the steps from the ACs of the step or of the phase's steps</step1>
+    <step1>Stop. Report run id and token, target, status and reason (AUTO: only (H) or (I), rule "AUTO decisions"). The auto decisions report line (block "auto-decisions"). Pending guardrail proposals by key only ("pending proposals: P1, P2, asked below"), the applied ones of this run by their lines. Specified → summarize the description and ACs in simple words. Human validation → explain in simple steps how the user verifies; a deployed url in the ability report → name it, the user verifies there. No review ran → derive the steps from the ACs of the step or of the phase's steps</step1>
     <step2>Pending guardrail proposals → block "proposals" first
         <question>How do you want to continue?
             <choice key="GO">Continue with the next step of the cycle</choice>

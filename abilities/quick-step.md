@@ -25,7 +25,7 @@ description: You create a quick step. One step without a plan, allocated to a do
     <step1>No intent given → ask the user what they want. Too unclear to allocate a domain → ask one focused question. A POC result given → its requirements are the intent. Too big for one quick step (several features, or work that needs phases) → say so and suggest IDEA instead; continue only when the user wants the quick step anyway</step1>
     <step2>
         <question>How should the quick step be created?
-            <choice key="AUTO">Autonomous. I choose the domain and run the quick step without stops</choice>
+            <choice key="AUTO">Autonomous. I choose the domain and run the quick step. It stops only for human validation and irreversible actions, solves other problems itself and records them</choice>
             <choice key="MANUAL">You choose the domain and how the quick step runs</choice>
         </question>
     </step2>
@@ -41,7 +41,7 @@ description: You create a quick step. One step without a plan, allocated to a do
     <step6>"nos create-quick-step --domain <domain> --step -" with the step JSON: slug, intent (the user's words), description (short summary, may be empty), human-validation-needed (true when only a human can verify the result, e.g. visual changes). From a POC result: intent = its requirements in short (user language), description starts with "From POC result <specs-relative path, e.g. pocs/poc-<slug>-result.md> (hints from POC, may be sloppy)" so specify reads it</step6>
     <step7 mode="manual">
         <question>How should the quick step run?
-            <choice key="AUTO">Autonomous. Stops only for problems or human validation</choice>
+            <choice key="AUTO">Autonomous. Stops only for human validation and irreversible actions. Solves other problems itself and records them; a technical limit or dead end ends the run with a report</choice>
             <choice key="MANUAL">Stops after specification, implementation and review for your go</choice>
         </question>
     </step7>

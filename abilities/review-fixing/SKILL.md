@@ -9,7 +9,7 @@ description: You are the second reviewer. You judge the pessimistic review and f
     <rule>Pessimistic findings may be wrong. Judge each one independently</rule>
     <rule>Follow TDD. Changing a test to make it pass is strictly forbidden</rule>
     <rule>Fix only within the target scope</rule>
-    <rule>If the expected input is not given you MUST stop and request it</rule>
+    <rule>If the expected input is not given you MUST stop and request it (orchestrated: from the caller, it supplies it from the run state)</rule>
     <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in full: never through a shell variable, function or alias (worktree isolation refuses computed command names). home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself. One nos call = the bare command as its own Bash call, the cwd already is <work>: no cd prefix, pipes, redirects or chains, also for git and test/tool runners (an allow rule matches only if every part matches, else the auto-mode classifier decides)</rule>
     <rule>Read/Grep/Glob in the specs: always pass <specs> or a path in it (it lies outside the checkout, default ../<project>.specs). Never run git against <specs>: the orchestrator commits it</rule>
     <rule>Cwd: stay in <work>, the Bash cwd persists. Never cd into <specs> or anywhere outside <work>: worktree isolation refuses Bash whose cwd is outside the worktree. Read outside <work> with Read/Grep/Glob and the absolute path</rule>
@@ -22,7 +22,7 @@ description: You are the second reviewer. You judge the pessimistic review and f
     <rule>Read guardrails for="review" in <work>/docs/guardrails.xml if existent.</rule>
     <rule>Read architecture docs in <work>/docs/architecture.md if existent</rule>
     <rule>Never change the architecture docs. Fix needs them updated or breaks one of their rules → note it in the Dev Log marked (architecture). Standalone → note it in the printed outcome</rule>
-    <rule>Run as a subagent → return every question to the caller and wait. Otherwise → ask the user directly</rule>
+    <rule>Run as a subagent → return every question to the caller and wait. Otherwise → ask the user directly. mode auto: never ask what the specs, ACs, guardrails, architecture docs or the code answer: decide (workflow step4) and report it as an auto decision</rule>
     <rule>Never write a Claude Code memory or a CLAUDE.md/AGENTS.md entry. A project lesson → put it in your report as a guardrail proposal (section, wording, reason)</rule>
 </coreRules>
 
@@ -31,20 +31,20 @@ description: You are the second reviewer. You judge the pessimistic review and f
     <mode name="standalone">otherwise → workflow mode="standalone". No plan.json, idea files, spec or review file. Read them only if the user points to them</mode>
 </modes>
 
-<input mode="orchestrated">home, work, specs, domain, target: step id, quick step id or phase id. Optional: mainBranch as in <home>/abilities/review-pessimistic/SKILL.md</input>
+<input mode="orchestrated">home, work, specs, domain, target: step id, quick step id or phase id, run mode (auto|manual; missing → manual). Optional: mainBranch as in <home>/abilities/review-pessimistic/SKILL.md</input>
 <input mode="standalone">Scope as in <home>/abilities/review-pessimistic/SKILL.md input mode="standalone". Optional: findings of a previous review, e.g. printed by review-pessimistic</input>
 
 <workflow mode="orchestrated">
     <step1>Read plan.json, the idea files, the target spec files and changes as in <home>/abilities/review-pessimistic/SKILL.md workflow mode="orchestrated" step1 and step2 (exact prefix match). Do NOT read the review file yet</step1>
     <step2>Run the quality check: "nos gate" in <work> (--e2e as in <home>/templates/quality-tools.md). Review the changes with the passes and the focus of the target from <home>/abilities/review-pessimistic/SKILL.md</step2>
     <step3>Read the review file. Compare with your review. Remove invalid findings. Add your own findings missing there as F<next id>, in the format of <home>/templates/review-template.md</step3>
-    <step4>Fix the findings. mechanical is a hint only, judge each one. Behavior change → failing test first. Mark each finding (x) fixed or (!) not fixable, out of scope or needs a user decision</step4>
+    <step4>Fix the findings. mechanical is a hint only, judge each one. Behavior change → failing test first. Mark each finding (x) fixed or (!) not fixable, out of scope or needs a user decision. Run mode auto: needs a user decision → decide by the specs and ACs (the most reasonable choice: consistent with them, the guardrails and architecture docs, the smallest reversible change, never weakening a test), fix it and mark it (x); step9 writes it under Fixes marked "(auto decision)" with the choice and why. Only a decision about the product's look or feel → return it as a question to the caller and wait (the orchestrator asks the user), then fix by the answer. Out of scope → (!), named as a follow-up in the report. Not fixable → (!)</step4>
     <step5>Run the quality check: "nos gate" in <work>. Fixable error → fix and rerun</step5>
     <step6>Test on the deployment, once the gate passes: "nos deploy" in <work> (the run's env, also used by develop). Exit 8 → deploy not configured, skip. Exit 1 → read "tail", then "log": fixable → fix, gate, redeploy; else mark the finding (!). Exit 0 → open its "url" with a browser tool (chrome-devtools MCP) and check the fixed findings and the ACs of the target a user can check there. No browser tool → note it, report the url for the user. A failure → failing test first, fix, gate, redeploy</step6>
     <step7>Add your fixes to the Dev Log under "### What I did", each entry marked (reviewer); findings left (!) under "### What I didn't do and why" (structure: <home>/templates/step-spec-template.md, no other headings). Phase → Dev Log of the affected step spec. Deployed → one bullet "deployed <url>: <what was checked> (reviewer)"</step7>
     <step8>Commit code only, in <work>, message "step-<id>: <what>" (phase target: "phase-<id>: <what>"). Spec and review files live in <specs> and are never part of it. No code changed → no commit.</step8>
-    <step9>Write "### Fixes" in the review file: per fixed finding what changed and the commit prefix ("step-<id>:" or "phase-<id>:"), never a sha. Update Criteria and Result when your fixes changed them. No second commit: the orchestrator commits the specs</step9>
-    <step10>Report verdict: pass, or blocked with reasons when any finding is (!). Deployed → add the url. human-validation-needed → add simple steps a non-technical user follows to verify (on the url when deployed)</step10>
+    <step9>Write "### Fixes" in the review file: per fixed finding what changed and the commit prefix ("step-<id>:" or "phase-<id>:"), never a sha. A finding decided in run mode auto → its line ends with "(auto decision): <choice and why>". Update Criteria and Result when your fixes changed them. No second commit: the orchestrator commits the specs</step9>
+    <step10>Report verdict: pass, or blocked with reasons when any finding is (!) (each (!) named not fixable, out of scope (follow-up) or needs a user decision). Deployed → add the url. Run mode auto: also the "(auto decision)" findings, each with problem and choice. human-validation-needed → add simple steps a non-technical user follows to verify (on the url when deployed)</step10>
 </workflow>
 
 <workflow mode="standalone">

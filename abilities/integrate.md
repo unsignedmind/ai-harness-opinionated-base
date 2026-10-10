@@ -6,7 +6,7 @@ description: You are the merge agent. You resolve a stopped rebase of a run bran
 
 <coreRules>
     <rule>You are the merge agent. The only ability that continues a rebase</rule>
-    <rule>If the expected input is not given you MUST stop and request it</rule>
+    <rule>If the expected input is not given you MUST stop and request it from the caller (the orchestrator supplies it from the run state)</rule>
     <rule>Invocation: "nos" = the literal command "node <home>/cli/bin/nos.js …", typed out in full: never through a shell variable, function or alias (worktree isolation refuses computed command names). home, work, specs are given by the caller. Missing → <home> = the nos folder that holds this ability's abilities/ folder, then "nos roots" prints them. <home> with forward slashes, verbatim as given or as printed by "nos roots". Never build a nos path yourself. One nos call = the bare command as its own Bash call, the cwd already is <work>: no cd prefix, pipes, redirects or chains, also for git and test/tool runners (an allow rule matches only if every part matches, else the auto-mode classifier decides)</rule>
     <rule>Read/Grep/Glob in the specs: always pass <specs> or a path in it (it lies outside the checkout, default ../<project>.specs). Never run git against <specs>: the orchestrator commits it</rule>
     <rule>Cwd: stay in <work>, the Bash cwd persists. Never cd into <specs> or anywhere outside <work>: worktree isolation refuses Bash whose cwd is outside the worktree. Read outside <work> with Read/Grep/Glob and the absolute path</rule>
@@ -18,19 +18,19 @@ description: You are the merge agent. You resolve a stopped rebase of a run bran
     <rule>Changing a test to make it pass is strictly forbidden</rule>
     <rule>Run project commands only via "nos gate" and "nos exec": <home>/templates/quality-tools.md</rule>
     <rule>Read guardrails for="coding" in <work>/docs/guardrails.xml and <work>/docs/architecture.md if existent</rule>
-    <rule>Run as a subagent → return every question to the caller and wait</rule>
+    <rule>Run as a subagent → return every question to the caller and wait. Mode auto: never ask what both specs, the guardrails, architecture docs or the code answer: decide (step4) and report it as an auto decision</rule>
     <rule>Never write a Claude Code memory or a CLAUDE.md/AGENTS.md entry. A project lesson → put it in your report as a guardrail proposal (section, wording, reason)</rule>
 </coreRules>
 
-<input>home, work, specs, the run file <specs>/.runs/<run>.json (kind, id, domain, branch, base, mainBranch). Optional: the conflict list from the nos output; missing → git diff --name-only --diff-filter=U in <work>. Optional: the user's decision which intent wins. The worktree has a stopped rebase</input>
+<input>home, work, specs, the run file <specs>/.runs/<run>.json (kind, id, domain, branch, base, mainBranch), mode (auto|manual; missing → manual). Optional: the conflict list from the nos output; missing → git diff --name-only --diff-filter=U in <work>. Optional: the user's decision which intent wins. The worktree has a stopped rebase</input>
 
 <workflow>
     <step1>Rebase check, two calls (no $(…), no variable, no "&&"): "git rev-parse --absolute-git-dir" in <work> prints the git dir. Then Glob pattern "rebase-*/*" with path <printed path>, the printed path typed out literally (it finds files in rebase-merge or rebase-apply). No match → no rebase in progress (not REBASE_HEAD, git leaves it behind after a finished rebase) → report "no rebase in progress", done</step1>
     <step2>Their side, the work already merged: git log <base>..<mainBranch> --format=%s → subject prefixes "step-<id>:" → "nos specs find-step <id>" per id → their spec files. "phase-<id>:" → the phase in <specs>/domain-*/plan.json (Grep with path <specs>). "architect:" or "setup:" → no spec, the commit message and diff are the intent</step2>
     <step3>Own side: the commit being replayed (git log -1 --format=%s REBASE_HEAD) → its prefix, handled like step2: "step-<id>:" → "nos specs find-step <id>", "phase-<id>:" → the phase in plan.json, "architect:" or "setup:" → no spec, the commit message and diff. Read own and their specs: Description, ACs, Dev Log. Conflicting files: the conflict list, for later commits always git diff --name-only --diff-filter=U</step3>
-    <step4>Resolve each conflicting file with the intent of both sides. A decision of the user is given → it wins over the contradiction. Otherwise both specs want contradictory behavior → stop: leave the rebase open, report blocked with both spec files and the contradicting ACs cited</step4>
+    <step4>Resolve each conflicting file with the intent of both sides. A decision of the user is given → it wins over the contradiction. Otherwise both specs want contradictory behavior → mode manual: stop, leave the rebase open, report blocked with both spec files and the contradicting ACs cited. Mode auto: the behavior already merged on main (their side) wins, unless the own step's spec explicitly replaces it (an AC or the Description says it changes that behavior). Adapt the own side to it, resolve and continue. The step7 entry cites both spec paths, the contradicting ACs and the choice, marked (auto decision); report it as an auto decision</step4>
     <step5>git add the resolved files, then git -c core.editor=true rebase --continue. The next commit stops with conflicts → step3 for it. Repeat until the rebase is done</step5>
     <step6>"nos gate" in <work> (--e2e when an involved Test Strategy names e2e). Fail caused by the merge → fix with a failing test first where behavior changes, commit code only with message "<prefix> merge fix": the prefix of the step whose code the fix changes (from the step4 resolutions), else the prefix of the last replayed commit. Rerun. Not fixable → report blocked with the failing tools</step6>
     <step7>Dev Log of the own step spec, under "### What I did" (structure: <home>/templates/step-spec-template.md, no other headings): per resolved conflict one entry marked (merge): file, what both sides wanted, how it was resolved, the other step id</step7>
-    <step8>Report verdict: pass (rebase done, gate pass), or blocked with reasons</step8>
+    <step8>Report verdict: pass (rebase done, gate pass), or blocked with reasons (say whether the rebase is done and only the gate fails, or the rebase is still open). Mode auto: also the auto decisions taken</step8>
 </workflow>
