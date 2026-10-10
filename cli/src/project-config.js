@@ -20,6 +20,7 @@ export const DEFAULT_PROJECT_CONFIG = Object.freeze({
     e2e: null,
     additional: Object.freeze([]),
     timeout: 30,
+    cache: true,
   }),
   'project-commands': Object.freeze({ install: null, dev: null, 'deploy-test': null }),
   deploy: Object.freeze({ provider: null, build: null, options: Object.freeze({}) }),

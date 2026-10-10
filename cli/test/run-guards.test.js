@@ -104,7 +104,8 @@ test('printed lock holders never carry the token: exit 4 details and lock status
   );
 });
 
-// A gate tool that commits to main (like an architect commit landing during the gate) the first <limit> times
+// A gate tool that commits to main (like an architect commit landing during the gate) the first <limit> times.
+// A new file each time: the rebased content differs, so the gate cache cannot skip the next gate.
 function mainMover(t, limit) {
   const dir = makeTempRoot(t);
   const script = writeFile(
@@ -117,7 +118,10 @@ const marker = ${JSON.stringify(path.join(dir, 'count'))};
 const count = fs.existsSync(marker) ? Number(fs.readFileSync(marker, 'utf8')) : 0;
 if (count < ${limit}) {
   const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir']).toString().trim();
-  execFileSync('git', ['-C', path.dirname(common), 'commit', '--allow-empty', '-q', '-m', 'architect: moved']);
+  const main = path.dirname(common);
+  fs.writeFileSync(path.join(main, 'moved-' + count + '.txt'), 'moved\\n');
+  execFileSync('git', ['-C', main, 'add', '--', 'moved-' + count + '.txt']);
+  execFileSync('git', ['-C', main, 'commit', '-q', '-m', 'architect: moved']);
   fs.writeFileSync(marker, String(count + 1));
 }
 `,

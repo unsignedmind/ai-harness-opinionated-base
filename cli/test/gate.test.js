@@ -1,13 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { FAILED, NosError, SLOT_TIMEOUT } from '../src/exit-codes.js';
-import { gateTools, runGate, TAIL_LINES } from '../src/gate.js';
+import { CACHE_FILE, gateTools, runGate, TAIL_LINES } from '../src/gate.js';
 import { lockStatus, takeLock } from '../src/lock.js';
 import { slash } from '../src/roots.js';
-import { invokeCli, makeProject, runNode, srcUrl } from './helpers.js';
+import {
+  gitOk,
+  hasGit,
+  invokeCli,
+  makeProject,
+  makeTempRoot,
+  readJson,
+  runNode,
+  srcUrl,
+  writeFile,
+} from './helpers.js';
 
 const pass = (text) => `node -e "console.log('${text}')"`;
 const fail = (text) => `node -e "console.log('${text}'); process.exit(3)"`;
@@ -16,6 +26,18 @@ const env = `node -e "console.log('home=' + process.env.NOS_HOME + ' slot=' + pr
 
 const project = (t, tools, worktrees = { slots: 1, slotWait: 1 }) =>
   makeProject(t, { config: { 'quality-tools': tools, worktrees } });
+
+// Cache tests: a git project; counter = a passing tool that counts its runs in a file outside the checkout
+const noGit = { skip: !hasGit && 'git is not available' };
+const gitProject = (t, tools, worktrees = { slots: 1, slotWait: 1 }) =>
+  makeProject(t, { git: true, config: { 'quality-tools': tools, worktrees } });
+function counter(t) {
+  const file = slash(path.join(makeTempRoot(t), 'runs'));
+  return {
+    cmd: `node -e "require('fs').appendFileSync('${file}', 'x'); console.log('counted')"`,
+    runs: () => (existsSync(file) ? readFileSync(file, 'utf8').length : 0),
+  };
+}
 
 test('gateTools: order test, lint, format-check, typecheck, additional, e2e; cmd null when not configured', () => {
   const tools = gateTools(
@@ -40,9 +62,11 @@ test('runGate runs every tool, also after a failure; JSON shape, logs, tail of 6
 
   const result = await runGate(roots);
 
-  assert.deepEqual(Object.keys(result), ['action', 'pass', 'tools']);
+  assert.deepEqual(Object.keys(result), ['action', 'pass', 'cache', 'tree', 'tools']);
   assert.equal(result.action, 'gate');
   assert.equal(result.pass, false);
+  assert.equal(result.cache, 'unavailable', 'not a git checkout');
+  assert.equal(result.tree, null);
   assert.deepEqual(
     result.tools.map((tool) => [tool.name, tool.status, tool.exit]),
     [
@@ -54,7 +78,17 @@ test('runGate runs every tool, also after a failure; JSON shape, logs, tail of 6
     ],
   );
   for (const tool of result.tools)
-    assert.deepEqual(Object.keys(tool), ['name', 'cmd', 'status', 'exit', 'signal', 'timedOut', 'tail', 'log']);
+    assert.deepEqual(Object.keys(tool), [
+      'name',
+      'cmd',
+      'status',
+      'exit',
+      'signal',
+      'timedOut',
+      'cached',
+      'tail',
+      'log',
+    ]);
   const [test1, lint, formatCheck] = result.tools;
   assert.equal(test1.cmd, fail('boom'));
   assert.equal(test1.tail, 'boom');
@@ -69,6 +103,7 @@ test('runGate runs every tool, also after a failure; JSON shape, logs, tail of 6
     exit: null,
     signal: null,
     timedOut: false,
+    cached: false,
     tail: '',
     log: null,
   });
@@ -254,4 +289,154 @@ test('SLOT_TIMEOUT details carry pass of the tools run so far', async (t) => {
     runGate(roots, { e2e: true, slot: { waitMs: 50, pollMs: 10 } }),
     (err) => err.code === SLOT_TIMEOUT && err.details.pass === false && err.details.tools.length === 4,
   );
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// cache
+
+test('cache: a second gate on the same content runs nothing; cached passes keep their tail, the log says so', noGit, async (t) => {
+  const a = counter(t);
+  const b = counter(t);
+  const { roots } = gitProject(t, { test: a.cmd, lint: b.cmd });
+
+  const first = await runGate(roots);
+  assert.equal(first.cache, 'saved');
+  assert.match(first.tree, /^[0-9a-f]{40}$/);
+  assert.deepEqual(
+    first.tools.map((tool) => tool.cached),
+    [false, false, false, false],
+  );
+
+  const second = await runGate(roots);
+
+  assert.equal(a.runs(), 1);
+  assert.equal(b.runs(), 1);
+  assert.equal(second.pass, true);
+  assert.equal(second.cache, 'saved');
+  assert.equal(second.tree, first.tree);
+  const [test1, lint, formatCheck] = second.tools;
+  assert.deepEqual(
+    [test1.status, test1.exit, test1.cached, test1.tail],
+    ['pass', 0, true, 'counted'],
+  );
+  assert.equal(lint.cached, true);
+  assert.equal(formatCheck.status, 'not-configured');
+  assert.match(readFileSync(test1.log, 'utf8'), new RegExp(`^nos: cached pass of .* on tree ${first.tree}[^]*counted`));
+  assert.ok(readJson(roots.specs, `.runs/logs/main/${CACHE_FILE}`).trees[first.tree].tools.test);
+});
+
+test('cache: uncommitted and untracked files count; committing exactly the gated content hits (develop, then review)', noGit, async (t) => {
+  const a = counter(t);
+  const { root, roots } = gitProject(t, { test: a.cmd });
+  await runGate(roots);
+
+  writeFile(root, 'src/x.txt', 'x\n');
+  const dirty = await runGate(roots);
+  assert.equal(a.runs(), 2, 'an untracked file changes the content');
+  assert.equal(dirty.tools[0].cached, false);
+
+  gitOk(['add', 'src/x.txt'], root);
+  gitOk(['commit', '-m', 'step-1: x'], root);
+  const committed = await runGate(roots);
+  assert.equal(a.runs(), 2);
+  assert.equal(committed.tools[0].cached, true);
+  assert.equal(committed.tree, dirty.tree);
+
+  writeFile(root, '.specs/scratch.txt', 'ignored\n');
+  assert.equal((await runGate(roots)).tools[0].cached, true, 'an ignored file is not part of the content');
+});
+
+test('cache: only passes are kept; a failed tool runs again, its passing sibling does not', noGit, async (t) => {
+  const b = counter(t);
+  const { roots } = gitProject(t, { test: fail('boom'), lint: b.cmd });
+  await runGate(roots);
+
+  const second = await runGate(roots);
+
+  assert.equal(second.pass, false);
+  assert.deepEqual(
+    [second.tools[0].status, second.tools[0].cached, second.tools[0].tail],
+    ['fail', false, 'boom'],
+  );
+  assert.equal(second.tools[1].cached, true);
+  assert.equal(b.runs(), 1);
+});
+
+test('cache: a pass counts only for the same command', noGit, async (t) => {
+  const a = counter(t);
+  const b = counter(t);
+  const { roots } = gitProject(t, { test: a.cmd, lint: b.cmd });
+  const first = await runGate(roots);
+  const file = path.join(roots.specs, '.runs', 'logs', 'main', CACHE_FILE);
+  const cache = JSON.parse(readFileSync(file, 'utf8'));
+  cache.trees[first.tree].tools.test.cmd = 'npm test';
+  writeFile(path.dirname(file), CACHE_FILE, cache);
+
+  const second = await runGate(roots);
+
+  assert.deepEqual(
+    second.tools.slice(0, 2).map((tool) => tool.cached),
+    [false, true],
+  );
+  assert.equal(a.runs(), 2);
+  assert.equal(b.runs(), 1);
+});
+
+test('cache: --fresh and quality-tools.cache false run every tool and keep nothing', noGit, async (t) => {
+  const a = counter(t);
+  const { root, roots } = gitProject(t, { test: a.cmd });
+  await runGate(roots);
+
+  const fresh = await invokeCli(['gate', '--fresh'], { cwd: root });
+  assert.equal(fresh.code, 0, fresh.err);
+  assert.equal(fresh.json.cache, 'off');
+  assert.equal(fresh.json.tree, null);
+  assert.equal(fresh.json.tools[0].cached, false);
+  assert.equal(a.runs(), 2);
+
+  const { roots: off } = gitProject(t, { test: a.cmd, cache: false });
+  await runGate(off);
+  const again = await runGate(off);
+  assert.equal(again.cache, 'off');
+  assert.equal(a.runs(), 4);
+  assert.equal(existsSync(path.join(off.specs, '.runs', 'logs', 'main', CACHE_FILE)), false);
+});
+
+test('cache: a tool that changes the content keeps nothing (tree-changed)', noGit, async (t) => {
+  const b = counter(t);
+  const writer = `node -e "require('fs').writeFileSync('out-' + Date.now() + '.txt', 'x')"`;
+  const { roots } = gitProject(t, { test: writer, lint: b.cmd });
+
+  const first = await runGate(roots);
+  assert.equal(first.cache, 'tree-changed');
+  const second = await runGate(roots);
+
+  assert.equal(second.tools[1].cached, false);
+  assert.equal(b.runs(), 2);
+});
+
+test('cache: a cached e2e takes no slot', noGit, async (t) => {
+  const e = counter(t);
+  const { roots } = gitProject(t, { e2e: e.cmd });
+  await runGate(roots, { e2e: true });
+  takeLock(roots, 'slot-1', { token: 'other', command: 'exec dev' });
+
+  const second = await runGate(roots, { e2e: true, slot: { waitMs: 50, pollMs: 10 } });
+
+  assert.equal(second.pass, true);
+  assert.equal(second.tools.at(-1).cached, true);
+  assert.equal(e.runs(), 1);
+});
+
+test('cache: interrupted gate keeps nothing', noGit, async (t) => {
+  const a = counter(t);
+  const { roots } = gitProject(t, { test: a.cmd, e2e: `node -e "setTimeout(() => {}, 20000)"` });
+  const signals = new EventEmitter();
+
+  const running = runGate(roots, { e2e: true, signals });
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  signals.emit('SIGINT');
+  await assert.rejects(running, /gate interrupted/);
+
+  assert.equal(existsSync(path.join(roots.specs, '.runs', 'logs', 'main', CACHE_FILE)), false);
 });

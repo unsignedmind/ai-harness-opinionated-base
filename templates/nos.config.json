@@ -14,7 +14,8 @@
     "typecheck": null,
     "e2e": null,
     "additional": [],
-    "timeout": 30
+    "timeout": 30,
+    "cache": true
   },
   "project-commands": {
     "install": null,

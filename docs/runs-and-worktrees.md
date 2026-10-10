@@ -284,7 +284,7 @@ Errors: one line on stderr `nos: <message>`. Exit 3–7 and some exit 1 (`run fi
 | `nos run finish --token` | — | merge protocol, sec. 11; a POC → 1 "never merged" | `run-finish` {run, merged, mainBranch, head, resumedFrom, gate, statuses, specs{committed,sha}} or {merged, already:true} | 0, 1, 3, 4, 5, 7 |
 | `nos run cleanup --token` | — | phase merged/abandoned; not from inside worktree; worktree remove (merged: untracked → force, modified tracked → 5), `worktree prune`, `branch -D` (merged: only if in mainBranch), run file + notes (`.runs/<run>.md`) delete, own merge lock released. Parts already gone skipped | `run-cleanup` {run, removed{worktree,branch,runFile,notes?}} | 0, 1, 4, 5 |
 | `nos run abandon --token` | — | refuses merged, and phase `merge` with branch already in main; not from inside worktree; `set-status --run discarded`, specs commit `<run>: discarded` (POC: neither, `statuses`/`specs` null), phase `abandoned`, then cleanup with `--force` / `-D` | `run-abandon` {run, removed, statuses, specs} | 0, 1, 4 |
-| `nos gate [--e2e]` | — | sec. 14 | `gate` {pass, tools[], reclaimed?} | 0, 1, 7 |
+| `nos gate [--e2e] [--fresh]` | — | sec. 14 | `gate` {pass, cache, tree, tools[], reclaimed?} | 0, 1, 7 |
 | `nos deploy [--env <id>] [--remove\|--check]` | — | build + provider command in the work root, env = run id (else `main`); `--remove` deletes the env, `--check` the provider login | `deploy` {provider, env, url, expires, log} / `deploy-remove` {removed} / `deploy-check` {ok} | 0, 1, 8 |
 | `nos exec <install\|dev\|deploy-test>` | name | runs the work root's command in a shell, stdio inherited, no JSON; `dev` under a slot lease | (raw) | command's code, 130/143 on SIGINT/SIGTERM, 1 not configured, 2 unknown name, 7 |
 | `nos specs commit (--run <r> \| --domain <d> \| --config) -m <msg>` | exactly one target | sec. 15; `--run poc-<slug>`: only `pocs/poc-<slug>-result.md`, no run file needed; result neither on disk nor tracked → 1 | `specs-commit` {domain, poc?, committed, sha, pushed, files, warning?} | 0, 1, 2 |
@@ -436,6 +436,7 @@ nos run finish --token ─────────► resolveRun (token, seen)
                                   │ sync: rebase in progress → 3, dirty → 5, conflict → 3
                                   │ phase gate (base updated)
                                   │ runGate(worktree roots, e2e if branch config has e2e)
+                                  │   tools passed on the same content → cached (D-13)
                                   │   fail → 1 (report, details.gate); no slot → 7
                                   │ phase merge
                                   │ git merge --ff-only <branch>  ───► main moves
@@ -457,6 +458,7 @@ ExitWorktree keep; nos run cleanup
 - Dirty worktrees are refused, never autostashed (stash hides state from integrate, pops into silent conflicts).
 - First done, first merged; others pick up main at their next sync.
 - D-5: finish gate includes e2e when `quality-tools.e2e` is set in the branch's config.
+- D-13: finish gate reads the run's gate cache: after integrate's gate (exit 3 path) or a gate fix, with main unmoved, only tools not yet passed on that content run (typically e2e).
 - Git in main runs as subprocess with cwd = main top (`spawnSync('git', …, {cwd})`), env without `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR`.
 
 ---
@@ -517,20 +519,21 @@ In short: one command runs all configured checks in a fixed order, always all of
 - Timeout: `quality-tools.timeout` minutes (default 30) per tool → process tree killed (`taskkill /T /F` on Windows, process group elsewhere), `status fail`, `timedOut: true`.
 - Ctrl+C / SIGTERM: kills running tool tree, releases lease, exit 1 `gate interrupted by <signal>`.
 - No command configured at all (e2e counts only with `--e2e`) → exit 1 "quality tools are not set up … Run setup" (no JSON).
+- Cache (D-13): a tool that passed with the same command on the same content is not run again (`cached: true`, tail of the run that passed; cached e2e takes no slot). Content = `tree`: git tree of all tracked + untracked non-ignored files on disk, uncommitted included (`git add -A` + `write-tree` in a copy of the index). Passes only, `<specs>/.runs/logs/<run>/gate-cache.json`, newest 10 trees. `cache`: `saved` / `tree-changed` (a tool changed the content: nothing saved) / `off` (`--fresh`, `quality-tools.cache: false`) / `unavailable` (no git). Ignored files (`node_modules`, `.env`, `dist`) are not in the key → `--fresh` after `nos exec install`.
 
 ```json
-{ "action": "gate", "pass": false,
+{ "action": "gate", "pass": false, "cache": "saved", "tree": "<git tree sha>",
   "tools": [
     { "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "signal": null, "timedOut": false,
-      "tail": "<last 60 lines>", "log": "D:/…/moodo-poc.specs/.runs/logs/quick-7/test.log" },
+      "cached": false, "tail": "<last 60 lines>", "log": "D:/…/moodo-poc.specs/.runs/logs/quick-7/test.log" },
     { "name": "e2e", "cmd": null, "status": "not-configured", "exit": null, "signal": null,
-      "timedOut": false, "tail": "", "log": null } ],
+      "timedOut": false, "cached": false, "tail": "", "log": null } ],
   "reclaimed": { "slot": 2, "holder": { … } } }
 ```
 
 `status`: `pass` / `fail` / `not-configured`. `pass` = no tool failed. Exit 0 pass, 1 a tool failed (JSON still printed), 7 no slot.
 
-Why a gate instead of running tools directly: only nos reads the right `nos.config.json` (branch's), takes the slot and sets `NOS_SLOT`, keeps logs out of the worktree, enforces timeouts. Rule for abilities: project commands only via `nos gate` / `nos exec`; exception: a single unit/integration test file directly with the test runner (no ports).
+Why a gate instead of running tools directly: only nos reads the right `nos.config.json` (branch's), takes the slot and sets `NOS_SLOT`, keeps logs out of the worktree, enforces timeouts, skips tools already passed on the same content. Rule for abilities: project commands only via `nos gate` / `nos exec`; exception: a single unit/integration test file directly with the test runner (no ports).
 
 `--e2e` by abilities: when the step's Test Strategy says e2e yes or lists an existing e2e test (develop, reviewers, integrate). Setup gates without `--e2e`.
 
@@ -747,6 +750,7 @@ In short: the design calls made while building it, referenced above as D-n.
 | D-10 | A slot lease whose holder process is dead is reclaimed by the next taker; merge/ids/runs locks and run files are never auto-broken |
 | D-11 | Specs root outside the project checkout (default `../<project>.specs`, `project` back-pointer in its `config.json`), because Claude Code worktree isolation blocks writes into the main checkout |
 | D-12 | nos never pushes code (no branch pushes from develop, review-fixing, architect); only the opt-in `specs.remote` backup push of the specs repo remains |
+| D-13 | `nos gate` (also inside `run finish`) skips a tool that passed with the same command on the same content (git tree incl. uncommitted and untracked files): develop → reviewers → phase review → integrate → finish ran the full gate on unchanged code up to 6 times. Passes only; `--fresh` / `quality-tools.cache: false` turn it off |
 
 (D-9 was a process decision for building this feature, not part of the architecture.)
 

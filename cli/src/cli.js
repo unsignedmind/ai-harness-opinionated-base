@@ -568,7 +568,7 @@ Example:
     "processed": "quick 12"
   }`;
 
-const GATE_HELP = `Usage: nos gate [--e2e] [--root <dir>]
+const GATE_HELP = `Usage: nos gate [--e2e] [--fresh] [--root <dir>]
 
 Run the quality tools of work's nos.config.json ("quality-tools") in the work root, in order:
 test, lint, format-check, typecheck, each "additional" entry, then e2e (only with --e2e).
@@ -580,12 +580,19 @@ run of this worktree, else main); the result carries the last 60 lines.
 A tool running longer than quality-tools.timeout minutes (default 30) is killed with its process tree:
 status "fail", "timedOut": true. A slot lease whose process is gone is taken over: "reclaimed":
 { slot, holder } in the result. Ctrl+C / SIGTERM kill the running tool's tree, release the lease, exit 1.
+Cache: a tool that passed with the same command on the same content is not run again ("cached": true,
+the tail of the run that passed; a cached e2e takes no slot). Content = "tree": the git tree of every
+tracked and untracked, not ignored file on disk, uncommitted changes included; ignored files
+(node_modules, .env, build output) are not part of it. Passes only, in <specs>/.runs/logs/<run>/
+gate-cache.json. "cache": "saved", "tree-changed" (a tool changed the content: nothing saved), "off"
+(--fresh or quality-tools.cache false) or "unavailable" (not a git checkout).
 
 Exit: 0 all configured tools pass, 1 a tool failed (the JSON is still printed), quality tools not
 set up (none configured; e2e counts only with --e2e) or interrupted, 7 no slot for e2e.
 
 Options:
   --e2e          Also run e2e
+  --fresh        Run every tool, no cache (e.g. after nos exec install, or to rule out a flaky pass)
   --root <dir>   Work root (default: see nos --help)
 
 Example:
@@ -593,11 +600,16 @@ Example:
   {
     "action": "gate",
     "pass": false,
+    "cache": "saved",
+    "tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
     "tools": [
       { "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "signal": null, "timedOut": false,
-        "tail": "<last 60 lines>", "log": "D:/repo.specs/.runs/logs/quick-7/test.log" },
-      { "name": "lint", "cmd": null, "status": "not-configured", "exit": null, "signal": null,
-        "timedOut": false, "tail": "", "log": null }
+        "cached": false, "tail": "<last 60 lines>", "log": "D:/repo.specs/.runs/logs/quick-7/test.log" },
+      { "name": "lint", "cmd": "npm run lint", "status": "pass", "exit": 0, "signal": null,
+        "timedOut": false, "cached": true, "tail": "<last 60 lines>",
+        "log": "D:/repo.specs/.runs/logs/quick-7/lint.log" },
+      { "name": "format-check", "cmd": null, "status": "not-configured", "exit": null, "signal": null,
+        "timedOut": false, "cached": false, "tail": "", "log": null }
     ]
   }`;
 
@@ -1003,10 +1015,10 @@ const COMMANDS = {
   },
   gate: {
     help: GATE_HELP,
-    options: { e2e: { type: 'boolean' }, root: { type: 'string' } },
+    options: { e2e: { type: 'boolean' }, fresh: { type: 'boolean' }, root: { type: 'string' } },
     required: [],
     async execute(values, io, roots) {
-      const result = await runGate(roots, { e2e: values.e2e ?? false });
+      const result = await runGate(roots, { e2e: values.e2e ?? false, fresh: values.fresh ?? false });
       if (!result.pass) {
         const failed = result.tools.filter((tool) => tool.status === 'fail').map((tool) => tool.name);
         io.stderr.write(`nos: gate failed: ${failed.join(', ')}\n`);

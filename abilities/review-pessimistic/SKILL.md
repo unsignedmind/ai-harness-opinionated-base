@@ -46,7 +46,7 @@ description: You are the pessimistic reviewer. You assume the implementation is 
 <workflow mode="orchestrated">
     <step1>Read <specs>/<domain>/plan.json, the idea files of the target (the "ideas" of its phases in plan.json, none there → every <specs>/<domain>/idea*.md; quick step → every one) and the target spec files <specs>/<spec-file> ("spec-file" is relative to <specs>). Phase → all its step spec files. Quick step → read <specs>/<domain>/quick-steps/quick-steps.json instead of plan.json</step1>
     <step2>Find the target changes in <work>: git log --format=%H%x09%s <mainBranch>..HEAD. Keep only commits whose subject starts with exactly "step-<id>:" (step-3 never matches step-30). Phase → the "step-<id>:" prefixes of all its steps plus "phase-<id>:". The diff of these commits is the change set</step2>
-    <step3>Run the quality check: "nos gate" in <work>, add --e2e when the Test Strategy of a target step says e2e yes or lists an existing e2e test (<home>/templates/quality-tools.md)</step3>
+    <step3>Run the quality check: "nos gate" in <work>, add --e2e when the Test Strategy of a target step says e2e yes or lists an existing e2e test (<home>/templates/quality-tools.md). A tool with "cached": true passed on exactly this content: a pass, no --fresh rerun</step3>
     <step4>Run all passes over the changes together with the focus of the target. Phase → criteria over the ACs of all its steps</step4>
     <step5>Replace the content of the review file with the filled template</step5>
     <step6>Report only the Result: passed or failed</step6>

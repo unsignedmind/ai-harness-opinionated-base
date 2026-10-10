@@ -1,7 +1,11 @@
 import { spawn } from 'node:child_process';
-import { closeSync, mkdirSync, openSync, readFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { FAILED, NosError } from './exit-codes.js';
+import { writeFileAtomic } from './fs-atomic.js';
+import { git } from './git.js';
 import { killTree, toolEnv } from './proc.js';
 import { qualityTools } from './project-config.js';
 import { slash } from './roots.js';
@@ -14,10 +18,15 @@ import { withSlot } from './slots.js';
 // caller's NODE_ENV or run token (proc.js toolEnv). Full output goes to
 // <specs>/.runs/logs/<run|main>/<tool>.log, the result carries its last TAIL_LINES lines. A tool running longer
 // than quality-tools.timeout minutes (default 30) is killed with its process tree and fails (timedOut).
+// Cache: a tool that passed with the same command on the same content (workTreeOf) is not run again
+// (cached: true, e2e then takes no slot). Passes only, kept in <logDir>/gate-cache.json for the newest
+// CACHE_TREES trees. Off with the option fresh or quality-tools.cache false.
 export const GATE_TOOLS = Object.freeze(['test', 'lint', 'format-check', 'typecheck']);
 export const TAIL_LINES = 60;
 export const LOGS_DIR = 'logs';
 export const DEFAULT_TIMEOUT_MIN = 30;
+export const CACHE_FILE = 'gate-cache.json';
+export const CACHE_TREES = 10;
 const SIGNALS = ['SIGINT', 'SIGTERM'];
 
 const isSet = (cmd) => typeof cmd === 'string' && cmd.trim() !== '';
@@ -58,9 +67,85 @@ const notConfigured = (name) => ({
   exit: null,
   signal: null,
   timedOut: false,
+  cached: false,
   tail: '',
   log: null,
 });
+
+// The content id of work's checkout: the git tree of every tracked and untracked, not ignored file as it is on
+// disk, uncommitted changes included, so a gate before a commit and one after it get the same id. Built in a
+// copy of the index (its stat cache spares hashing unchanged files), the real index stays untouched. Ignored
+// files (node_modules, .env, build output) are not part of it. null when git fails (e.g. no repo).
+export function workTreeOf(roots) {
+  const cwd = roots.work;
+  const index = git(['rev-parse', '--git-path', 'index'], { cwd });
+  if (index.code !== 0) return null;
+  const tmp = path.join(os.tmpdir(), `nos-gate-index-${process.pid}-${randomBytes(3).toString('hex')}`);
+  try {
+    const real = path.resolve(cwd, index.stdout.trim());
+    if (existsSync(real)) copyFileSync(real, tmp);
+    const env = { GIT_INDEX_FILE: tmp };
+    if (git(['add', '-A'], { cwd, env }).code !== 0) return null;
+    const tree = git(['write-tree'], { cwd, env });
+    return tree.code === 0 ? tree.stdout.trim() : null;
+  } catch {
+    return null;
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+}
+
+const emptyCache = () => ({ version: 1, trees: {} });
+
+// gate-cache.json: { version: 1, trees: { <tree>: { at, tools: { <name>: { cmd, at, tail } } } } }. Unreadable
+// or another version -> empty.
+function readCache(logDir) {
+  try {
+    const cache = JSON.parse(readFileSync(path.join(logDir, CACHE_FILE), 'utf8'));
+    if (cache?.version === 1 && cache.trees && typeof cache.trees === 'object') return cache;
+  } catch {
+    // none yet, or broken: start over
+  }
+  return emptyCache();
+}
+
+// The passes of results under tree (also of a gate with failed tools: each tool stands for itself), only the
+// newest CACHE_TREES trees kept. Best effort: a write error never fails the gate.
+function saveCache(logDir, cache, tree, results) {
+  const at = new Date().toISOString();
+  const entry = { tools: { ...cache.trees[tree]?.tools } };
+  for (const r of results) {
+    if (r.status === 'pass' && !r.cached) entry.tools[r.name] = { cmd: r.cmd, at, tail: r.tail };
+  }
+  entry.at = at;
+  const trees = { ...cache.trees, [tree]: entry };
+  const newest = Object.keys(trees)
+    .sort((a, b) => String(trees[b].at).localeCompare(String(trees[a].at)))
+    .slice(0, CACHE_TREES);
+  try {
+    const kept = Object.fromEntries(newest.map((key) => [key, trees[key]]));
+    writeFileAtomic(path.join(logDir, CACHE_FILE), `${JSON.stringify({ version: 1, trees: kept }, null, 2)}\n`);
+  } catch {
+    // the next gate runs the tools again
+  }
+}
+
+// A cached pass: not run, its log says so and keeps the tail of the run that passed.
+function cachedPass(tool, hit, tree, logDir) {
+  const log = path.join(logDir, `${tool.name}.log`);
+  writeFileSync(log, `nos: cached pass of ${hit.at} on tree ${tree}, not run again. Its last lines:\n${hit.tail}\n`);
+  return {
+    name: tool.name,
+    cmd: tool.cmd,
+    status: 'pass',
+    exit: 0,
+    signal: null,
+    timedOut: false,
+    cached: true,
+    tail: hit.tail,
+    log: slash(log),
+  };
+}
 
 // One tool, output (stdout + stderr interleaved) into its log file. ctx: { timeoutMs, running } where
 // running.child is the tool in flight (the gate's signal handler kills it).
@@ -107,6 +192,7 @@ function runTool(roots, tool, logDir, ctx, slot) {
         exit,
         signal: signal ?? null,
         timedOut,
+        cached: false,
         tail: lastLines(output, TAIL_LINES),
         log: slash(log),
       });
@@ -118,14 +204,20 @@ const timeoutOf = (tools) =>
   (typeof tools.timeout === 'number' && tools.timeout > 0 ? tools.timeout : DEFAULT_TIMEOUT_MIN) * 60_000;
 
 // Runs the gate. options: e2e (also run e2e under a slot lease), run (run id for the log folder; default the
-// run of this worktree, else 'main'), timeoutMs (per tool; default quality-tools.timeout minutes), slot options
-// for withSlot (pollMs, waitMs), signals (emitter whose SIGINT/SIGTERM stop the gate, default process).
-// Returns { action: 'gate', pass, tools: [{ name, cmd, status: 'pass'|'fail'|'not-configured', exit, signal,
-// timedOut, tail, log }], reclaimed? } (reclaimed: { slot, holder } of a dead lease e2e took over).
+// run of this worktree, else 'main'), fresh (no cache: run every tool), timeoutMs (per tool; default
+// quality-tools.timeout minutes), slot options for withSlot (pollMs, waitMs), signals (emitter whose
+// SIGINT/SIGTERM stop the gate, default process).
+// Returns { action: 'gate', pass, cache, tree, tools: [{ name, cmd, status: 'pass'|'fail'|'not-configured',
+// exit, signal, timedOut, cached, tail, log }], reclaimed? } (reclaimed: { slot, holder } of a dead lease e2e
+// took over). cache: 'saved' (passes stored under tree), 'tree-changed' (the content changed while the tools
+// ran: nothing stored), 'off' (fresh or quality-tools.cache false), 'unavailable' (no tree: not a git checkout).
 // Not set up (no command configured; e2e counts only with e2e) -> NosError FAILED. No slot -> NosError
 // SLOT_TIMEOUT, details.tools / details.pass of the tools run so far. SIGINT/SIGTERM -> the running tool's tree
-// is killed, the lease released, NosError FAILED "gate interrupted" (details.tools).
-export async function runGate(roots, { e2e = false, run, timeoutMs, slot: slotOptions = {}, signals = process } = {}) {
+// is killed, the lease released, NosError FAILED "gate interrupted" (details.tools). Both store nothing.
+export async function runGate(
+  roots,
+  { e2e = false, run, fresh = false, timeoutMs, slot: slotOptions = {}, signals = process } = {},
+) {
   const config = qualityTools(roots);
   const tools = gateTools(config, { e2e });
   if (tools.every((tool) => !tool.cmd)) {
@@ -135,6 +227,11 @@ export async function runGate(roots, { e2e = false, run, timeoutMs, slot: slotOp
     );
   }
   const { runId, logDir } = logDirOf(roots, run);
+  const useCache = !fresh && config.cache !== false;
+  const tree = useCache ? workTreeOf(roots) : null;
+  const cache = tree ? readCache(logDir) : emptyCache();
+  const hits = (tree && cache.trees[tree]?.tools) || {};
+  const hitOf = (tool) => (tool.cmd && hits[tool.name]?.cmd === tool.cmd ? hits[tool.name] : null);
   const ctx = { timeoutMs: timeoutMs ?? timeoutOf(config), running: { child: null } };
   let interrupted = null;
   const abort = new AbortController();
@@ -155,11 +252,14 @@ export async function runGate(roots, { e2e = false, run, timeoutMs, slot: slotOp
   try {
     for (const tool of tools.filter((t) => t.name !== 'e2e')) {
       checkInterrupt();
-      results.push(await runTool(roots, tool, logDir, ctx));
+      const hit = hitOf(tool);
+      results.push(hit ? cachedPass(tool, hit, tree, logDir) : await runTool(roots, tool, logDir, ctx));
     }
     checkInterrupt();
     const tool = tools.find((t) => t.name === 'e2e');
+    const e2eHit = tool && hitOf(tool);
     if (tool && !tool.cmd) results.push(notConfigured('e2e'));
+    else if (e2eHit) results.push(cachedPass(tool, e2eHit, tree, logDir));
     else if (tool) {
       try {
         const result = await withSlot(
@@ -181,5 +281,11 @@ export async function runGate(roots, { e2e = false, run, timeoutMs, slot: slotOp
   } finally {
     for (const [signal, handler] of handlers) signals.off(signal, handler);
   }
-  return { action: 'gate', pass: passed(), tools: results, ...(reclaimed && { reclaimed }) };
+  let state = !useCache ? 'off' : !tree ? 'unavailable' : 'saved';
+  if (tree) {
+    const ran = results.some((r) => r.cmd && !r.cached);
+    if (ran && workTreeOf(roots) !== tree) state = 'tree-changed';
+    else saveCache(logDir, cache, tree, results);
+  }
+  return { action: 'gate', pass: passed(), cache: state, tree, tools: results, ...(reclaimed && { reclaimed }) };
 }

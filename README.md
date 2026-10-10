@@ -576,7 +576,7 @@ Used in ACs, the Task List and review findings:
 | `nos specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | orchestrator | commits one domain's specs (or only `config.json`) in `<specs>`; `--run poc-<slug>`: only that POC's result file |
 | `nos poc results`, `nos poc processed <slug> --as <what>` | orchestrator | lists the POC results in `<specs>/pocs`; marks one processed |
 | `nos specs find-step <id>` | integrate | spec file of a step id in any domain |
-| `nos gate [--e2e]` | develop, reviewers, integrate, architect, setup | the quality check, JSON per tool |
+| `nos gate [--e2e] [--fresh]` | develop, reviewers, integrate, architect, setup | the quality check, JSON per tool; a tool that passed on the same content is not run again |
 | `nos exec <install\|dev\|deploy-test>` | setup, `run start` | project commands with slot lease |
 | `nos deploy [--env <id>] [--remove\|--check]` | develop, review-fixing, poc, orchestrator, setup | build + deploy to the run's own test env (`deploy.provider`, e.g. a Firebase Hosting channel per run); remove at finish/abandon |
 
@@ -901,7 +901,7 @@ Invocation: `node <home>/cli/bin/nos.js <command>`, `<home>` = the nos folder, a
 | `run start --domain <d> (--plan\|--quick <id>)` | branch + worktree + run token for a plan or quick step |
 | `run start --poc <slug>` | branch + worktree + run token for a POC: no domain, no statuses, never merged (finish refuses), abandon deletes it with its notes |
 | `run sync\|finish\|cleanup\|abandon --token <t>` | rebase onto main; lock + checks + gate + ff-only merge; remove worktree and branch; drop the run |
-| `gate [--e2e]` | the quality tools of `nos.config.json`, JSON per tool |
+| `gate [--e2e] [--fresh]` | the quality tools of `nos.config.json`, JSON per tool; passes cached per content |
 | `exec <install\|dev\|deploy-test>` | a project command; `dev` holds a slot |
 | `deploy [--env <id>] [--remove\|--check]` | build and deploy work to its own test env, url in the JSON |
 | `specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | commits one domain's specs (or only `config.json`) in `<specs>`. Never `--domain` for a domain another session's run owns |

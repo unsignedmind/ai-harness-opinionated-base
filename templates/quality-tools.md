@@ -43,6 +43,7 @@ Project specific commands live in `nos.config.json` at the project root. It is t
 | quality-tools    | e2e          | end-to-end tests in a real browser or app                          |
 | quality-tools    | additional   | list of further checks, e.g. dead code, i18n, bundle size: a command string (named additional-<n>) or { "name", "cmd" } |
 | quality-tools    | timeout      | minutes one tool may run before `nos gate` kills it (status fail, "timedOut": true), default 30 |
+| quality-tools    | cache        | `nos gate` skips a tool that passed on the same content, default true; `false` = every gate runs every tool |
 | project-commands | install      | installs dependencies, e.g. in a fresh worktree; with a lockfile the variant that never rewrites it (`npm ci`), so the worktree stays clean |
 | project-commands | dev          | starts the local dev server                                        |
 | project-commands | deploy-test  | legacy: one fixed test deploy; used by `nos deploy` only while `deploy.provider` is null |
@@ -72,6 +73,7 @@ Exception while developing: a single unit or integration test file may run direc
                { "name": "e2e", "cmd": null, "status": "not-configured" }] }
    ```
    `status` is `pass`, `fail` or `not-configured`. Read `tail` first, the full output is in `log` (`<specs>/.runs/logs/<run|main>/<tool>.log`).
+   `"cached": true` = this tool passed with the same command on exactly this content (all tracked and untracked, not ignored files, uncommitted changes included) in an earlier gate and was not run again: a pass like any other, never a reason to rerun. Each content change runs it again. `--fresh` runs every tool: only after `nos exec install` (ignored files like node_modules are not part of the content) or to rule out a flaky pass.
 4. Exit codes: `0` all pass. `1` a tool failed, or `quality-tools` is not set up → stop, report blocked: "quality tools not configured, run setup". `7` no slot free within `slotWait` (e2e only) → report blocked: "no slot".
 5. Name tools with status `not-configured` as "not configured: <key>" in the Dev Log or report.
 

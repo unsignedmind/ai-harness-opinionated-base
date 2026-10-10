@@ -35,7 +35,7 @@ nos <command> --help
 | `specs commit`      | Commit `config.json` + one domain folder of the specs repo (`--run`, `--domain` or `--config`; `--run poc-<slug>`: only its result file) |
 | `specs find-step`   | Find the spec file of a step id in any domain                               |
 | `poc results\|processed` | List the POC results in `<specs>/pocs`; mark one processed (`--as`)     |
-| `gate`              | Run the quality tools of `nos.config.json` (`--e2e`: also e2e, under a slot lease) |
+| `gate`              | Run the quality tools of `nos.config.json` (`--e2e`: also e2e, under a slot lease); passes cached per content (`--fresh`: none) |
 | `exec <name>`       | Run a project command: `install`, `dev` (holds a slot while it runs), `deploy-test` (legacy) |
 | `deploy`            | Build and deploy work to its own test environment (`--env`, `--remove`, `--check`) |
 | `lock <action>`     | `take`, `release` or `status` of a lock in `<specs>/.locks`                 |
@@ -201,7 +201,7 @@ A POC run → 1 "a POC is never merged: nos run abandon". Precondition: the plan
 2. Main's checkout is on `mainBranch` (else 1 "main checkout is on <x>, expected <mainBranch>"). Main busy (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, one `rev-parse -q --verify` each, or a `rebase-merge` / `rebase-apply` folder in main's git dir) → 1 with `details.busy`.
 3. Main dirty on the paths the branch touches (`git diff --name-only --no-renames <mainBranch>...<branch>`, intersected with main's `status --porcelain --untracked-files=all`) → 1 with `details.files` / `paths`. Main is untouched by every refusal.
 4. Sync as `run sync` → 3 or 5.
-5. `phase=gate`: the full gate in the worktree, e2e included when `quality-tools.e2e` is configured. Fail → 1, `details.gate` = the gate result.
+5. `phase=gate`: the full gate in the worktree, e2e included when `quality-tools.e2e` is configured. Tools that already passed on the same content (e.g. integrate's gate, when main did not move since) are cached, see [`gate`](#gate). Fail → 1, `details.gate` = the gate result.
 6. `phase=merge`: `git -C <main> merge --ff-only <branch>` (main's working tree moves along). Refused (main moved, e.g. an architect commit) → steps 1–6 once more, then 1.
 7. `set-status --run <run> merged`, `specs commit "<run>: merged"`, `phase=merged`, release.
 
@@ -261,7 +261,7 @@ Flips a whole run in one write per file. The domain comes from the run file (els
 ### `gate`
 
 ```sh
-nos gate [--e2e] [--root <dir>]
+nos gate [--e2e] [--fresh] [--root <dir>]
 ```
 
 Runs the `quality-tools` of work's `nos.config.json` in the work root, in order: `test`, `lint`, `format-check`, `typecheck`, each `additional` entry (a command string, named `additional-<n>`, or `{ "name", "cmd" }`), then `e2e` (only with `--e2e`). Every tool runs, also after a failure. Each runs in a shell with `NOS_HOME` and without the caller's `NODE_ENV`, `NOS_SLOT` and `NOS_RUN_TOKEN` (a session's `NODE_ENV=development` would switch build tools into another mode); only e2e runs under a slot lease with `NOS_SLOT=<n>`. Full output goes to `<specs>/.runs/logs/<run>/<tool>.log` (`<run>` = the run of this worktree, else `main`), the result carries the last 60 lines. No tool configured at all (e2e counts only with `--e2e`) → exit 1 "quality tools are not set up".
@@ -269,6 +269,7 @@ Runs the `quality-tools` of work's `nos.config.json` in the work root, in order:
 - Timeout: a tool running longer than `quality-tools.timeout` minutes (default 30) is killed with its process tree: `status: "fail"`, `timedOut: true`. `signal` is the signal that ended a tool (else `null`).
 - Ctrl+C / SIGTERM: the running tool's tree is killed, the e2e lease released, exit 1 "gate interrupted".
 - A slot lease of a dead process taken over for e2e adds `"reclaimed": { "slot", "holder" }` to the result.
+- Cache: a tool that passed with the same command on the same content is not run again: `status: "pass"`, `cached: true`, the tail of the run that passed, its log a note that names it; a cached e2e takes no slot. Content = `tree`: the git tree of every tracked and untracked, not ignored file on disk, uncommitted changes included (built with `git add -A` + `git write-tree` in a copy of the index, the real index stays untouched). So develop's gate before its commit and the reviewers' gates after it share it. Ignored files (`node_modules`, `.env`, build output) are not part of it. Only passes are kept, per run in `<specs>/.runs/logs/<run>/gate-cache.json` (newest 10 trees); `run finish` reads the same file. `cache`: `saved`, `tree-changed` (a tool changed the content while it ran: nothing saved), `off` (`--fresh` or `quality-tools.cache: false`), `unavailable` (not a git checkout). `--fresh`: after `nos exec install`, or to rule out a flaky pass.
 
 `status`: `pass`, `fail`, `not-configured`.
 
@@ -277,11 +278,15 @@ $ nos gate
 {
   "action": "gate",
   "pass": false,
+  "cache": "saved",
+  "tree": "<git tree sha>",
   "tools": [
     { "name": "test", "cmd": "npm test", "status": "fail", "exit": 1, "signal": null, "timedOut": false,
-      "tail": "<last 60 lines>", "log": "D:/repo.specs/.runs/logs/quick-7/test.log" },
-    { "name": "lint", "cmd": null, "status": "not-configured", "exit": null, "signal": null, "timedOut": false,
-      "tail": "", "log": null }
+      "cached": false, "tail": "<last 60 lines>", "log": "D:/repo.specs/.runs/logs/quick-7/test.log" },
+    { "name": "lint", "cmd": "npm run lint", "status": "pass", "exit": 0, "signal": null, "timedOut": false,
+      "cached": true, "tail": "<last 60 lines of the run that passed>", "log": "D:/repo.specs/.runs/logs/quick-7/lint.log" },
+    { "name": "format-check", "cmd": null, "status": "not-configured", "exit": null, "signal": null, "timedOut": false,
+      "cached": false, "tail": "", "log": null }
   ]
 }
 ```

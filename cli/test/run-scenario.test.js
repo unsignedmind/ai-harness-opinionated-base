@@ -262,6 +262,27 @@ test('finish: the gate includes e2e when it is configured (D-5)', noGit, async (
   assert.equal(e2e.tail, 'slot=1');
 });
 
+test('finish: tools that passed in the worktree on the same content are not run again, the rest is', noGit, async (t) => {
+  const { root, roots, quick } = setup(t, {
+    config: { 'quality-tools': { test: PASS, e2e: `node -e "console.log('slot=' + process.env.NOS_SLOT)"` } },
+  });
+  const a = await start(root, quick.a);
+  commitIn(a.enter, 'src/x.txt', 'x\n', `step-${quick.a.id}: x`);
+  const gate = await nos(['gate'], a.enter);
+  assert.equal(gate.code, 0, gate.err);
+  assert.equal(gate.json.cache, 'saved');
+  done(roots, quick.a);
+
+  const res = await nos(['run', 'finish', '--token', a.token], a.enter);
+
+  assert.equal(res.code, 0, res.err);
+  assert.equal(res.json.gate.tree, gate.json.tree, 'main did not move: same content');
+  const byName = Object.fromEntries(res.json.gate.tools.map((tool) => [tool.name, tool]));
+  assert.equal(byName.test.cached, true, 'the worktree gate passed it');
+  assert.equal(byName.e2e.cached, false, 'never run with --e2e before: runs now');
+  assert.equal(byName.e2e.tail, 'slot=1');
+});
+
 test(
   'finish: a crashed finish (own lock, phase gate) resumes with the same token; another token -> 4',
   noGit,
