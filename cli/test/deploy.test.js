@@ -5,6 +5,7 @@ import path from 'node:path';
 import { FAILED, NOT_CONFIGURED, NosError } from '../src/exit-codes.js';
 import { runDeploy } from '../src/deploy.js';
 import { CommandProvider } from '../src/deploy/command.js';
+import { deployConfig } from '../src/project-config.js';
 import { FirebaseHostingProvider } from '../src/deploy/firebase-hosting.js';
 import { invokeCli, makeProject, writeFile } from './helpers.js';
 
@@ -162,4 +163,13 @@ test('nos deploy: JSON result, exit 8 when not configured, 2 for --remove with -
   const missing = await invokeCli(['deploy'], { cwd: bare.root });
   assert.equal(missing.code, 8);
   assert.equal(missing.json.action, 'deploy');
+});
+
+test('deployConfig: a worktree config without a deploy section falls back to main', async (t) => {
+  const { roots } = firebaseProject(t);
+  const work = makeProject(t, { config: { 'project-commands': { 'deploy-test': 'legacy' } } });
+  const mixed = { ...work.roots, main: roots.main };
+  assert.equal(deployConfig(mixed).provider, 'firebase-hosting', 'main has deploy, work has none');
+  writeFile(work.root, 'nos.config.json', { deploy: { provider: 'command', options: { command: 'x' } } });
+  assert.equal(deployConfig(mixed).provider, 'command', 'own deploy section wins');
 });

@@ -53,7 +53,7 @@ Project specific commands live in `nos.config.json` at the project root. It is t
 | worktrees        | slots        | parallel e2e runs and dev servers (port sets), default 1           |
 | worktrees        | slotWait     | seconds to wait for a free slot, default 600                       |
 
-`null` or missing key → tool not available. `worktrees` and `specs` are read from main's `nos.config.json`, the other nodes from the checkout's.
+`null` or missing key → tool not available. `worktrees` and `specs` are read from main's `nos.config.json`, the other nodes from the checkout's. `deploy`: the checkout's, main's while the checkout's file has no `deploy` key (a branch from before it).
 
 ## Rule
 

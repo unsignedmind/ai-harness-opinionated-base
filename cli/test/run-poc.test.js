@@ -54,7 +54,16 @@ test(
     const out = await startPoc(root, 'dark-mode');
 
     const wt = slash(path.join(root, '.claude', 'worktrees', 'poc-dark-mode'));
-    assert.deepEqual(Object.keys(out), ['action', 'run', 'token', 'roots', 'enter', 'install', 'leftovers']);
+    assert.deepEqual(Object.keys(out), [
+      'action',
+      'run',
+      'token',
+      'roots',
+      'enter',
+      'install',
+      'settings',
+      'leftovers',
+    ]);
     assert.equal(out.run.kind, 'poc');
     assert.equal(out.run.id, 'dark-mode');
     assert.equal(out.run.domain, null);

@@ -5,7 +5,7 @@ import { PROJECT_CONFIG_FILE, slash } from './roots.js';
 
 // nos.config.json: project config, tracked in the project (templates/nos.config.json).
 // specs.* and worktrees.* are read from main's file; quality-tools, project-commands, deploy and spec-ui from
-// work's file, because a branch may change its test command.
+// work's file, because a branch may change its test command (deploy: main's while work's has none).
 // deploy: provider (a name of deploy/index.js PROVIDERS, null = not configured), build (runs first, null = none),
 // options (provider specific, defaults and validation in the provider class).
 // specs.dir null = the default sibling folder ../<main folder name>.specs (roots.js defaultSpecsDir).
@@ -32,18 +32,23 @@ export const hasProjectConfig = (dir) => existsSync(projectConfigPath(dir));
 
 const isObject = (value) => value != null && typeof value === 'object' && !Array.isArray(value);
 
+// nos.config.json of dir as written; {} when the file is missing.
+function readRawConfig(dir) {
+  const file = projectConfigPath(dir);
+  if (!existsSync(file)) return {};
+  let config;
+  try {
+    config = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new NosError(FAILED, `Cannot read ${slash(file)}: ${err.message}`);
+  }
+  if (!isObject(config)) throw new NosError(FAILED, `${slash(file)} must contain a JSON object`);
+  return config;
+}
+
 // nos.config.json of dir with the defaults merged in per section; only the defaults when the file is missing.
 export function readProjectConfig(dir) {
-  const file = projectConfigPath(dir);
-  let config = {};
-  if (existsSync(file)) {
-    try {
-      config = JSON.parse(readFileSync(file, 'utf8'));
-    } catch (err) {
-      throw new NosError(FAILED, `Cannot read ${slash(file)}: ${err.message}`);
-    }
-    if (!isObject(config)) throw new NosError(FAILED, `${slash(file)} must contain a JSON object`);
-  }
+  const config = readRawConfig(dir);
   const merged = structuredClone(config);
   for (const [key, defaults] of Object.entries(DEFAULT_PROJECT_CONFIG)) {
     merged[key] = { ...structuredClone(defaults), ...(isObject(config[key]) ? config[key] : {}) };
@@ -53,7 +58,9 @@ export function readProjectConfig(dir) {
 
 export const qualityTools = (roots) => readProjectConfig(roots.work)['quality-tools'];
 export const projectCommands = (roots) => readProjectConfig(roots.work)['project-commands'];
-export const deployConfig = (roots) => readProjectConfig(roots.work).deploy;
+// deploy of work's file; a branch from before its deploy section (no "deploy" key) -> main's
+export const deployConfig = (roots) =>
+  readProjectConfig(isObject(readRawConfig(roots.work).deploy) ? roots.work : roots.main).deploy;
 export const docsFolder = (roots) => readProjectConfig(roots.work)['spec-ui']['docs-folder'];
 export const worktreesConfig = (roots) => readProjectConfig(roots.main).worktrees;
 export const specsConfig = (roots) => readProjectConfig(roots.main).specs;

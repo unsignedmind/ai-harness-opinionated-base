@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { writeJsonFile } from './config.js';
 import { CONFLICT, DIRTY, DOMAIN_RUNNING, FAILED, HELD, NosError, USAGE } from './exit-codes.js';
@@ -292,6 +292,27 @@ function addWorktree(mainTop, { wt, branch, mainBranch }) {
   return { created: true, branchCreated: !reuse };
 }
 
+// Claude Code reads .claude/settings.local.json of the session's project: a session in the worktree misses
+// main's (git-ignored, so never checked out), and with it the nos allow rules. Copied from main on every start,
+// only where git ignores it in the worktree (a copy never dirties the branch). Returns the copied path, else null
+// with a warning when main has one that cannot be copied.
+export const LOCAL_SETTINGS = ['.claude', 'settings.local.json'];
+
+function copyLocalSettings(roots, run, warnings) {
+  const from = path.join(roots.main, ...LOCAL_SETTINGS);
+  if (!existsSync(from)) return null;
+  const dir = enterOf(roots, run);
+  const rel = LOCAL_SETTINGS.join('/');
+  if (git(['check-ignore', '-q', '--', rel], { cwd: dir }).code !== 0) {
+    warnings.push(`${rel} is not git-ignored in the worktree: not copied, the session there lacks main's allow rules`);
+    return null;
+  }
+  const to = path.join(dir, ...LOCAL_SETTINGS);
+  mkdirSync(path.dirname(to), { recursive: true });
+  copyFileSync(from, to);
+  return slash(to);
+}
+
 async function install(roots, run) {
   const wtRoots = worktreeRoots(roots, run);
   const cmd = projectCommands(wtRoots).install;
@@ -331,7 +352,7 @@ function releaseOwnMergeLock(roots, token) {
   return releaseLock(roots, MERGE_LOCK, token).released;
 }
 
-function startResult(roots, run, { install: installed = null, leftovers = null, warnings = [] } = {}) {
+function startResult(roots, run, { install: installed = null, leftovers = null, warnings = [], settings = null } = {}) {
   const enter = slash(enterOf(roots, run));
   return {
     action: 'run-start',
@@ -340,6 +361,7 @@ function startResult(roots, run, { install: installed = null, leftovers = null, 
     roots: { home: slash(roots.home), work: enter, main: slash(roots.main), specs: slash(roots.specs) },
     enter,
     install: installed,
+    settings,
     leftovers,
     ...(warnings.length && { warnings }),
   };
@@ -384,8 +406,9 @@ export async function startRun(
   }
   if (started.done) return started.done;
   const { run, created, leftovers, warnings } = started;
+  const settings = copyLocalSettings(roots, run, warnings);
   const installed = created ? await install(roots, run) : null;
-  return startResult(roots, run, { install: installed, leftovers, warnings });
+  return startResult(roots, run, { install: installed, leftovers, warnings, settings });
 }
 
 // A finish or abandon of this run crashed between set-status --run and the phase change: the target is merged

@@ -31,7 +31,7 @@ test('run start: branch + worktree + run file, branch in the quick step, JSON sh
   const { root, roots, quick } = setup(t);
   const out = await start(root, quick.a);
 
-  assert.deepEqual(Object.keys(out), ['action', 'run', 'token', 'roots', 'enter', 'install', 'leftovers']);
+  assert.deepEqual(Object.keys(out), ['action', 'run', 'token', 'roots', 'enter', 'install', 'settings', 'leftovers']);
   assert.equal(out.action, 'run-start');
   assert.equal('error' in out, false);
   const wt = slash(path.join(root, '.claude', 'worktrees', quick.a.runId));
@@ -91,6 +91,28 @@ test('run start: install runs in the new worktree, its output goes to the log, n
   // resume with the worktree in place: no install
   const again = await start(root, quick.a, ['--token', res.json.token]);
   assert.equal(again.install, null);
+});
+
+test('run start: copies main .claude/settings.local.json into the worktree when ignored there', noGit, async (t) => {
+  const { root, quick } = setup(t);
+  writeFile(root, '.claude/settings.local.json', { permissions: { allow: ['Bash(node nos.js *)'] } });
+
+  // not ignored yet: a copy would dirty the branch -> warning, no copy
+  const plain = await start(root, quick.a);
+  assert.equal(plain.settings, null);
+  assert.match(plain.warnings.join('\n'), /not git-ignored/);
+  assert.equal(existsSync(path.join(plain.enter, '.claude', 'settings.local.json')), false);
+
+  commitIn(root, '.gitignore', '.claude/worktrees/\n.claude/settings.local.json\n', 'ignore settings');
+  const res = await start(root, quick.b);
+  assert.equal(res.settings, slash(path.join(res.enter, '.claude', 'settings.local.json')));
+  assert.deepEqual(readJson(res.enter, '.claude/settings.local.json').permissions.allow, ['Bash(node nos.js *)']);
+  assert.equal(gitOk(['status', '--porcelain'], res.enter), '', 'the copy leaves the worktree clean');
+
+  // every start refreshes it from main (resume)
+  writeFile(root, '.claude/settings.local.json', { permissions: { allow: ['changed'] } });
+  await start(root, quick.b, ['--token', res.token]);
+  assert.deepEqual(readJson(res.enter, '.claude/settings.local.json').permissions.allow, ['changed']);
 });
 
 test('run start: a failing install is reported, the run stays', noGit, async (t) => {
