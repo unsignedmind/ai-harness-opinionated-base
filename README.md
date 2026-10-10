@@ -216,7 +216,7 @@ Accepted ones go to the architect (task ADD-GUARDRAILS). It checks each (section
 | After a step is specified | continues | stops, shows the spec in simple words, waits for your go |
 | After a step or phase is implemented | continues | stops, waits for your go |
 | After a step or phase is reviewed | continues | stops, waits for your go |
-| Develop or review is blocked | solves it: develop reruns once with the problems as feedback, review-fixing decides open questions by the specs; what is left goes on, recorded; the finish gate decides | stops |
+| Develop or review is blocked | solves it: develop reruns once with the problems as feedback, review-fixing decides open questions by the specs; what is left goes on, recorded; the finish gate decides (a quick run with `(!)` left ends unmerged before its finish) | stops |
 | A subagent asks a question | answers it with the most reasonable choice, recorded (asks you only about look and feel or irreversible actions) | asks you |
 | Gate fails at integration | fixes it, at most 2 rounds, then ends the run unmerged with a report | asks: FIX, PAUSE or ABANDON |
 | Contradicting specs at a rebase | what is already on main wins, unless the step's spec explicitly replaces it; recorded | asks you (DECIDE) |
@@ -444,7 +444,7 @@ Input: domain, phase id, step id, run mode, optional feedback and resume flag. F
 4. Runs `nos gate` (with `--e2e` when the Test Strategy names e2e). It fixes what it can and marks what it can't with `(!)`.
 5. Fills the Dev Log. It never changes the Spec Log.
 6. Commits code only with `step-<id>: <what>` in the worktree, never pushes (you push). The spec file lives in `<specs>` and is committed by the orchestrator.
-7. Reports `pass` or `blocked`. In AUTO it asks nothing the specs, guardrails, architecture or code answer: it decides, notes it in the Dev Log marked `(auto decision)` and reports it. A blocked verdict in AUTO: no ACs → specify and spec-review run again; `(!)` tasks → one rerun with the reasons as feedback; still `(!)` → recorded, the step goes on to review and the finish gate decides.
+7. Reports `pass` or `blocked`. In AUTO it asks nothing the specs, guardrails, architecture or code answer: it decides, notes it in the Dev Log marked `(auto decision)` and reports it. A blocked verdict in AUTO: no ACs → specify and spec-review run again; `(!)` tasks → one rerun with the reasons as feedback; still `(!)` → recorded, the step goes on to review and the finish gate decides (a quick run with `(!)` left ends unmerged before its finish).
 
 It never changes the Description, ACs, Spec Log or Test Strategy. Changing a test to make it pass is strictly forbidden.
 
