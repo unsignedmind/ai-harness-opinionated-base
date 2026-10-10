@@ -212,3 +212,11 @@ test('nos ready reads the plan of a domain', (t) => {
   assert.deepEqual(r.blocked.map((e) => [e.id, e.waitsOn]), [[2, [1]]]);
   assert.throws(() => planReady(roots, { domain: 'domain-9-none' }), /does not exist/);
 });
+
+test('nos ready reports the parallel caps of main\'s nos.config.json', (t) => {
+  const { roots, domain } = setup(t);
+  createPlan(roots, { domain, plan: plan([phase('a', [step('x', [])])]) });
+  assert.deepEqual(planReady(roots, { domain }).parallel, { specify: 3, develop: 2, mergeGate: 'quick' });
+  writeFile(roots.main, 'nos.config.json', { specs: { dir: '.specs', remote: null }, parallel: { specify: 1 } });
+  assert.deepEqual(planReady(roots, { domain }).parallel, { specify: 1, develop: 2, mergeGate: 'quick' });
+});

@@ -605,6 +605,7 @@ Used in ACs, the Task List and review findings:
 
 - Questions from subagents (idea, architect, and specify and spec-review in MANUAL) are relayed through the orchestrator session. They only work while that session is open.
 - spec-review can ask specify only while the orchestrator session that ran specify is open. After a resume it decides alone.
+- Parallel specifications (AUTO) multiply the live subagents: up to two per step in specification. Lower `parallel.specify` in `nos.config.json` when the orchestrator session gets slow or its context compacts often.
 - Reviewers find changes only through the commit prefix. A commit without the prefix is invisible to them.
 - The run token lives in the session's transcript. A fresh session must take a running run over on purpose.
 - Stale locks and run files after a crash are never broken automatically; nos shows holder and age, you decide (`nos lock release <name> --break`).
@@ -622,9 +623,10 @@ Used in ACs, the Task List and review findings:
 | `<option name="plan">` | Picks a domain without a plan, runs plan (create), then offers RUN |
 | `<option name="quick">` | Continues an unfinished quick step or runs quick-step for a new one, then runs the step cycle for it |
 | `<modes>` | Defines AUTO and MANUAL through the `mode` attribute on each `<park>` (AUTO only on human-validation parks) and on a `do` element that runs in one mode only (`mode="auto"` or `mode="manual"`) |
-| `<option name="run">` | Picks a plan or quick step, starts or resumes its run (`nos run start`, enter the worktree) and a mode. Quick step → step cycle, then finish. Plan → sets the plan `in-progress`, runs every unfinished phase, sets the plan `done`, asks to integrate |
+| `<option name="run">` | Picks a plan or quick step, starts or resumes its run (`nos run start`, enter the worktree) and a mode. Quick step → step cycle, then finish. Plan → sets the plan `in-progress`, runs every unfinished phase (MANUAL: in order; AUTO: block `scheduler`), sets the plan `done`, asks to integrate |
+| `<scheduler>` | AUTO plan runs: `nos ready` answers which steps may start by their `depends-on` (dependency pass first when the plan has none); specifications of independent steps run in parallel (`parallel.specify` of `nos.config.json`), development one step at a time in the run worktree; each step keeps its own cycle position; parks name their step and let the others continue |
 | `<cycle name="finish">` | Proposals (AUTO: after cleanup), docs update, `nos run finish` (AUTO: up to 2 gate fix rounds), leave the worktree, `nos run cleanup` |
-| `<cycle name="phase">` | Runs all steps, then reviews the phase as a whole |
+| `<cycle name="phase">` | Runs all steps (MANUAL; in AUTO the scheduler does), then reviews the phase as a whole |
 | `<cycle name="step">` | specify → spec-review → develop → review-pessimistic → review-fixing |
 | `<proposals>` | Asks pending guardrail proposals (P1… / ALL / NO) at a park or final report; accepted ones go to architect ADD-GUARDRAILS |
 | `<docs-update>` | At finish, before `nos run finish`: the run's `(architecture)` Dev Log entries → architect UPDATE-DOCS with the run mode; its questions relayed (AUTO: a standing answer or nos answers itself); commits on the run branch |

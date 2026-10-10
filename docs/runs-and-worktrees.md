@@ -1,6 +1,6 @@
 # Runs, worktrees and the specs repo
 
-Written against nos main `64fca4b` (2026-10-07); moodo-poc migrated the same day. Code is the source of truth; where docs differ see [22](#22-known-gaps--notes). Decision codes (D-n): see the end of [21](#21-rejected-alternatives).
+Written against nos main `64fca4b` (2026-10-07); moodo-poc migrated the same day. Code is the source of truth; where docs differ see [23](#23-known-gaps--notes). Decision codes (D-n): see the end of [21](#21-rejected-alternatives).
 
 `nos` below always means the literal call `node <home>/cli/bin/nos.js …` (see [7](#7-process-model)).
 
@@ -756,7 +756,16 @@ In short: the design calls made while building it, referenced above as D-n.
 
 ---
 
-## 22. Known gaps / notes
+## 22. Parallel steps (AUTO plan runs)
+
+- **Dependencies** (`cli/src/dependencies.js`): `plan.json` `"dependencies-checked": true` + `"depends-on"` per step (`"<step slug>"` same phase, `"<phase slug>/<step slug>"` earlier phase, `[]` independent). Validated by `create-plan` / `update-plan`: list present, refs resolve, no later phase, no self, no cycle (Kahn per phase; cross-phase refs point backwards), step slugs unique per phase, phase slugs unique. Flag false or missing (older plans; after `create-plan` appended phases) → ignored, array order. The plan ability writes them (`abilities/plan.md` "dependencies", action `dependencies` = the dependency pass, adds only).
+- **`nos ready --domain`** (`cli/src/ready.js`): the only scheduling input of the orchestrator. `specify` (open, deps done, barrier ok), `develop` (specified, deps done), `running`, `continue`, `blocked` (`waitsOn`, `waitsOnPhases`), `phasesReviewable`, `phasesContinuing`, `done`, `parallel` (caps from main's `nos.config.json`: `specify` 3, `develop` 2, `mergeGate` quick). Barrier = every earlier phase done, lifted per step by a cross-phase ref, gates only `open` steps (a step specified before a fix phase was inserted in front continues).
+- **Scheduler** (`workflow.md` block `scheduler`, AUTO only): after every notification `nos ready`, then: phase open → in-progress; specifications up to `parallel.specify` at once (specify + spec-review per step, background, descriptions `step-<id> <ability>`); development one step at a time in the run worktree; phase review when nothing else works in the worktree; nothing launched + nothing running + not done → `auto-end` with the blocked list. MANUAL stays strictly sequential (cycle `phase` step1).
+- **Why specifications first**: they write only `<specs>` files, no worktree, no git in `<work>`. Specs commits stay domain-scoped per step; a commit may carry another step's half-written spec (the next commit heals it).
+- **`update-plan` under concurrency**: statuses on disk win for kept phases and steps (a plan subagent — dependency pass, REJECT extend — may run while other steps report), `dependencies-checked` is restored before validation, `create-plan` append resets it. All plan writers use `writeJsonFile` (atomic).
+- **Parallel development** (step worktrees `<main>/.claude/worktrees/<run>-step-<id>`, step files `<specs>/.runs/<run>.steps/`, merge queue): a later stage; see the plan in `README.md` Part 3 "Ideas" until it lands.
+
+## 23. Known gaps / notes
 
 In short: what is untested, unfinished, or where docs and code disagree.
 

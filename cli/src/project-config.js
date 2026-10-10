@@ -4,14 +4,18 @@ import { FAILED, NosError } from './exit-codes.js';
 import { PROJECT_CONFIG_FILE, slash } from './roots.js';
 
 // nos.config.json: project config, tracked in the project (templates/nos.config.json).
-// specs.* and worktrees.* are read from main's file; quality-tools, project-commands, deploy and spec-ui from
+// specs.*, worktrees.* and parallel.* are read from main's file; quality-tools, project-commands, deploy and spec-ui from
 // work's file, because a branch may change its test command (deploy: main's while work's has none).
 // deploy: provider (a name of deploy/index.js PROVIDERS, null = not configured), build (runs first, null = none),
 // options (provider specific, defaults and validation in the provider class).
 // specs.dir null = the default sibling folder ../<main folder name>.specs (roots.js defaultSpecsDir).
+// parallel (AUTO runs of a plan, workflow.md block "scheduler"): specify = steps specified at once, develop =
+// steps developed at once in their own step worktrees, mergeGate = the gate of the merge queue ('quick': no e2e,
+// 'full': e2e when configured).
 export const DEFAULT_PROJECT_CONFIG = Object.freeze({
   specs: Object.freeze({ dir: null, remote: null }),
   worktrees: Object.freeze({ slots: 1, slotWait: 600 }),
+  parallel: Object.freeze({ specify: 3, develop: 2, mergeGate: 'quick' }),
   'quality-tools': Object.freeze({
     test: null,
     lint: null,
@@ -64,4 +68,5 @@ export const deployConfig = (roots) =>
   readProjectConfig(isObject(readRawConfig(roots.work).deploy) ? roots.work : roots.main).deploy;
 export const docsFolder = (roots) => readProjectConfig(roots.work)['spec-ui']['docs-folder'];
 export const worktreesConfig = (roots) => readProjectConfig(roots.main).worktrees;
+export const parallelConfig = (roots) => readProjectConfig(roots.main).parallel;
 export const specsConfig = (roots) => readProjectConfig(roots.main).specs;

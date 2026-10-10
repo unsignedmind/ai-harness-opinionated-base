@@ -7,6 +7,11 @@
     "slots": 1,
     "slotWait": 600
   },
+  "parallel": {
+    "specify": 3,
+    "develop": 2,
+    "mergeGate": "quick"
+  },
   "quality-tools": {
     "test": null,
     "lint": null,

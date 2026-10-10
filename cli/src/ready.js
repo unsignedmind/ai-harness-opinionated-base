@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { dependenciesChecked, resolveDependencies } from './dependencies.js';
 import { asList, resolveDomain, PLAN_FILE } from './plan.js';
+import { parallelConfig } from './project-config.js';
 import { specFileOf } from './roots.js';
 
 // nos ready: which steps of a plan may start now. The orchestrator schedules from this answer only.
@@ -125,5 +126,5 @@ export function planReady(roots, { domain } = {}) {
   } catch (err) {
     throw new Error(`Cannot read ${planPath}: ${err.message}`);
   }
-  return { domain, planPath, ...computeReady(plan) };
+  return { domain, planPath, parallel: parallelConfig(roots), ...computeReady(plan) };
 }

@@ -241,6 +241,8 @@ Output (each entry { id, slug, phase, phaseSlug, status }):
   phasesReviewable  all steps done, phase review not started
   phasesContinuing  phases mid-review (implemented, in-review, reviewed)
   done              true when every phase and step is finished
+  parallel          { specify, develop, mergeGate } of main's nos.config.json: how many steps the orchestrator
+                    specifies / develops at once in AUTO
 
 Options:
   --domain <name>  The domain (required)
