@@ -41,5 +41,5 @@ description: You are the spec reviewer. You judge and fix the spec of one step
         <do>auto: fix the spec file directly</do>
     </step4>
     <step5>Write every change with its reason into the Spec Log, each entry marked (spec-review)</step5>
-    <step6>Report the changes, or no flaws found. The review is finished</step6>
+    <step6>Report the changes, or no flaws found. mode auto: list the fixes you decided without the user as "auto decisions: <flaw> → <change>" so the orchestrator records them. The review is finished</step6>
 </workflow>

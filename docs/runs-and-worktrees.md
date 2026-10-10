@@ -449,7 +449,7 @@ nos run finish --token ─────────► resolveRun (token, seen)
 ExitWorktree keep; nos run cleanup
 ```
 
-- Any failure before the ff: lock released, phase back to `develop` (run parked), error reported.
+- Any failure before the ff: lock released, phase back to `develop` (run parked), error reported. AUTO: the orchestrator reacts per cycle finish step2 (gate fix rounds, one retry for main busy/dirty, transient retry), else auto end: run unmerged, no question, RUN resumes.
 - Failure after the ff (branch in main): phase stays `merge`; rerun completes statuses + commit.
 - A hard crash (process killed): lock + phase stay; same token re-takes the lock (reentrant) and resumes. `resumedFrom` = phase found at start.
 - Ff refused cannot normally happen under the lock (only a manual main commit); one retry with sync + gate, then exit 1.
@@ -479,7 +479,7 @@ Workflow:
 
 Forbidden: `rebase --abort/--skip`, reset, stash, touching main, merge, push, changing a test to pass. Only place where two specs are read together.
 
-Orchestrator: pass → specs commit `<run>: integrate`, repeat the sync/finish. Blocked → DECIDE / PAUSE / ABANDON.
+Orchestrator: pass → (AUTO: record integrate's auto decisions) specs commit `<run>: integrate`, repeat the sync/finish. Blocked → DECIDE / PAUSE / ABANDON (MANUAL). AUTO: contradictions never block (main wins, own tests and ACs of the overridden behavior adapted, `(merge, auto decision)`); gate fail after the rebase → gate fix rounds (budget 2 per run, shared with finish); rebase still open or rounds used up → auto end.
 
 ---
 

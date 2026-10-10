@@ -197,7 +197,7 @@ After each task the menu comes back. Every change is proposed first (handed-over
 
 nos never saves a Claude Code memory or a CLAUDE.md/AGENTS.md entry for a project lesson, and neither does any ability: guardrail proposals are the single channel. Abilities put their lessons into their report, the orchestrator collects them with its own. When you correct it, decide something for the project, or the same failure keeps coming back, the orchestrator writes it down as a **guardrail proposal**: the section (`coding`, `review`, `specify`, `plan`, `architect` or `orchestrator`), the wording, the reason (your words and the date, or the failure with its step, park, Dev Log entry or review finding) and why it does not block valid work. Guesses, one-offs and things already in a guardrail or the docs get no proposal. A lesson about nos itself is just reported to you.
 
-It tells you in one line when it notes one (`Noted guardrail proposal P1: …`) but never interrupts a step for the question. It asks at the next park or final report, or before the session ends (pause, stop, abandon), also in AUTO, as its own question. In AUTO it never asks before the finish: the proposals come once at the very end, after merge and cleanup (the architect then commits on main), or at the end of a run that ended at a technical limit or dead end:
+It tells you in one line when it notes one (`Noted guardrail proposal P1: …`) but never interrupts a step for the question. It asks at the next park or final report, or before the session ends (pause, stop, abandon), also in AUTO, as its own question. In AUTO it asks only at a park, before the plan's integrate question, or at the very end: after merge and cleanup (the architect then commits on main), or at the end of a run that ended at a technical limit or dead end:
 
 ```
 Lessons from this work, proposed as guardrails. Which should the architect add?
@@ -228,7 +228,7 @@ Accepted ones go to the architect (task ADD-GUARDRAILS). It checks each (section
 
 You can switch modes at every stop. In AUTO an orchestrator guardrail may answer one named question of a subagent for you (a standing answer, see Templates → guardrails.xml); it wins over nos's own choice. MANUAL always asks you.
 
-**AUTO decisions.** Every problem AUTO solves without you is written to `<specs>/<domain>/auto-decisions.md` (template `templates/auto-decisions.md`): one section per run (`## <run> — <date>`), one line per decision (`- <where> — problem: … — applied: … — revert: …`), committed with the run's next specs commit. The details stay where the abilities write them (Spec Log, Dev Log, review Fixes marked `(auto decision)`). Every park and the final report show `auto decisions this run: <n>` with the lines, plus follow-ups (out-of-scope review findings). Ending a run at a technical limit or dead end is no park: nothing waits for you, the status stays and RUN continues it; the report names the blocker and what was tried.
+**AUTO decisions.** Every problem AUTO solves without you is written to `<specs>/<domain>/auto-decisions.md` (template `templates/auto-decisions.md`): one section per run (`## <run> — <date>`), one line per decision (`- <where> — problem: … — applied: … — revert: …`), committed with the run's next specs commit. The details stay where the abilities write them (Spec Log, Dev Log, review Fixes marked `(auto decision)`). Every park and the final report show `auto decisions this run: <n>` with the lines, plus follow-ups (out-of-scope review findings). Ending a run at a technical limit or dead end is no park: nothing waits for you, the status stays (a plan stays `in-progress`, not `on-hold`), RUN lists the run as running and continues it; the report names the blocker and what was tried. Every report of an ability that lists auto decisions is recorded, whatever its verdict. Tries are counted from the file (`specify rerun 1/1`, `develop rerun 1/1`, `gate fix round <n>/2`, shared by finish and rebase gate fixes; a resume you start in AUTO resets the gate rounds once). A quick step with a recorded `(!) left` line is not finished automatically in AUTO: the run ends unmerged, you check it and resume in MANUAL or abandon. Parks and questions an orchestrator guardrail adds stay in AUTO.
 
 ### When nos stops (a "park")
 
@@ -721,9 +721,9 @@ The files are plain text, so no tools are needed.
 2. Add an `<ability name="review-security">` to `SKILL.md`.
 3. In `workflow.md`, add `<do>Run ability "review-security" with the step</do>` to step5 of the step cycle (the review step), plus a `<park>` if it can block.
 
-**Add a stop point.** Example: always stop before a phase review. Add `<park mode="auto,manual"/>` to step2 of the phase cycle.
+**Add a stop point.** Example: stop before a phase review in MANUAL: add `<park mode="manual"/>` to step2 of the phase cycle. A stop that should hold in AUTO too (and is no human validation or irreversible action) belongs in an orchestrator guardrail ("Park before … , also in auto mode"), not in `workflow.md`.
 
-**Change when AUTO stops.** Add or remove `auto` in a park's `mode` attribute. Keep `auto` only on parks for human validation or irreversible actions (rule "AUTO decisions"); for any other problem give AUTO a `do` element with `mode="auto"` and a bounded solution that is recorded.
+**Change when AUTO stops.** Add or remove `auto` in a park's `mode` attribute. Keep `auto` only on parks for human validation or irreversible actions (rule "AUTO decisions"; parks and questions an orchestrator guardrail adds stay in AUTO too); for any other problem give AUTO a `do` element with `mode="auto"` and a bounded solution that is recorded.
 
 **Add a status.** Add it to `status.xml`, then add a cycle step with `<status from to>` and `resume-at` in `workflow.md`, and adjust the `from` of the next step. Every status must be set by exactly one step, or resume breaks.
 
