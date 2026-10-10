@@ -94,9 +94,9 @@
 
 <option name="idea">
     <step1>No POC result passed in → block "poc-results" first. Run ability "idea", a POC result as its starting context (the result file path)</step1>
-    <step2>nos specs commit --domain <domain> -m "idea: <domain>". Came from a POC result → option "poc" step6 with that POC and "idea <domain>". Report the domain folder. Pending guardrail proposals → block "proposals" first
+    <step2>nos specs commit --domain <domain> -m "idea: <domain>" (domain has a run file in <specs>/.runs → skip it, that run's next specs commit picks it up). Came from a POC result → option "poc" step6 with that POC and "idea <domain>". Report the domain folder and the idea file (new domain or added to an existing one). Pending guardrail proposals → block "proposals" first
         <question>Create a plan now?
-            <choice key="YES">Create the plan → option "plan" with this domain</choice>
+            <choice key="YES">Create the plan → option "plan" with this domain and this idea</choice>
             <choice key="NO">Stop here</choice>
         </question>
     </step2>
@@ -131,7 +131,7 @@
     <step2>NEW: ask for a short name. Make a slug from it (lowercase kebab-case, a-z 0-9, single dashes, at most 40 characters; a result pocs/poc-<slug>-result.md or run file poc-<slug>.json already exists → another slug; nos run start refuses an existing result with exit 1 too). nos run start --poc <slug>. Exit 4 → exit code table. Keep "token" from the output. Install failure or "warnings" in the output → report them, continue. Cwd not <main> → cd <main> (absolute path, its own call). EnterWorktree path=<run.worktree>. Denied → cd <main>, retry once. Denied again → stop, report run id, token and the denial. "enter" differs from run.worktree → work in <enter>. nos roots. Read the orchestrator guardrails (rule "Guardrails"). Read the run file <specs>/.runs/poc-<slug>.json: mainBranch</step2>
     <step3>Turns: no first message yet → ask "What do you want to try?". Run ability "poc" with home, work, specs, run id, mainBranch and the user's message. Keep its subagent alive. Show the turn result of each report, then this question (drop the subagent's own option lines)
         <question>How do you want to continue?
-            <choice key="DEPLOY">Deploy to test → SendMessage "deploy" to the subagent. It runs nos exec deploy-test and reports the url. Show the report, ask this question again</choice>
+            <choice key="DEPLOY">Deploy to test → SendMessage "deploy" to the subagent. It runs nos deploy (the POC's own env) and reports the url. Show the report, ask this question again</choice>
             <choice key="END">End the POC → step4</choice>
             <choice key="CONTINUE">Continue → ask for the next request</choice>
             <choice key="PAUSE">Pause → ExitWorktree action=keep, nos roots. Pending guardrail proposals → block "proposals". Report run id and token. End. The run, its worktree and branch stay, POC offers it</choice>
@@ -157,7 +157,7 @@
         </question>
     </step5>
     <step6>Processed, with the POC slug and "<as>" (quick <step id> | idea <domain> | dropped). Called from step3, step4 or step5 (DROP, ABANDON), from option "quick" or "idea" (QUICK, IDEA, block "poc-results"), or from step7:
-        <do>Inside a worktree → ExitWorktree action=keep</do>
+        <do>Inside the POC's worktree → nos deploy --remove (as in cycle "finish" step3), then ExitWorktree action=keep. Not inside it but its run file exists → nos deploy --remove --env poc-<slug></do>
         <do>Result file exists and processed is no → nos poc processed <slug> --as "<as>". nos specs commit --run poc-<slug> -m "poc-<slug>: processed" (dropped: kept as history)</do>
         <do>Run file <specs>/.runs/poc-<slug>.json exists → a dev server or background task the "poc" subagent started still runs → stop it (TaskStop). Phase abandoned → nos run cleanup --token <token> --run poc-<slug>. Otherwise → nos run abandon --token <token> --run poc-<slug>. No token → TAKEOVER question of exit code 4 first, to get one (phase abandoned: only the token; worktree folder gone and phase not abandoned: the take-over recreates it, abandon deletes it again). It deletes worktree, branch, run file and notes. Its cleanup part fails (exit 1, e.g. a dev server holds the folder) → report it, repeat "nos run cleanup --token <token> --run poc-<slug>" after the user stopped it. No run file (cleaned up by hand) → nothing to abandon</do>
         <do>nos roots. Called from step3, step4, step5 or step7 → pending guardrail proposals → block "proposals" (now on main). Report: result <as>, worktree and branch removed. End. Called from option "quick" or "idea" → continue there (its report asks the proposals)</do>
@@ -181,10 +181,16 @@
 </option>
 
 <option name="plan">
-    <step1>No domain given →
-        <question>Which idea should be planned?
-            <choice key="domain id">One choice per <specs>/domain-* folder without plan.json or with a hollow plan.json (no phases): domain name</choice>
+    <step1>A domain holds one idea file per idea (idea-<slug>.md, older domains idea.md). Each is planned on its own. nos ideas --unplanned → the domains with ideas not planned yet. None → report it, end. Domain given → only it
+        <question>Which domain should be planned?
+            <choice key="domain id">One choice per such domain (skip when only one or a domain was given): domain name, number of unplanned ideas, "has a plan" when its plan.json has phases (the new phases get appended)</choice>
         </question>
+        Ideas given (e.g. by option "idea") → skip
+        <question>Which ideas should be planned? (several allowed, e.g. "1,3")
+            <choice key="number">One choice per unplanned idea of the domain: idea title, file name. All chosen ideas go into one plan</choice>
+            <choice key="ALL">All unplanned ideas of the domain</choice>
+        </question>
+        Only one unplanned idea → take it without asking
     </step1>
     <step2>
         <question>How big should phases and steps be?
@@ -193,7 +199,7 @@
             <choice key="L">Large. Few phases (maybe one), few big steps (maybe one)</choice>
         </question>
     </step2>
-    <step3>Run ability "plan" (action create) with the domain and the sizing. nos specs commit --domain <domain> -m "plan: <domain>"</step3>
+    <step3>Run ability "plan" (action create) with the domain, the ideas (file names) and the sizing. nos specs commit --domain <domain> -m "plan: <domain>"</step3>
     <step4>Report the phases. Pending guardrail proposals → block "proposals" first
         <question>Run it now?
             <choice key="YES">Run the plan → option "run" with this domain</choice>
@@ -219,6 +225,7 @@
     <step2>Enter the run:
         <do>Cleanup pending (status merged or discarded, run file phase merged or abandoned) → inside its worktree → ExitWorktree action=keep. nos run cleanup --token <token> (no token → TAKEOVER question of exit code 4 first, to get one). nos roots. Report. Pending guardrail proposals → block "proposals" first. End</do>
         <do>Crashed finish (status merged, run file phase merge) → nos run finish --token <token> (no token → TAKEOVER question of exit code 4 first): cycle "finish" from step1. Crashed abandon (status discarded, run file phase not abandoned) → ExitWorktree action=keep when inside its worktree, nos run abandon --token <token> (no token → TAKEOVER first). nos roots. Report. Pending guardrail proposals → block "proposals" first. End</do>
+        <do>Plan reopened (status open or on-hold: create-plan appended phases of another idea) while its run file phase is merged or abandoned (the earlier run) → that run is over: inside its worktree → ExitWorktree action=keep. nos run cleanup --token <token> (no token → TAKEOVER question of exit code 4 first). nos roots. Continue below with a new run start</do>
         <do>Inside the worktree of a different run → ExitWorktree action=keep, nos roots</do>
         <do>Inside its worktree and this session holds its token → no run start. Otherwise → nos run start --domain <domain> --plan, or --quick <step id>, with --token <token> when this session holds one. Exit 4|6 → exit code table. Keep "token" from the output. Install failure in the output ("install" with code not 0) → report it, continue. "warnings" in the output (e.g. .claude/worktrees not ignored) → report them, continue. Not inside yet → cwd not <main> → cd <main> (absolute path, its own call). EnterWorktree path=<run.worktree> (the worktree top: EnterWorktree accepts only a folder git knows as a worktree). Denied → cd <main>, retry once. Denied again → park, report run id, token and the denial. Never continue outside the worktree. "enter" differs from run.worktree (the project is a subfolder of its repo) → work in <enter> from now on: cd there, pass it as work</do>
         <do>Always: nos roots → home, work (= the worktree), specs. Read the run file <specs>/.runs/<run>.json: run id, mainBranch, base</do>
@@ -261,7 +268,7 @@
         <do>Main busy ("details.busy": a merge, rebase, cherry-pick or revert in progress in main), main dirty ("details.files" on paths the branch touches), main checkout on another branch ("main checkout is on <x>, expected <mainBranch>") or "git merge --ff-only … refused twice" → park, report the error and the details. GO → repeat step1 after the user fixed main. Main dirty on docs/guardrails.xml (an interrupted proposals architect on main) → same advice in the park report: rerun ability "architect" (resume) on main with the same task and proposals</do>
         <do>Other → park, report the error</do>
     </step2>
-    <step3>Merged → ExitWorktree action=keep. nos run cleanup --token <token> (from main the token finds the run). nos roots. Report: merged into <mainBranch>, worktree and branch removed. Proposals collected since step1 → block "proposals" (now on main)</step3>
+    <step3>Merged → still in the worktree: nos deploy --remove (deletes the run's test env; exit 8 → nothing deployed; exit 1 → name it in the report, continue). ExitWorktree action=keep. nos run cleanup --token <token> (from main the token finds the run). nos roots. Report: merged into <mainBranch>, worktree and branch removed. Proposals collected since step1 → block "proposals" (now on main)</step3>
     <step4>Cleanup refused: exit 1 "a process … still uses <wt>" (e.g. a dev server) → report it, repeat "nos run cleanup --token <token>" after the user stopped it. Exit 5 → exit code table</step4>
 </cycle>
 
@@ -365,7 +372,7 @@
 </docs-update>
 
 <park>
-    <step1>Stop. Report run id and token, target, status and reason. Pending guardrail proposals by key only ("pending proposals: P1, P2, asked below"), the applied ones of this run by their lines. Specified → summarize the description and ACs in simple words. Human validation → explain in simple steps how the user verifies. No review ran → derive the steps from the ACs of the step or of the phase's steps</step1>
+    <step1>Stop. Report run id and token, target, status and reason. Pending guardrail proposals by key only ("pending proposals: P1, P2, asked below"), the applied ones of this run by their lines. Specified → summarize the description and ACs in simple words. Human validation → explain in simple steps how the user verifies; a deployed url in the ability report → name it, the user verifies there. No review ran → derive the steps from the ACs of the step or of the phase's steps</step1>
     <step2>Pending guardrail proposals → block "proposals" first
         <question>How do you want to continue?
             <choice key="GO">Continue with the next step of the cycle</choice>
@@ -387,7 +394,7 @@
                 <do>nos specs commit --run <run> -m "<run>: pause". ExitWorktree action=keep. End. The run, its worktree and branch stay. A quick step keeps its status and continues via QUICK or RUN</do>
             </choice>
             <choice key="ABANDON">Drop the plan or quick step: its branch and worktree are deleted, the specs stay as history with status discarded
-                <do>Ask YES/NO to confirm. YES → ExitWorktree action=keep. nos run abandon --token <token>. nos roots. Report. Guardrails the architect added on this run's branch (every block "proposals" since run start, see the applied lines) die with it → block "proposals" again with those proposals (now applied on main). Its cleanup part fails (exit 1, e.g. a dev server holds the folder) → report it, repeat "nos run cleanup --token <token>" after the user stopped it</do>
+                <do>Ask YES/NO to confirm. YES → nos deploy --remove (as in cycle "finish" step3). ExitWorktree action=keep. nos run abandon --token <token>. nos roots. Report. Guardrails the architect added on this run's branch (every block "proposals" since run start, see the applied lines) die with it → block "proposals" again with those proposals (now applied on main). Its cleanup part fails (exit 1, e.g. a dev server holds the folder) → report it, repeat "nos run cleanup --token <token>" after the user stopped it</do>
             </choice>
         </question>
     </step2>

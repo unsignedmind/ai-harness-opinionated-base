@@ -4,6 +4,7 @@
 // Runs (GET /__runs) are joined in: a plan run by its domain, a quick run by its step; the rest (POCs) are
 // otherRuns.
 import type { Run } from './runs';
+import { IDEA_FILE, LEGACY_IDEA_FILE } from './folder';
 import { normStatus, type Status } from './status';
 
 export type Progress = { done: number; total: number };
@@ -17,7 +18,8 @@ export type Idea = {
   // domain name for Board and Backlog: `name` in domain.json, else the title
   name: string;
   intent: string;
-  md: string | null;
+  // the idea files of the domain (idea.md first, then idea-*.md); a domain is an area, each file one idea
+  ideaFiles: IdeaFile[];
   domainJson: string | null;
   planJson: string | null;
   plan: { name: string } | null;
@@ -36,6 +38,15 @@ export type Idea = {
   run: Run | null;
 };
 
+export type IdeaFile = {
+  file: string;
+  md: string;
+  title: string;
+  intent: string;
+  // in "ideas" of plan.json; a plan with phases but without "ideas" (older plans) covers idea.md
+  planned: boolean;
+};
+
 export type Phase = {
   kind: 'phase';
   number: number;
@@ -46,6 +57,8 @@ export type Phase = {
   description: string;
   hvn: boolean;
   idea: Idea;
+  // the idea files this phase was planned from ("ideas" of the phase)
+  ideas: string[];
   labels: string[];
   steps: Step[];
 };
@@ -113,12 +126,14 @@ type RawPhase = Partial<{
   intent: string;
   'human-validation-needed': boolean;
   description: string;
+  ideas: string[];
   steps: RawStep[];
 }>;
 type RawPlan = Partial<{
   name: string;
   status: string;
   branch: string;
+  ideas: string[];
   phases: RawPhase[];
 }>;
 type RawDomain = Partial<{
@@ -204,9 +219,30 @@ export function buildModel(
 
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
+// the idea files of a domain folder, legacy idea.md first, then idea-*.md by name
+function ideaFilesOf(folder: string, files: Map<string, string>, raw: RawPlan | null): IdeaFile[] {
+  const olderPlan = Array.isArray(raw?.phases) && raw.phases.length > 0;
+  const planned = new Set(Array.isArray(raw?.ideas) ? raw.ideas : olderPlan ? [LEGACY_IDEA_FILE] : []);
+  const names = [...files.keys()]
+    .filter((p) => p.startsWith(`${folder}/`))
+    .map((p) => p.slice(folder.length + 1))
+    .filter((name) => IDEA_FILE.test(name))
+    .sort((a, b) => (a === LEGACY_IDEA_FILE ? -1 : b === LEGACY_IDEA_FILE ? 1 : a.localeCompare(b)));
+  return names.map((file) => {
+    const md = files.get(`${folder}/${file}`) ?? '';
+    const slug = file === LEGACY_IDEA_FILE ? '' : file.slice('idea-'.length, -'.md'.length);
+    return {
+      file,
+      md,
+      title: firstH1(md).replace(/^idea:\s*/i, '') || (slug ? humanize(slug) : ''),
+      intent: firstParagraph(section(md, 'Intent')),
+      planned: planned.has(file),
+    };
+  });
+}
+
 function buildIdea(folder: string, files: Map<string, string>, runs: Run[]): Idea {
   const m = /^domain-(\d+)-(.*)$/.exec(folder);
-  const md = files.get(`${folder}/idea.md`) ?? null;
   const domainJson = files.get(`${folder}/domain.json`) ?? null;
   const planJson = files.get(`${folder}/plan.json`) ?? null;
 
@@ -229,7 +265,11 @@ function buildIdea(folder: string, files: Map<string, string>, runs: Run[]): Ide
     }
   }
 
-  const title = firstH1(md).replace(/^idea:\s*/i, '') || domain?.name || raw?.name || (m ? humanize(m[2]) : folder);
+  const ideaFiles = ideaFilesOf(folder, files, raw);
+  // one idea: its heading; several: the domain (the area) names them
+  const single = ideaFiles.length === 1 ? ideaFiles[0].title : '';
+  const title =
+    single || str(domain?.name) || ideaFiles[0]?.title || raw?.name || (m ? humanize(m[2]) : folder);
   const idea: Idea = {
     kind: 'idea',
     folder,
@@ -237,8 +277,11 @@ function buildIdea(folder: string, files: Map<string, string>, runs: Run[]): Ide
     slug: m ? m[2] : folder,
     title,
     name: domain?.name?.trim() || title,
-    intent: firstParagraph(section(md, 'Intent')),
-    md,
+    intent: ideaFiles
+      .map((f) => f.intent)
+      .filter(Boolean)
+      .join(' · '),
+    ideaFiles,
     domainJson,
     planJson,
     plan: raw ? { name: raw.name ?? '' } : null,
@@ -272,6 +315,7 @@ function buildIdea(folder: string, files: Map<string, string>, runs: Run[]): Ide
       description: rp.description ?? '',
       hvn: !!rp['human-validation-needed'],
       idea,
+      ideas: Array.isArray(rp.ideas) ? rp.ideas.filter((f) => typeof f === 'string') : [],
       labels: idea.labels,
       steps: [],
     };

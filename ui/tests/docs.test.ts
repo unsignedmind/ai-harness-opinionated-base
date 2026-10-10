@@ -144,3 +144,65 @@ test('empty docs say why, with the pick button in the standalone viewer', () => 
     'No text files under docs/',
   );
 });
+
+// ── domain docs ──
+
+const withDomains = (over: Partial<DocsData> = {}) =>
+  buildDocs(
+    data(
+      { 'index.md': '# Project docs' },
+      {
+        domains: {
+          'domain-10-api': { 'x.md': '# X' },
+          'domain-2-ui': { 'notes/a.md': '# A\n\n[b](../b.md) [up](../../../index.md)', 'b.md': '# B' },
+        },
+        ...over,
+      },
+    ),
+    '../p.specs',
+  );
+
+test('domain docs sit in a virtual Domains folder, last in the root', () => {
+  const d = withDomains();
+  expect(d.root.children.map((c) => c.path)).toStrictEqual(['index.md', '.domains']);
+  const v = d.byPath.get('.domains') as DocDir;
+  expect(v.title).toBe('Domains');
+  expect(v.children.map((c) => [c.path, c.title])).toStrictEqual([
+    ['.domains/domain-2-ui', 'ui'],
+    ['.domains/domain-10-api', 'api'],
+  ]);
+  expect(v.count).toBe(3);
+  expect(d.root.count).toBe(4);
+  expect(d.byPath.get('.domains/domain-2-ui/notes/a.md')).toMatchObject({
+    title: 'A',
+    loc: '../p.specs/domain-2-ui/docs/notes/a.md',
+  });
+  expect(d.byPath.get('index.md')).toMatchObject({ loc: 'docs/index.md' });
+});
+
+test('without domain docs there is no Domains folder', () => {
+  expect(sample().byPath.has('.domains')).toBe(false);
+});
+
+test('links in domain docs stay inside the domain', () => {
+  const d = withDomains();
+  const from = '.domains/domain-2-ui/notes/a.md';
+  expect(resolveDocLink(d, from, '../b.md')).toBe('.domains/domain-2-ui/b.md');
+  expect(resolveDocLink(d, from, '../../../index.md')).toBeNull();
+});
+
+test('renders the Domains folder with labels in tree and crumbs', () => {
+  const docs = withDomains();
+  const el = view('#docs/.domains/domain-2-ui/notes/a.md', ui(), docs);
+  expect(el.querySelector('.crumbs')?.textContent).toBe('Docs › Domains › ui › notes › a.md');
+  expect(el.querySelector('.tree')?.textContent).toContain('Domains');
+  expect(el.querySelector('.detail')?.textContent).toContain('../p.specs/domain-2-ui/docs/notes/a.md');
+  expect(view('#docs/.domains', ui(), docs).querySelector('h1')?.textContent).toBe('Domains');
+});
+
+test('domain docs show even when the project docs could not be read', () => {
+  const docs = withDomains({ files: {}, error: 'No docs/ folder in p/.' });
+  const el = view('#docs', ui(), docs);
+  expect(el.querySelector('.tree')).not.toBeNull();
+  expect(el.querySelector('.error')?.textContent).toBe('No docs/ folder in p/.');
+});

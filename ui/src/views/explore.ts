@@ -172,6 +172,7 @@ const domainCard = (i: Idea) => `<div class="card" data-href="${esc(hrefOf(i))}"
         <h3><span class="id mono">${i.number}</span>${esc(i.title)} ${pill(i.status)} ${runBadge(i.run ?? quickRun(i))}</h3>
         ${i.intent ? `<p>${esc(i.intent.length > 240 ? i.intent.slice(0, 240) + '…' : i.intent)}</p>` : ''}
         ${i.labels.length ? `<div class="row">${labelChips(i.labels)}</div>` : ''}
+        ${i.plan && unplanned(i).length ? `<div class="row"><span class="hvn">${plural(unplanned(i).length, 'idea')} not planned</span></div>` : ''}
         ${i.steps.length ? `<div class="row"><span class="muted">${plural(i.phases.length, 'phase')} · ${plural(i.steps.length, 'step')}${i.quickSteps.length ? ` (${i.quickSteps.length} quick)` : ''}</span>${dots(i.steps)}</div><div class="row">${rollup(i.steps)}</div>` : ''}
       </div>`;
 
@@ -200,6 +201,17 @@ function overview(model: Model, scope: Scope, canPick: boolean | undefined) {
     ${regular.length ? cards(regular) : ''}
     ${cross.length ? `<h2>Cross-cutting</h2>${cards(cross)}` : ''}`;
 }
+
+const unplanned = (i: Idea) => i.ideaFiles.filter((f) => !f.planned);
+
+// the idea files of a domain: title, file, planned or not
+const ideaRows = (i: Idea) =>
+  i.ideaFiles
+    .map(
+      (f) =>
+        `${esc(f.title || f.file)} <span class="mono muted">${esc(f.file)}</span>${f.planned ? '' : ' <span class="hvn">not planned</span>'}`,
+    )
+    .join('<br>');
 
 // unplanned idea: promote it to Domains with an empty (hollow) plan.json
 function promote(i: Idea, ui: ExploreUi) {
@@ -230,9 +242,10 @@ function ideaDetail(i: Idea, ui: ExploreUi, root: Crumb) {
     `<h1><span class="id mono">${i.number}</span>${esc(i.title)} ${pill(i.status)}</h1>
     ${i.error ? `<p class="error">${esc(i.error)}</p>` : ''}
     ${promote(i, ui)}
-    ${ask(ui, i.plan ? ['discuss'] : ['plan', 'discuss'])}
+    ${ask(ui, unplanned(i).length || !i.plan ? ['plan', 'discuss'] : ['discuss'])}
     <dl class="meta">
       ${i.plan ? `<dt>Plan</dt><dd>${esc(i.plan.name)}</dd>` : ''}
+      ${i.ideaFiles.length > 1 || (i.plan && unplanned(i).length) ? `<dt>Ideas</dt><dd>${ideaRows(i)}</dd>` : ''}
       ${i.labels.length ? `<dt>Labels</dt><dd>${labelChips(i.labels)}</dd>` : ''}
       ${i.crossCutting ? `<dt>Scope</dt><dd>cross-cutting</dd>` : ''}
       ${i.steps.length ? `<dt>Steps</dt><dd>${rollup(i.steps)}</dd>` : ''}
@@ -244,7 +257,7 @@ function ideaDetail(i: Idea, ui: ExploreUi, root: Crumb) {
     ${subtabs(ui, 'idea', {
       Phases: i.plan ? { html: kanban(i.phases, { level: 'phases' }) } : null,
       Steps: i.steps.length ? { html: kanban(i.steps, { where: true }) } : null,
-      'idea.md': i.md ? stripH1(i.md) : null,
+      ...Object.fromEntries(i.ideaFiles.map((f) => [f.file, stripH1(f.md) || null])),
       'domain.json': i.domainJson ? { html: `<pre><code>${esc(i.domainJson)}</code></pre>` } : null,
       'plan.json': i.planJson ? { html: `<pre><code>${esc(i.planJson)}</code></pre>` } : null,
     })}`
@@ -257,6 +270,7 @@ function phaseDetail(p: Phase, ui: ExploreUi, root: Crumb) {
     `<h1><span class="id mono">${itemId(p)}</span>${esc(p.name)} ${pill(p.status)}</h1>
     <div class="row">${rollup(p.steps)}${hvnBadge(p.hvn)}</div>
     ${ask(ui, ['review', 'discuss'])}
+    ${p.ideas.length ? `<dl class="meta"><dt>Ideas</dt><dd class="mono">${p.ideas.map(esc).join(', ')}</dd></dl>` : ''}
     ${p.intent ? `<p>${inline(p.intent)}</p>` : ''}
     ${subtabs(ui, 'phase', {
       Board: { html: kanban(p.steps) },

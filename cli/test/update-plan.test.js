@@ -245,6 +245,20 @@ test('keeps branch always and statuses left out of the update; other fields foll
   assert.equal(saved.phases[1].steps[1].status, 'open');
 });
 
+test('keeps "ideas" of the plan and of kept phases when the update leaves them out', (t) => {
+  const { roots, domain, current } = setup(t);
+  const update = current();
+  delete update.ideas;
+  for (const p of update.phases) delete p.ideas;
+  update.phases.push(phase('new-one', [step('x')]));
+
+  updatePlan(roots, { domain, plan: update });
+
+  const saved = current();
+  assert.deepEqual(saved.ideas, ['idea-auth.md']);
+  assert.deepEqual(saved.phases.map((p) => p.ideas ?? null), [['idea-auth.md'], ['idea-auth.md'], null]);
+});
+
 test('a plan without branch gets none', (t) => {
   const { roots, domain, current } = setup(t);
   updatePlan(roots, { domain, plan: current() });

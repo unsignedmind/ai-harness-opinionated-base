@@ -37,7 +37,7 @@ async function open(h: Permissioned) {
     const docs = await readDocs(specs, root);
     current = h;
     app.setModel(buildModel(files, [], rel));
-    app.setDocs(buildDocs(docs));
+    app.setDocs(buildDocs(docs, rel));
     app.setSource(`${h.name}/`);
     app.setNotice(null);
     await saveHandle(h);

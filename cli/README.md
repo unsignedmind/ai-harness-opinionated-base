@@ -24,7 +24,9 @@ nos <command> --help
 | ------------------- | --------------------------------------------------------------------------- |
 | `init`              | Set up the nos layout: `nos.config.json`, `<specs>/` (own git repo, next to the checkout), `.gitignore` entry |
 | `roots`             | Print the resolved roots: `home`, `work`, `main`, `specs`, `inWorktree`, `configured` |
-| `create-domain`     | Reserve a domain id and create `<specs>/domain-<id>-<slug>/idea.md`         |
+| `create-domain`     | Reserve a domain id and create `<specs>/domain-<id>-<slug>/idea-<idea-slug>.md` |
+| `add-idea`          | Add another idea to a domain: `<specs>/<domain>/idea-<slug>.md`             |
+| `ideas`             | List the domains and their ideas, planned or not                            |
 | `create-plan`       | Save a `plan.json` in a domain and create its phase folders and step files (`--hollow`: empty plan, promotes unplanned) |
 | `update-plan`       | Save an updated `plan.json` and create, move or delete phases and steps     |
 | `create-quick-step` | Add a quick step (one step outside any plan) to a domain                    |
@@ -34,7 +36,8 @@ nos <command> --help
 | `specs find-step`   | Find the spec file of a step id in any domain                               |
 | `poc results\|processed` | List the POC results in `<specs>/pocs`; mark one processed (`--as`)     |
 | `gate`              | Run the quality tools of `nos.config.json` (`--e2e`: also e2e, under a slot lease) |
-| `exec <name>`       | Run a project command: `install`, `dev` (holds a slot while it runs), `deploy-test` |
+| `exec <name>`       | Run a project command: `install`, `dev` (holds a slot while it runs), `deploy-test` (legacy) |
+| `deploy`            | Build and deploy work to its own test environment (`--env`, `--remove`, `--check`) |
 | `lock <action>`     | `take`, `release` or `status` of a lock in `<specs>/.locks`                 |
 
 General rules:
@@ -293,6 +296,14 @@ Runs a `project-commands` entry of work's `nos.config.json` in a shell in the wo
 
 `execCommand(roots, name, { stdio: 'log' })` (for `run start`'s install) writes the output to `<specs>/.runs/logs/<run>/<name>.log` and resolves with `{ code, log }`.
 
+### `deploy`
+
+```sh
+nos deploy [--env <id>] [--remove | --check] [--root <dir>]
+```
+
+Builds (`deploy.build`) and deploys work to a test environment of `deploy.provider` (work's `nos.config.json`). Env id = `--env`, else the run id of the worktree, else `main`; lowercased to `[a-z0-9-]`. Providers are classes in `src/deploy/` (`DeployProvider` base: `deployCmd`, `parse`, `removeCmd`, `checkCmd`, static `defaults`; registry `PROVIDERS` in `src/deploy/index.js`): `firebase-hosting` (preview channel per env, `live` refused, env max 40 chars) and `command` (`options.command` with `NOS_DEPLOY_ENV`, url = last url printed). nos only runs shell commands: no provider SDK. `deploy.provider` null with `project-commands.deploy-test` set → `command` provider with it. Output of every command → `<specs>/.runs/logs/<run>/deploy[-remove|-check].log`. Result `{ action: "deploy", provider, env, url, expires, log }`; `--remove` → `deploy-remove` `{ removed }`, `--check` → `deploy-check` `{ ok }`. Exit 1 on a failed step (`details.step`, `exit`, `tail`, `log`), 8 not configured.
+
 ### Slots
 
 A slot is a lease on a set of ports: the lock `<specs>/.locks/slot-<n>` (`src/slots.js`). `gate --e2e` and `exec dev` take the smallest free `slot-<n>` (n in 1..`worktrees.slots` of main's `nos.config.json`), polling every 2 s up to `worktrees.slotWait` seconds (fractions allowed), then exit 7 with the holders. A lease whose process is gone (holder `pid` not alive, e.g. killed hard) is reclaimed by the next taker [D-10]. The project derives ports from `NOS_SLOT` (e.g. dev `5173 + NOS_SLOT`).
@@ -451,31 +462,50 @@ $ nos roots
 ### `create-domain`
 
 ```sh
-nos create-domain --idea <file|-> --slug <slug> [--name <name>] [--labels <a,b>] [--root <dir>]
+nos create-domain --idea <file|-> --slug <slug> [--idea-slug <slug>] [--name <name>] [--labels <a,b>] [--root <dir>]
 ```
+
+A domain is an area or topic: `--slug` and `--name` describe the area. It holds one file per idea, `idea-<idea-slug>.md` (`--idea-slug`, default `--slug`); `nos add-idea` adds more. Older domains have a single `idea.md`, still read everywhere.
 
 Needs `<specs>/config.json` from `nos init`.
 
 1. Takes the next domain id from `<specs>/config.json` and increments the counter.
-2. Creates `<specs>/domain-<id>-<slug>/` and saves the idea in it as `idea.md`.
+2. Creates `<specs>/domain-<id>-<slug>/` and saves the idea in it as `idea-<idea-slug>.md`.
 3. Saves `domain.json` in it: `name` (`--name`, default: first `# ` heading of the idea without `Idea:`), `labels` (`--labels`, comma separated, lowercase kebab-case, default none) and `cross-cutting` (always `false` for now).
 
 ```sh
-$ nos create-domain --idea idea.md --slug user-auth --labels auth,ui
+$ nos create-domain --idea idea.md --slug user-auth --idea-slug login-form --labels auth,ui
 {
   "action": "create-domain",
   "id": 1,
   "folder": "domain-1-user-auth",
   "path": "D:/repo.specs/domain-1-user-auth",
-  "idea": "D:/repo.specs/domain-1-user-auth/idea.md",
+  "ideaFile": "idea-login-form.md",
+  "idea": "D:/repo.specs/domain-1-user-auth/idea-login-form.md",
   "domain": "D:/repo.specs/domain-1-user-auth/domain.json"
 }
 ```
 
+### `add-idea`
+
+```sh
+nos add-idea --domain <domain-<id>-<slug>> --idea <file|-> --slug <slug> [--root <dir>]
+```
+
+Saves another idea of the domain's area as `<specs>/<domain>/idea-<slug>.md`. An existing file is refused. Prints `{ "action": "add-idea", "domain", "ideaFile", "idea" }`.
+
+### `ideas`
+
+```sh
+nos ideas [--domain <domain-<id>-<slug>>] [--unplanned] [--root <dir>]
+```
+
+Lists every domain (or one) with its idea files: `{ "action": "ideas", "domains": [{ "domain", "name", "path", "ideas": [{ "file", "path", "title", "planned" }] }] }`. An idea is planned when its file is in `"ideas"` of the domain's `plan.json`; a plan with phases but without `"ideas"` (older plans) covers `idea.md`. `--unplanned` keeps only unplanned ideas and the domains that have one.
+
 ### `create-plan`
 
 ```sh
-nos create-plan --domain <domain-<id>-<slug>> --plan <file|-> [--root <dir>]
+nos create-plan --domain <domain-<id>-<slug>> --plan <file|-> [--ideas <a,b>] [--root <dir>]
 nos create-plan --domain <domain-<id>-<slug>> --hollow [--root <dir>]
 ```
 
@@ -483,7 +513,11 @@ nos create-plan --domain <domain-<id>-<slug>> --hollow [--root <dir>]
 2. For each step, reserves a step id and creates an empty `step-<id>-<slug>.md` in its phase folder.
 3. Sets each step's `spec-file` field (relative to the specs root: `<domain>/phases/phase-<id>-<slug>/step-<id>-<slug>.md`) and saves `plan.json` in the domain. A `labels` field is dropped: labels live in `domain.json`.
 
-The plan is validated before anything is written. Each domain can have only one plan; only a hollow plan (see below) may be replaced.
+4. Records the planned idea files in `"ideas"` of `plan.json` and of every new phase.
+
+The plan is validated before anything is written. `--ideas` names the idea files the plan covers (`idea-<slug>.md`, the slug alone, or `idea.md`); each must exist and be unplanned. Default: every unplanned idea of the domain.
+
+Each domain has one `plan.json`. A hollow plan (see below) is replaced. A plan with phases gets the new phases appended, so ideas of one area are planned and run separately, one after another: the new phase slugs must not be in the plan yet, `"ideas"` grows, and the plan status goes back to the first `<plans>` status of `status.xml` (`open`), so a merged or discarded plan runs again. Earlier phases and steps keep their statuses and `branch` stays. The result has `"ideas"` (planned now) and `"appended"`. A merged run file of the earlier run is removed with `nos run cleanup` before the next `nos run start`.
 
 Example `plan.json` (`phases` and `steps` can be arrays or single objects):
 
@@ -511,7 +545,7 @@ Example `plan.json` (`phases` and `steps` can be arrays or single objects):
 Every phase and step needs a `slug`. All other fields are kept unchanged.
 
 ```sh
-$ nos create-plan --domain domain-1-user-auth --plan plan.json
+$ nos create-plan --domain domain-1-user-auth --ideas login-form --plan plan.json
 # creates:
 #   <specs>/domain-1-user-auth/plan.json
 #   <specs>/domain-1-user-auth/phases/phase-1-data-model/step-1-user-table.md
@@ -530,7 +564,7 @@ Promotes a domain without planning it (the Spec UI's "Manual promote" button run
 { "name": "<domain.json name>", "status": "open", "phases": [] }
 ```
 
-and creates no folders. The name falls back to the first `# ` heading of `idea.md` (without `Idea:`). The status is the first `<plans>` status of `status.xml` (`open` without the file). `--plan` is not allowed with `--hollow`, and an existing `plan.json` is refused.
+and creates no folders. The name falls back to the first `# ` heading of the first idea file (without `Idea:`). The status is the first `<plans>` status of `status.xml` (`open` without the file). `--plan` is not allowed with `--hollow`, and an existing `plan.json` is refused.
 
 A hollow plan (no phases and no `phase-*` folders) does not count as "planned": a later `create-plan --plan …` replaces it with the real plan. The orchestrator's RUN option skips plans without phases; its PLAN option still offers the domain.
 
@@ -683,7 +717,7 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
 ├── .locks/                     # merge, ids, slot-<n>
 ├── .chat/                      # chat state
 └── domain-1-user-auth/
-    ├── idea.md
+    ├── idea-login-form.md       # one file per idea (older domains: idea.md)
     ├── domain.json
     ├── plan.json
     ├── phases/

@@ -141,10 +141,11 @@ test('create-domain reads the idea from a file and prints JSON', async (t) => {
     id: 1,
     folder: 'domain-1-search',
     path: at(root, 'domain-1-search'),
-    idea: at(root, 'domain-1-search/idea.md'),
+    ideaFile: 'idea-search.md',
+    idea: at(root, 'domain-1-search/idea-search.md'),
     domain: at(root, 'domain-1-search/domain.json'),
   });
-  assert.ok(existsSync(path.join(root, '.specs/domain-1-search/idea.md')));
+  assert.ok(existsSync(path.join(root, '.specs/domain-1-search/idea-search.md')));
   assert.deepEqual(readJson(root, '.specs/domain-1-search/domain.json'), {
     name: 'Search Feature',
     labels: [],
@@ -195,6 +196,8 @@ test('create-plan reads plan.json from a file and prints created structure', asy
     action: 'create-plan',
     domain: 'domain-1-auth',
     plan: at(root, 'domain-1-auth/plan.json'),
+    ideas: ['idea-auth.md'],
+    appended: false,
     phases: [
       {
         id: 1,
@@ -205,6 +208,42 @@ test('create-plan reads plan.json from a file and prints created structure', asy
     ],
   });
   assert.equal(readJson(root, '.specs/config.json')['id-counters'].step, 2);
+});
+
+test('add-idea adds an idea file to a domain, ideas lists them, create-plan --ideas plans one and appends the next', async (t) => {
+  const { root } = makeProject(t);
+  await invoke(['create-domain', '--idea', '-', '--slug', 'plan-mode', '--idea-slug', 'tasks'], { cwd: root, stdin: '# Tasks' });
+
+  const added = await invoke(['add-idea', '--domain', 'domain-1-plan-mode', '--idea', '-', '--slug', 'sizing'], { cwd: root, stdin: '# Idea: Sizing' });
+  assert.equal(added.code, 0);
+  assert.deepEqual(added.json, {
+    action: 'add-idea',
+    domain: 'domain-1-plan-mode',
+    ideaFile: 'idea-sizing.md',
+    idea: at(root, 'domain-1-plan-mode/idea-sizing.md'),
+  });
+  const again = await invoke(['add-idea', '--domain', 'domain-1-plan-mode', '--idea', '-', '--slug', 'sizing'], { cwd: root, stdin: '# x' });
+  assert.equal(again.code, 1);
+  assert.match(again.err, /already exists/);
+
+  const first = await invoke(['create-plan', '--domain', 'domain-1-plan-mode', '--ideas', 'tasks', '--plan', '-'], { cwd: root, stdin: JSON.stringify(PLAN) });
+  assert.equal(first.code, 0);
+  assert.deepEqual([first.json.ideas, first.json.appended], [['idea-tasks.md'], false]);
+
+  const listed = await invoke(['ideas'], { cwd: root });
+  assert.deepEqual(
+    listed.json.domains.map((d) => [d.domain, d.name, d.ideas.map((i) => [i.file, i.title, i.planned])]),
+    [['domain-1-plan-mode', 'Tasks', [['idea-sizing.md', 'Sizing', false], ['idea-tasks.md', 'Tasks', true]]]],
+  );
+  const unplanned = await invoke(['ideas', '--unplanned'], { cwd: root });
+  assert.deepEqual(unplanned.json.domains[0].ideas.map((i) => i.file), ['idea-sizing.md']);
+
+  const next = { ...PLAN, phases: [{ ...PLAN.phases[0], slug: 'sizing-setup' }] };
+  const second = await invoke(['create-plan', '--domain', 'domain-1-plan-mode', '--ideas', 'idea-sizing.md', '--plan', '-'], { cwd: root, stdin: JSON.stringify(next) });
+  assert.equal(second.code, 0);
+  assert.deepEqual([second.json.ideas, second.json.appended], [['idea-sizing.md'], true]);
+  assert.deepEqual(readJson(root, '.specs/domain-1-plan-mode/plan.json').ideas, ['idea-tasks.md', 'idea-sizing.md']);
+  assert.deepEqual((await invoke(['ideas', '--unplanned'], { cwd: root })).json.domains, []);
 });
 
 test('create-plan reads plan.json from stdin', async (t) => {
@@ -302,18 +341,19 @@ test('general help lists every command and points to command help', async () => 
     assert.match(out, /create-domain/);
     assert.match(out, /create-plan/);
     assert.match(out, /create-quick-step/);
-    for (const command of ['specs commit', 'specs find-step', 'gate', 'exec <name>', 'lock <action>']) {
+    for (const command of ['specs commit', 'specs find-step', 'gate', 'exec <name>', 'deploy', 'lock <action>']) {
       assert.ok(out.includes(`  ${command} `), command);
     }
     assert.match(out, /help <command>/);
   }
 });
 
-test('help of specs, gate, exec and lock documents usage, exit codes and the result', async () => {
+test('help of specs, gate, exec, deploy and lock documents usage, exit codes and the result', async () => {
   const expect = {
     specs: [/specs commit \(--run <kind>-<id> \| --domain <domain> \| --config\) -m <message>/, /"action": "specs-commit"/, /"action": "find-step"/],
     gate: [/nos gate \[--e2e\]/, /"action": "gate"/, /not-configured/, /7 no slot/],
     exec: [/nos exec <install\|dev\|deploy-test>/, /2 unknown name/, /7 no slot/],
+    deploy: [/nos deploy \[--env <id>\] \[--remove \| --check\]/, /"action": "deploy"/, /8 deploy not configured/, /live channel is refused/],
     lock: [/nos lock take <name> --token <t>/, /--break/, /"action": "lock-take"/, /"action": "lock-release"/, /"action": "lock-status"/],
   };
   for (const [command, patterns] of Object.entries(expect)) {
@@ -343,7 +383,7 @@ test('help <command> and <command> --help print the detailed command help', asyn
 
 test('create-domain help documents its options and the result', async () => {
   const { out } = await invoke(['help', 'create-domain'], { cwd: '.' });
-  for (const text of ['--idea', '--slug', '--name', '--labels', '--root', 'idea.md', 'domain.json', 'cross-cutting', 'config.json', 'kebab-case']) {
+  for (const text of ['--idea', '--slug', '--idea-slug', '--name', '--labels', '--root', 'idea-<idea-slug>.md', 'domain.json', 'cross-cutting', 'config.json', 'kebab-case']) {
     assert.ok(out.includes(text), `missing "${text}"`);
   }
 });

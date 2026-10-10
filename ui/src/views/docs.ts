@@ -1,5 +1,5 @@
 // Docs: the docs folder as a tree on the left, the chosen file or folder on the right. Built from
-// whatever folders and text files the project has.
+// whatever folders and text files the project has, plus the docs/ folders of the domains under "Domains".
 import { resolveDocLink, type DocDir, type DocFile, type Docs } from '../docs';
 import { esc, renderMd } from '../markdown';
 import { hrefOfDoc, type Route } from '../route';
@@ -26,7 +26,7 @@ function tree(docs: Docs, sel: string, ui: ExploreUi) {
         `dir ${cls}`,
         open ? '▾' : '▸',
         '',
-        c.name,
+        c.title,
         `<span class="muted">${c.count}</span>`,
         key(c),
         style,
@@ -38,13 +38,16 @@ function tree(docs: Docs, sel: string, ui: ExploreUi) {
   return `<nav class="tree" aria-label="Docs">${out}</nav>`;
 }
 
-function trail(path: string) {
+function trail(docs: Docs, path: string) {
   const parts = path.split('/');
   return crumbs(
     ['Docs', '#docs'],
-    ...parts.map((p, i): [string, string?] =>
-      i < parts.length - 1 ? [p, hrefOfDoc(parts.slice(0, i + 1).join('/'))] : [p],
-    ),
+    ...parts.map((p, i): [string, string?] => {
+      const at = parts.slice(0, i + 1).join('/');
+      const node = docs.byPath.get(at);
+      const label = node?.kind === 'dir' ? node.title : p;
+      return i < parts.length - 1 ? [label, hrefOfDoc(at)] : [label];
+    }),
   );
 }
 
@@ -64,10 +67,10 @@ function body(docs: Docs, f: DocFile) {
   return `<h1>${esc(f.name)}</h1><pre><code>${esc(text)}</code></pre>`;
 }
 
-const where = (docs: Docs, path: string) => `<p class="muted mono">${esc(docs.folder)}/${esc(path)}</p>`;
+const where = (f: DocFile) => `<p class="muted mono">${esc(f.loc)}</p>`;
 
 function fileDetail(docs: Docs, f: DocFile) {
-  return trail(f.path) + where(docs, f.path) + body(docs, f);
+  return trail(docs, f.path) + where(f) + body(docs, f);
 }
 
 function cards(d: DocDir) {
@@ -83,19 +86,22 @@ function cards(d: DocDir) {
 }
 
 function dirDetail(docs: Docs, d: DocDir) {
-  const top = d.path ? trail(d.path) : '';
+  const top = d.path ? trail(docs, d.path) : '';
+  // project docs that could not be read, while domain docs could
+  const note = !d.path && docs.error ? `<p class="error">${esc(docs.error)}</p>` : '';
   const rest = d.children.length > (d.landing ? 1 : 0);
   if (d.landing)
     return (
       top +
-      where(docs, d.landing.path) +
+      where(d.landing) +
       body(docs, d.landing) +
-      (rest ? `<h2>In ${esc(d.path ? d.name : docs.folder)}/</h2>${cards(d)}` : '')
+      (rest ? `<h2>In ${esc(d.path ? d.title : docs.folder)}${d.virtual ? '' : '/'}</h2>${cards(d)}` : '')
     );
   return (
     top +
-    `<h1>${esc(d.path ? d.name : 'Docs')}</h1>
-    <p class="muted"><span class="mono">${esc(docs.folder)}/${esc(d.path && d.path + '/')}</span> · ${plural(d.count, 'file')}</p>` +
+    `<h1>${esc(d.path ? d.title : 'Docs')}</h1>
+    <p class="muted">${d.loc && !note ? `<span class="mono">${esc(d.loc)}</span> · ` : ''}${d.virtual ? 'the docs/ folders of the domains · ' : ''}${plural(d.count, 'file')}</p>` +
+    note +
     cards(d)
   );
 }

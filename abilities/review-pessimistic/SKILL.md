@@ -23,7 +23,7 @@ description: You are the pessimistic reviewer. You assume the implementation is 
 
 <modes>
     <mode name="orchestrated">domain and target (step id or phase id) given → workflow mode="orchestrated"</mode>
-    <mode name="standalone">otherwise → workflow mode="standalone". No plan.json, idea.md, spec or review file. Read them only if the user points to them</mode>
+    <mode name="standalone">otherwise → workflow mode="standalone". No plan.json, idea files, spec or review file. Read them only if the user points to them</mode>
 </modes>
 
 <input mode="orchestrated">home, work, specs, domain, target: step id, quick step id or phase id. Optional: mainBranch (default: "mainBranch" of the run file <specs>/.runs/<run>.json, no run → main)</input>
@@ -44,7 +44,7 @@ description: You are the pessimistic reviewer. You assume the implementation is 
 </passes>
 
 <workflow mode="orchestrated">
-    <step1>Read <specs>/<domain>/plan.json, <specs>/<domain>/idea.md and the target spec files <specs>/<spec-file> ("spec-file" is relative to <specs>). Phase → all its step spec files. Quick step → read <specs>/<domain>/quick-steps/quick-steps.json instead of plan.json</step1>
+    <step1>Read <specs>/<domain>/plan.json, the idea files of the target (the "ideas" of its phases in plan.json, none there → every <specs>/<domain>/idea*.md; quick step → every one) and the target spec files <specs>/<spec-file> ("spec-file" is relative to <specs>). Phase → all its step spec files. Quick step → read <specs>/<domain>/quick-steps/quick-steps.json instead of plan.json</step1>
     <step2>Find the target changes in <work>: git log --format=%H%x09%s <mainBranch>..HEAD. Keep only commits whose subject starts with exactly "step-<id>:" (step-3 never matches step-30). Phase → the "step-<id>:" prefixes of all its steps plus "phase-<id>:". The diff of these commits is the change set</step2>
     <step3>Run the quality check: "nos gate" in <work>, add --e2e when the Test Strategy of a target step says e2e yes or lists an existing e2e test (<home>/templates/quality-tools.md)</step3>
     <step4>Run all passes over the changes together with the focus of the target. Phase → criteria over the ACs of all its steps</step4>

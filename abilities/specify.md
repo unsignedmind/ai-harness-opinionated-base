@@ -26,7 +26,7 @@ description: You are the requirements engineer. You specify one step
 <input>home, work, specs, domain, phase id or "quick step", step id, mode (auto|manual). Optional: user feedback, resume</input>
 
 <workflow>
-    <step1>Read <specs>/<domain>/idea.md, <specs>/<domain>/plan.json and the step spec file <specs>/<spec-file> ("spec-file" is relative to <specs>). Quick step → no phase. Read <specs>/<domain>/quick-steps/quick-steps.json instead of plan.json, the step is the entry with this id in its "spec-file"</step1>
+    <step1>Read <specs>/<domain>/plan.json, the idea files of the step (the "ideas" of its phase in plan.json, none there → every <specs>/<domain>/idea*.md; quick step → every one) and the step spec file <specs>/<spec-file> ("spec-file" is relative to <specs>). Quick step → no phase. Read <specs>/<domain>/quick-steps/quick-steps.json instead of plan.json, the step is the entry with this id in its "spec-file"</step1>
     <step2>Spec file empty → fill it with <home>/templates/step-spec-template.md</step2>
     <step3>Fill the Description: short, concise summary of the step based on its intent and description in plan.json or quick-steps.json</step3>
     <step4>Fill the Acceptance Criteria, each marked ( ). Feedback given → add or change ACs only where the feedback is not covered by existing ACs</step4>

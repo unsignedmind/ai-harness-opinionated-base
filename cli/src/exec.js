@@ -18,8 +18,9 @@ const SIGNALS = ['SIGINT', 'SIGTERM'];
 const SIGNAL_EXIT = Object.freeze({ SIGINT: 130, SIGTERM: 143 });
 
 // Runs cmd and resolves with its exit code. SIGINT/SIGTERM of signals kill the child's tree; the exit code is
-// then 130 / 143 (also for a child ended by such a signal; another signal -> 1).
-function runChild(cmd, { cwd, env, stdio, signals }) {
+// then 130 / 143 (also for a child ended by such a signal; another signal -> 1). onSpawn gets the child (piped
+// output).
+export function runChild(cmd, { cwd, env, stdio, signals = process, onSpawn }) {
   return new Promise((resolve) => {
     // a process group of its own off Windows, so killTree reaches the shell's children
     const child = spawn(cmd, {
@@ -30,6 +31,7 @@ function runChild(cmd, { cwd, env, stdio, signals }) {
       windowsHide: true,
       detached: process.platform !== 'win32',
     });
+    onSpawn?.(child);
     let received = null;
     const handlers = SIGNALS.map((signal) => [
       signal,

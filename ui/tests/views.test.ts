@@ -250,6 +250,15 @@ test('chosen subtab is remembered per key', () => {
   expect(explore('#domains/dark-mode', u).querySelector('.subtab-body .md')?.textContent).toContain('Decisions');
 });
 
+test('a domain with several idea files has a tab per file and lists the ones not planned', () => {
+  const files = fixtureFiles();
+  files['domain-2-dark-mode/idea-contrast.md'] = '# Contrast\n\nHigh contrast mode.\n';
+  const root = mount(renderExplore(buildModel(files), parseRoute('#domains/dark-mode'), ui()));
+  const tabs = [...root.querySelectorAll<HTMLElement>('.subtabs button')].map((b) => b.dataset.tab);
+  expect(tabs).toStrictEqual(['Phases', 'Steps', 'idea.md', 'idea-contrast.md', 'domain.json', 'plan.json']);
+  expect(root.querySelector('.meta')?.textContent).toMatch(/Contrast\s+idea-contrast\.md not planned/);
+});
+
 test('idea without plan shows its idea.md and no board', () => {
   const root = explore('#ideas/i18n');
   expect(root.querySelector('.subtab-body .md')?.textContent).toContain('Two languages');

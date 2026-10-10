@@ -21,6 +21,11 @@
     "dev": null,
     "deploy-test": null
   },
+  "deploy": {
+    "provider": null,
+    "build": null,
+    "options": {}
+  },
   "spec-ui": {
     "docs-folder": "docs"
   }

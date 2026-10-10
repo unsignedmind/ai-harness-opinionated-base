@@ -90,7 +90,7 @@ In short: project repo holds code + one config file; sibling repo holds specs; d
     ├── .gitignore                     ".chat/", ".locks/", ".runs/"
     ├── .gitattributes                 "* text=auto eol=lf"
     ├── config.json                    TRACKED (specs repo): project back-pointer, id-counters, chat
-    ├── domain-<id>-<slug>/            TRACKED: idea.md, domain.json, plan.json, phases/, quick-steps/
+    ├── domain-<id>-<slug>/            TRACKED: idea-*.md (or idea.md), domain.json, plan.json, phases/, quick-steps/
     ├── pocs/                          TRACKED: poc-<slug>-result.md (POC results, kept after the POC)
     ├── .runs/                         local: <run>.json registry, poc-<slug>.md (POC notes) + logs/<run|main>/<tool>.log
     ├── .locks/                        local: merge/, runs/, ids/, slot-<n>/, reclaim-slot-<n>/
@@ -129,7 +129,8 @@ In short: project config is versioned with code (a branch may change its test co
 | `quality-tools.test/lint/format-check/typecheck/e2e` | `null` | **work** | commands; `null` = not configured |
 | `quality-tools.additional` | `[]` | **work** | strings (named `additional-<n>`) or `{name, cmd}` (`name` `^[a-z0-9][a-z0-9-]*$`) |
 | `quality-tools.timeout` | `30` | **work** | minutes per tool before it is killed |
-| `project-commands.install/dev/deploy-test` | `null` | **work** | `nos exec` targets; `install` also run by `nos run start` in a new worktree |
+| `project-commands.install/dev/deploy-test` | `null` | **work** | `nos exec` targets; `install` also run by `nos run start` in a new worktree; `deploy-test` legacy fallback of `nos deploy` |
+| `deploy.provider/build/options` | `null`/`null`/`{}` | **work** | `nos deploy`: provider (`firebase-hosting`, `command`), build command, provider options |
 | `spec-ui.docs-folder` | `"docs"` | **work** (spec-ui: main) | docs shown in spec-ui |
 
 Missing sections/keys are merged with these defaults per section (`project-config.js readProjectConfig`). D-1: `specs`, `worktrees` from main's copy (`specsConfig`, `worktreesConfig`); `quality-tools`, `project-commands`, `spec-ui` from the work root's copy (`qualityTools`, `projectCommands`, `docsFolder`). So `nos run finish` gates with the **branch's** tools but the **main's** slot count.
@@ -282,6 +283,7 @@ Errors: one line on stderr `nos: <message>`. Exit 3–7 and some exit 1 (`run fi
 | `nos run cleanup --token` | — | phase merged/abandoned; not from inside worktree; worktree remove (merged: untracked → force, modified tracked → 5), `worktree prune`, `branch -D` (merged: only if in mainBranch), run file + notes (`.runs/<run>.md`) delete, own merge lock released. Parts already gone skipped | `run-cleanup` {run, removed{worktree,branch,runFile,notes?}} | 0, 1, 4, 5 |
 | `nos run abandon --token` | — | refuses merged, and phase `merge` with branch already in main; not from inside worktree; `set-status --run discarded`, specs commit `<run>: discarded` (POC: neither, `statuses`/`specs` null), phase `abandoned`, then cleanup with `--force` / `-D` | `run-abandon` {run, removed, statuses, specs} | 0, 1, 4 |
 | `nos gate [--e2e]` | — | sec. 14 | `gate` {pass, tools[], reclaimed?} | 0, 1, 7 |
+| `nos deploy [--env <id>] [--remove\|--check]` | — | build + provider command in the work root, env = run id (else `main`); `--remove` deletes the env, `--check` the provider login | `deploy` {provider, env, url, expires, log} / `deploy-remove` {removed} / `deploy-check` {ok} | 0, 1, 8 |
 | `nos exec <install\|dev\|deploy-test>` | name | runs the work root's command in a shell, stdio inherited, no JSON; `dev` under a slot lease | (raw) | command's code, 130/143 on SIGINT/SIGTERM, 1 not configured, 2 unknown name, 7 |
 | `nos specs commit (--run <r> \| --domain <d> \| --config) -m <msg>` | exactly one target | sec. 15; `--run poc-<slug>`: only `pocs/poc-<slug>-result.md`, no run file needed; result neither on disk nor tracked → 1 | `specs-commit` {domain, poc?, committed, sha, pushed, files, warning?} | 0, 1, 2 |
 | `nos poc results` | — | lists `<specs>/pocs/poc-<slug>-result.md` (front matter parsed: BOM, `# comment`, quotes ignored); `state` from one `git status -- pocs` in the specs repo | `poc-results` {results[{slug, run, title, processed, state (committed\|draft\|null), runExists, file}], warnings?} | 0, 2 |
@@ -382,7 +384,7 @@ Crash recovery (option run step2):
   ┌──── turns (ability "poc", one live subagent) ────────────────┐
   │ user message ─► subagent: code, commit "poc: <what>",        │
   │                 one notes line in .runs/poc-<slug>.md          │
-  │ options: DEPLOY (nos exec deploy-test) │ END │ CONTINUE/free text │
+  │ options: DEPLOY (nos deploy)          │ END │ CONTINUE/free text │
   └──────────────────────────────────────────────────────────────┘
                  │ END
   subagent writes <specs>/pocs/poc-<slug>-result.md ─► APPROVE / CHANGE (loop)

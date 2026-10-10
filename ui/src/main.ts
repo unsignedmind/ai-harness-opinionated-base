@@ -69,7 +69,7 @@ async function refresh() {
     specsAbs = typeof s?.specsAbs === 'string' ? s.specsAbs : '';
     runs = r;
     show();
-    app.setDocs(buildDocs(docs));
+    app.setDocs(buildDocs(docs, specsRel));
     app.setSource('live');
     app.setNotice(null);
   } catch (e) {

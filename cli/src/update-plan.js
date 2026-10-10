@@ -79,8 +79,9 @@ function matchPlan(phases, domain, { phasesBySlug, stepsBySpec }) {
 }
 
 // The statuses (and the plan's branch) survive an update that leaves them out: the orchestrator and nos run
-// own them, not the plan ability. Plan: branch (the current value always wins: run start writes it), status;
-// kept phases (by slug) and kept steps (by spec-file): status. Every other field follows the update as given.
+// own them, not the plan ability. Plan: branch (the current value always wins: run start writes it), status,
+// ideas; kept phases (by slug): status, ideas; kept steps (by spec-file): status. Every other field follows the
+// update as given.
 function keepUnmanaged(parsed, planPath, matched) {
   let current;
   try {
@@ -89,10 +90,13 @@ function keepUnmanaged(parsed, planPath, matched) {
     return;
   }
   if (!current || typeof current !== 'object') return;
-  const keepStatus = (target, source) => {
-    if (source && Object.hasOwn(source, 'status') && !Object.hasOwn(target, 'status')) target.status = source.status;
+  const keep = (field) => (target, source) => {
+    if (source && Object.hasOwn(source, field) && !Object.hasOwn(target, field)) target[field] = source[field];
   };
+  const keepStatus = keep('status');
+  const keepIdeas = keep('ideas');
   keepStatus(parsed, current);
+  keepIdeas(parsed, current);
   if (Object.hasOwn(current, 'branch')) parsed.branch = current.branch;
   const phasesBySlug = new Map(asList(current.phases).map((phase) => [phase?.slug, phase]));
   const stepsBySpec = new Map();
@@ -106,7 +110,10 @@ function keepUnmanaged(parsed, planPath, matched) {
     }
   }
   for (const { phase, existing, steps } of matched) {
-    if (existing) keepStatus(phase, phasesBySlug.get(phase.slug));
+    if (existing) {
+      keepStatus(phase, phasesBySlug.get(phase.slug));
+      keepIdeas(phase, phasesBySlug.get(phase.slug));
+    }
     for (const { step, source } of steps) {
       if (source) keepStatus(step, stepsBySpec.get(source.specFile));
     }

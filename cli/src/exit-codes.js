@@ -1,4 +1,4 @@
-// Exit codes of the nos CLI. 3-7 are states the orchestrator reacts to: run() prints them as JSON
+// Exit codes of the nos CLI. 3-8 are states the orchestrator reacts to: run() prints them as JSON
 // { action, error, exit, details } on stdout plus one line on stderr.
 export const OK = 0;
 export const FAILED = 1;
@@ -8,8 +8,9 @@ export const HELD = 4;
 export const DIRTY = 5;
 export const DOMAIN_RUNNING = 6;
 export const SLOT_TIMEOUT = 7;
+export const NOT_CONFIGURED = 8;
 
-export const EXIT = Object.freeze({ OK, FAILED, USAGE, CONFLICT, HELD, DIRTY, DOMAIN_RUNNING, SLOT_TIMEOUT });
+export const EXIT = Object.freeze({ OK, FAILED, USAGE, CONFLICT, HELD, DIRTY, DOMAIN_RUNNING, SLOT_TIMEOUT, NOT_CONFIGURED });
 
 // An error with an exit code and machine readable details, e.g. new NosError(HELD, 'lock ids is held', { holder }).
 export class NosError extends Error {

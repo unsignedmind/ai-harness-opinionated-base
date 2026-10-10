@@ -99,7 +99,9 @@ Idempotent: on a fresh project it sets everything up, on a set up one it only ch
 }
 ```
 
-`null` → not available. Key meanings, slots and the quality check rules: `templates/quality-tools.md`. Project commands only ever run through `nos gate` and `nos exec`.
+`null` → not available. Key meanings, slots and the quality check rules: `templates/quality-tools.md`. Project commands only ever run through `nos gate`, `nos exec` and `nos deploy`.
+
+`deploy` gives every run its own test environment: `nos deploy` builds and deploys the worktree, env id = run id. `firebase-hosting` = one Hosting preview channel per run (`firebase hosting:channel:deploy <run id>`), `command` = any other target. develop and review-fixing deploy once the gate passes and check the ACs on the url; the orchestrator deletes the env at finish and abandon. nos has no provider dependency: the project brings the CLI (setup checks the login with `nos deploy --check`).
 
 ### Start
 
@@ -127,9 +129,9 @@ Answer with the letter or the key (`A` or `IDEA`). All questions work this way.
 
 ### The typical path
 
-1. **IDEA**: describe what you want. The idea agent asks you questions until the idea is clear. It saves the result as `<specs>/domain-<id>-<slug>/idea.md`.
+1. **IDEA**: describe what you want. The idea agent asks you questions until the idea is clear. It offers the matching existing domains (a domain is an area or topic and holds several ideas) or a new one, and saves the idea as `<specs>/domain-<id>-<slug>/idea-<idea-slug>.md`.
    Then: `Create a plan now?` → `YES`.
-2. **PLAN**: the planner splits the idea into phases and steps and saves `plan.json`. Every step gets an empty spec file.
+2. **PLAN**: you pick the domain and which of its unplanned ideas to plan. The planner splits them into phases and steps and saves `plan.json`. A domain that has a plan already gets the new phases appended: the plan reopens and runs again. Every step gets an empty spec file.
    Then: `Run it now?` → `YES`. Or `CHANGE` to describe changes to the split. The planner revises the plan and asks again.
    > The plan agent will judge on its own where human intervention is required and where a review is not needed (pure documentation). It configures this in the plan.json. By changing the boolean values you can overrule that.
 3. **RUN**: choose a mode:
@@ -152,7 +154,7 @@ Outside the typical path. For a small change that needs no idea and no plan. A q
 3. Choose the mode:
    - **AUTO**: nos picks the best fitting domain (or creates one) and runs the quick step in AUTO mode.
    - **MANUAL**: nos shows the matching domains with a suggestion and `NEW` (with a suggested name you can change). You choose. Then you choose AUTO or MANUAL for the run.
-4. A new domain gets an `idea.md` with your intent and a note that the quick step flow generated it.
+4. A new domain (slug and name describe the area or topic, not the step) gets an `idea-<quick-step-slug>.md` with your intent and a note that the quick step flow generated it.
 5. The quick step runs like a plan step, in its own branch and worktree (`quick-<step id>`): same statuses, parks, `human-validation-needed` and `review-needed`. There is no phase and no phase review. PAUSE keeps the status; continue later via QUICK or RUN.
 6. When the step is done, nos integrates it into main automatically.
 
@@ -168,7 +170,7 @@ Outside the typical path. Brainstorm in code before you write an idea: try somet
    B - End the POC [END]
    C - Continue [CONTINUE]
    ```
-   `DEPLOY` runs `nos exec deploy-test` and shows the url. Any free text (a question, a change) is the next turn. nos also offers `PAUSE` (leave the worktree, the POC stays) and `ABANDON` (drop it); the single word `pause`, `abandon` or `drop` works too.
+   `DEPLOY` runs `nos deploy` (the POC's own env) and shows the url. Any free text (a question, a change) is the next turn. nos also offers `PAUSE` (leave the worktree, the POC stays) and `ABANDON` (drop it); the single word `pause`, `abandon` or `drop` works too.
 4. `END`: the prototyper writes `<specs>/pocs/poc-<slug>-result.md` (`templates/poc-result.md`): numbered requirements in your words, technical details per requirement (marked as POC insights that may be sloppy) and what was tried and dropped. You `APPROVE` it or `CHANGE` it; approved, it is committed in the specs repo.
 5. Hand-over: `QUICK` (a quick step from the result), `IDEA` (an idea from it), `LATER` (keep result, worktree and branch; IDEA and QUICK offer the result later) or `DROP`. QUICK, IDEA and DROP mark the result `processed` (`nos poc processed`) and delete worktree, branch, run file and notes (`nos run abandon`). The result file stays as history.
 
@@ -290,7 +292,8 @@ nos.config.json                          tracked: quality tools, project command
 ├── .gitignore .gitattributes            local state ignored; LF working copies (nos init)
 ├── .runs/ .locks/ .chat/                running runs, locks, chat state (local, not committed)
 └── domain-1-user-auth/
-    ├── idea.md                          the idea
+    ├── idea-login-form.md               an idea (one file per idea; older domains: idea.md)
+    ├── idea-password-reset.md           another idea of the same area
     ├── domain.json                      name, labels, cross-cutting
     ├── plan.json                        phases, steps, statuses
     ├── phases/
@@ -411,16 +414,16 @@ Not part of the run cycle. Started from the menu (SETUP), or offered at start wh
 
 ### abilities/idea.md: idea 💡
 
-Asks you focused questions until the idea is ready for planning. It generates a slug, picks a domain name and labels, and saves the idea with `nos create-domain`, which creates `<specs>/domain-<id>-<slug>/idea.md` and `domain.json`. It reports the domain folder. Its questions reach you through the orchestrator. Optional input: a starting context, e.g. tech debt entries handed over by the architect.
+Asks you focused questions until the idea is ready for planning. It generates an idea slug and looks through the idea files of all domains (`nos ideas`). It asks whether the idea belongs to a matching domain (`nos add-idea` saves `idea-<idea-slug>.md` there) or to a new one: `nos create-domain` with a domain slug and name for the area or topic, labels and the idea slug creates `<specs>/domain-<id>-<slug>/idea-<idea-slug>.md` and `domain.json`. It reports the domain folder and the idea file. Its questions reach you through the orchestrator. Optional input: a starting context, e.g. tech debt entries handed over by the architect.
 
 ### abilities/quick-step.md: quick step ⚡
 
-Not part of the plan flow. Started from the menu (QUICK). Gets your intent (a rough one is fine, it only has to be clear enough to pick a domain) and asks AUTO or MANUAL. AUTO: picks the best fitting domain itself, or creates one. MANUAL: lists the matching domains with a suggestion plus `NEW`, and you choose; then asks the mode of the run. A new domain is created with `nos create-domain` and an `idea.md` holding the intent and a "generated by the quick step flow" note. Saves the step with `nos create-quick-step`. Returns domain, step id and run mode; the orchestrator then runs the step cycle for it. It never creates a quick step that only updates docs the architect maintains or a helper writes for it: those updates happen at run end from `(architecture)` notes, or via ARCHITECT. specify, spec-review, develop and both reviewers read `quick-steps/quick-steps.json` instead of `plan.json` for a quick step.
+Not part of the plan flow. Started from the menu (QUICK). Gets your intent (a rough one is fine, it only has to be clear enough to pick a domain) and asks AUTO or MANUAL. AUTO: picks the best fitting domain itself, or creates one. MANUAL: lists the matching domains with a suggestion plus `NEW`, and you choose; then asks the mode of the run. A new domain (named after the area or topic) is created with `nos create-domain` and an `idea-<quick-step-slug>.md` holding the intent and a "generated by the quick step flow" note. Saves the step with `nos create-quick-step`. Returns domain, step id and run mode; the orchestrator then runs the step cycle for it. It never creates a quick step that only updates docs the architect maintains or a helper writes for it: those updates happen at run end from `(architecture)` notes, or via ARCHITECT. specify, spec-review, develop and both reviewers read `quick-steps/quick-steps.json` instead of `plan.json` for a quick step.
 
 ### abilities/plan.md: implementation architect and planner 🏗️
 
 Reads `docs/architecture.md` if it exists and respects its structure and rules. Reads the `plan` guardrails in `docs/guardrails.xml` in every action: they add constraints to splitting and flags, but never override your sizing or the `review-needed` rules unless they say so. It never plans a phase or step that updates docs the architect maintains or an architect guardrail assigns to a helper (`docs/architecture*`, the template, docs a helper writes from the code): those updates happen at run end from develop's `(architecture)` notes; requested anyway, it leaves them out and says so. Other documentation the idea asks for (API reference, README, CHANGELOG, user guides) is a deliverable and stays allowed. Three actions:
-- **create**: needs the domain and its `idea.md`. Splits the idea into phases and steps that respect the existing architecture, following `templates/plan.json`. All statuses are `open`, and every phase and step gets a slug. Pure documentation steps, and phases that are only documentation and human verification (with all their steps), get `review-needed: false`. A phase with exactly one step always gets `review-needed: false` on the phase only. Saves with `nos create-plan`, which creates phase folders and empty step spec files and fills `spec-file`.
+- **create**: needs the domain and the idea files to plan (the orchestrator asks which unplanned ideas). Splits them into phases and steps that respect the existing architecture, following `templates/plan.json`. All statuses are `open`, and every phase and step gets a slug. Pure documentation steps, and phases that are only documentation and human verification (with all their steps), get `review-needed: false`. A phase with exactly one step always gets `review-needed: false` on the phase only. Saves with `nos create-plan --ideas`, which creates phase folders and empty step spec files, fills `spec-file` and records the ideas in `"ideas"` of the plan and of each new phase. A domain with a plan already gets the new phases appended and the plan reopened.
 - **extend**: used after a phase is rejected. Inserts a fix phase directly after the rejected one, with the issues split into steps and `human-validation-needed: true`, and `review-needed` set by the same rules as create. Saves with `nos update-plan`.
 - **revise**: used when you pick `CHANGE` after the split is shown. Applies your changes (move, merge, split, add or remove phases and steps), reapplies the `review-needed` rules and saves with `nos update-plan`.
 
@@ -441,7 +444,7 @@ It reads the coding guardrails in `docs/guardrails.xml` and the architecture in 
 
 ### abilities/specify.md: requirements engineer 📑
 
-Runs before develop, as its own subagent. Input: domain, phase id, step id, mode, optional feedback. It reads `idea.md`, `plan.json` and the spec, fills an empty spec from `step-spec-template.md`, and writes the Description and the Acceptance Criteria (`( )`). ACs must be understandable and verifiable by a non-technical person, with no filenames or line numbers. On feedback it changes ACs only where the feedback isn't already covered.
+Runs before develop, as its own subagent. Input: domain, phase id, step id, mode, optional feedback. It reads `plan.json`, the idea files of the step's phase (`"ideas"`) and the spec, fills an empty spec from `step-spec-template.md`, and writes the Description and the Acceptance Criteria (`( )`). ACs must be understandable and verifiable by a non-technical person, with no filenames or line numbers. On feedback it changes ACs only where the feedback isn't already covered.
 
 When something is unclear:
 - **MANUAL**: it asks you focused questions, which are relayed through the orchestrator.
@@ -497,7 +500,7 @@ Runs only when `nos run sync` or `nos run finish` stops with a rebase conflict (
 
 ### abilities/poc.md: prototyper 🧪
 
-Not part of the run cycle. Started from the menu (POC), inside the POC's worktree `poc-<slug>`. The orchestrator keeps its subagent alive and forwards your messages turn by turn. Speed over polish: no TDD, no spec, no ACs, no statuses. It commits each change `poc: <what>` on the throwaway branch (never pushed, never merged), logs it in its notes `<specs>/.runs/poc-<slug>.md` (read again on resume) and ends every report with `DEPLOY` / `END` / `CONTINUE`. `deploy` runs `nos exec deploy-test`. `end` writes `<specs>/pocs/poc-<slug>-result.md` by `templates/poc-result.md`: requirements in user language, technical details per requirement (POC insights, may be sloppy), tried and dropped. After `end` it changes only that file. It reads the `coding` guardrails, since it writes code.
+Not part of the run cycle. Started from the menu (POC), inside the POC's worktree `poc-<slug>`. The orchestrator keeps its subagent alive and forwards your messages turn by turn. Speed over polish: no TDD, no spec, no ACs, no statuses. It commits each change `poc: <what>` on the throwaway branch (never pushed, never merged), logs it in its notes `<specs>/.runs/poc-<slug>.md` (read again on resume) and ends every report with `DEPLOY` / `END` / `CONTINUE`. `deploy` runs `nos deploy`. `end` writes `<specs>/pocs/poc-<slug>-result.md` by `templates/poc-result.md`: requirements in user language, technical details per requirement (POC insights, may be sloppy), tried and dropped. After `end` it changes only that file. It reads the `coding` guardrails, since it writes code.
 
 ### abilities/architect.md: quality and docs architect 🏗️🕵🏼
 
@@ -507,7 +510,7 @@ It shows its task menu first and analyzes nothing before you pick. Every change 
 
 | Task | Does |
 | --- | --- |
-| CREATE-DOCS | Derives a project template (`docs/architecture-template.md`) from `templates/architecture-sections.md`: from the code's project type and stack, or for an empty project from `idea.md` or your intent. You approve the template, then it writes `docs/architecture.md` exactly by it |
+| CREATE-DOCS | Derives a project template (`docs/architecture-template.md`) from `templates/architecture-sections.md`: from the code's project type and stack, or for an empty project from the idea files or your intent. You approve the template, then it writes `docs/architecture.md` exactly by it |
 | UPDATE-DOCS | Checks each section against the code, fixed tech debt and `(architecture)` Dev Log notes. Proposes one fix per drift. A new section changes the template first. At run end (given entries and mode): only the drift the entries name, no wish question, one yes/no question per change (a helper's approval question with its diff, never approved by the architect itself); every touched file committed, a helper's working files too, as `architect: docs <section> from step-<id> (architecture)`; steps with such a commit or already in the "docs update" report line are skipped, so a repeated finish finds nothing new |
 | ADD-GUARDRAILS | Collects observed failures (review findings, `(!)` markers, `(reviewer)` Dev Log entries, fix commits, plan revisions and fix phases) and proposes one guardrail per recurring failure, with the evidence as `reason`. No evidence, no guardrail. Started by the orchestrator with proposals you already accepted: skips the search, checks each, applies the good ones without asking again and asks only about problem ones |
 | REVIEW-GUARDRAILS | Proposes sharper wording, enforcement by a test, or removal for vague, duplicate, contradicting, blocking or never relevant guardrails, in all six sections |
@@ -553,7 +556,9 @@ Used in ACs, the Task List and review findings:
 | --- | --- | --- |
 | `nos roots` | orchestrator, every ability without given paths | prints `home`, `work`, `main`, `specs`, `inWorktree`, `configured` |
 | `nos init` | setup | creates `nos.config.json`, the `<specs>` repo next to the checkout (with the back-pointer) and the `.gitignore` entry if missing |
-| `nos create-domain --idea <file> --slug <s>` | idea, quick-step | new domain id, folder, `idea.md`, `domain.json` |
+| `nos create-domain --idea <file> --slug <s> --idea-slug <i>` | idea, quick-step | new domain id, folder, `idea-<i>.md`, `domain.json` |
+| `nos add-idea --domain <d> --idea <file> --slug <i>` | idea | `idea-<i>.md` in an existing domain |
+| `nos ideas [--unplanned]` | idea, plan option | domains and their ideas, planned or not |
 | `nos create-plan --domain <d> --plan <file>` | plan (create) | saves `plan.json`, creates phase folders and step files |
 | `nos update-plan --domain <d> --plan <file>` | plan (extend, revise) | saves the changed plan, creates/moves/deletes phases and steps |
 | `nos create-quick-step --domain <d> --step <file>` | quick-step | new step id, quick step file, entry in `quick-steps/quick-steps.json` |
@@ -564,6 +569,7 @@ Used in ACs, the Task List and review findings:
 | `nos specs find-step <id>` | integrate | spec file of a step id in any domain |
 | `nos gate [--e2e]` | develop, reviewers, integrate, architect, setup | the quality check, JSON per tool |
 | `nos exec <install\|dev\|deploy-test>` | setup, `run start` | project commands with slot lease |
+| `nos deploy [--env <id>] [--remove\|--check]` | develop, review-fixing, poc, orchestrator, setup | build + deploy to the run's own test env (`deploy.provider`, e.g. a Firebase Hosting channel per run); remove at finish/abandon |
 
 ### Who may do what
 
@@ -690,7 +696,7 @@ Most changes touch more than one file. Before you finish a change, check these c
 | Test Strategy section | the template, specify, spec-review, develop, review-pessimistic (tests pass) |
 | Dev Log marker `(architecture)` | develop, review-fixing, architect (UPDATE-DOCS), `workflow.md` block "docs-update", plan and quick-step (no docs-update steps) |
 | guardrail sections (`coding`, `review`, `specify`, `plan`, `architect`, `orchestrator`) | `templates/guardrails.xml`, architect (ADD-GUARDRAILS, REVIEW-GUARDRAILS), `workflow.md` rule "Lessons → guardrail proposals" and the lesson coreRule of every ability, the readers of the section (`specify`: specify and spec-review; `plan`: plan; `orchestrator`: `workflow.md` rule "Guardrails" and `SKILL.md`) |
-| architect handover (tech debt) | `<option name="architect">` in `workflow.md`, `idea.md` input |
+| architect handover (tech debt) | `<option name="architect">` in `workflow.md`, idea ability input |
 | `plan.json` structure or spec sections | `ui/src/model.ts` and its tests |
 
 ### Changing it by hand
@@ -781,10 +787,10 @@ Runs (`nos run start`) show live: `/__runs` lists `<specs>/.runs/*.json` with ah
 | View | Shows |
 | --- | --- |
 | **Ideas** | Domains without a `plan.json`. In the live viewer (dev server) an idea's page has a **Manual promote** button: it runs `nos create-plan --domain <folder> --hollow`, which saves an empty `plan.json` (`status` open, no phases), so the idea moves to Domains. The standalone viewer shows the command to run instead. A later PLAN replaces the hollow plan; RUN skips plans without phases |
-| **Domains** | Domains with a `plan.json`. Tree of domains → phases → steps on the left, plus a "Quick steps" node per domain that has quick steps. On the right: details (idea.md, rendered spec, AC/task progress) and a kanban per domain, phase or the quick steps of a domain. Old `#explore` links still open |
+| **Domains** | Domains with a `plan.json`. Tree of domains → phases → steps on the left, plus a "Quick steps" node per domain that has quick steps. On the right: details (a tab per idea file, the ideas not planned yet, rendered spec, AC/task progress) and a kanban per domain, phase or the quick steps of a domain. Old `#explore` links still open |
 | **Board** | One kanban of all steps or phases across all ideas. There is one column per status. Step boards include `in specification` and `specified`; phase boards only show them when used. `on-hold` and unknown statuses appear only when used |
 | **Backlog** | The same items as a sortable table (id, title, where, status, AC progress) with status tiles |
-| **Docs** | The docs folder (`"spec-ui": { "docs-folder": "docs" }` in `nos.config.json`, relative to the repo root) as a tree of its own folders and text files. Markdown is rendered, and relative links between docs work. Other text is shown as code. A folder shows its `index.md`/`README.md` and its contents |
+| **Docs** | The docs folder (`"spec-ui": { "docs-folder": "docs" }` in `nos.config.json`, relative to the repo root) as a tree of its own folders and text files. Markdown is rendered, and relative links between docs work. Other text is shown as code. A folder shows its `index.md`/`README.md` and its contents. Below them a virtual **Domains** folder lists each domain with a `docs/` folder in the specs root (`domain-*/docs/`), readable the same way (also when only the specs root is opened) |
 
 Board and Backlog can be filtered by label, status, domain and free text. Labels and domains are picked from a search box with suggestions (the list opens on focus) and show as removable badges; domains are named by `name` in `domain.json`. Values of one kind combine with OR, different kinds with AND. Filters live in the URL hash (`#board?status=in-review&labels=ui`), so every view can be bookmarked. Cards show AC and task progress, which is counted from the `( )`/`(x)` markers, a badge for human validation and a ⚡ quick badge for quick steps. Quick steps show in every step kanban and in the backlog next to plan steps (path `<idea> › Quick`). Unknown statuses are flagged.
 
@@ -825,7 +831,7 @@ From the couch (`npm run dev-to-lan`):
 | `src/status.ts` | The statuses from `templates/status.xml` and their board order |
 | `src/serve-specs.ts` + `src/main.ts` | Dev server: a Vite plugin reads `<specs>/` on the host with `readSpecsFolder` and serves it at `/__specs` (`/` is `dev.html`); `/__docs` serves the docs folder (`readDocs`); it pushes `specs:changed` / `docs:changed` when a file changes, and the page fetches again. `POST /__promote?domain=<folder>` runs `nos create-plan --hollow` (Manual promote) |
 | `src/folder.ts` + `src/handle-store.ts` + `src/standalone.ts` | Standalone: reads the picked folder (specs and docs) and remembers the handle in IndexedDB |
-| `src/docs.ts` | Pure: turns `path → text` of the docs folder into a folder tree, resolves relative links |
+| `src/docs.ts` | Pure: turns `path → text` of the docs folder and the domains' `docs/` folders into a folder tree (domains under the virtual `.domains`), resolves relative links |
 | `src/route.ts`, `src/filter.ts` | Hash routes and filters |
 | `src/app.ts`, `src/views/*` | Rendering: explore, board, backlog, docs, kanban, filter bar |
 | `src/markdown.ts` | Minimal markdown renderer. Escapes first, so no raw HTML is rendered |
@@ -874,8 +880,10 @@ Invocation: `node <home>/cli/bin/nos.js <command>`, `<home>` = the nos folder, a
 | --- | --- |
 | `roots` | prints the resolved `home`, `work`, `main`, `specs` (absolute), `inWorktree`, `configured` |
 | `init` | creates `nos.config.json`, `<specs>/` (own git repo) and the `.gitignore` entries if missing. Run on main |
-| `create-domain --idea <file\|-> --slug <s>` | a domain id, creates `<specs>/domain-<id>-<slug>/idea.md` and `domain.json` |
-| `create-plan --domain <d> --plan <file\|->` | saves `plan.json`, creates phase folders and empty step files, fills `spec-file`. One plan per domain |
+| `create-domain --idea <file\|-> --slug <s> [--idea-slug <i>]` | a domain id, creates `<specs>/domain-<id>-<slug>/idea-<i>.md` and `domain.json` |
+| `add-idea --domain <d> --idea <file\|-> --slug <i>` | adds `idea-<i>.md` to a domain |
+| `ideas [--domain <d>] [--unplanned]` | lists domains and their ideas, planned or not |
+| `create-plan --domain <d> --plan <file\|-> [--ideas <a,b>]` | saves `plan.json`, creates phase folders and empty step files, fills `spec-file`, records `"ideas"`. One plan per domain: later ideas are appended and reopen it |
 | `update-plan --domain <d> --plan <file\|-> [--dry-run] [--force]` | saves a changed plan, creates/moves/deletes phases and steps. Deleting files with content needs `--force` |
 | `create-quick-step --domain <d> --step <file\|->` | reserves a step id, creates `quick-steps/step-<id>-<slug>.md` and adds the step to `quick-steps/quick-steps.json` |
 | `set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | changes one status. Plan, phase or step depends on the arguments. A step not in `plan.json` (without `--phase`) is looked up in the quick steps. Checked against `templates/status.xml`. `--run <r> merged\|discarded` flips a whole run (finish/abandon only) |
@@ -884,6 +892,7 @@ Invocation: `node <home>/cli/bin/nos.js <command>`, `<home>` = the nos folder, a
 | `run sync\|finish\|cleanup\|abandon --token <t>` | rebase onto main; lock + checks + gate + ff-only merge; remove worktree and branch; drop the run |
 | `gate [--e2e]` | the quality tools of `nos.config.json`, JSON per tool |
 | `exec <install\|dev\|deploy-test>` | a project command; `dev` holds a slot |
+| `deploy [--env <id>] [--remove\|--check]` | build and deploy work to its own test env, url in the JSON |
 | `specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | commits one domain's specs (or only `config.json`) in `<specs>`. Never `--domain` for a domain another session's run owns |
 | `specs find-step <id>` | spec file of a step id |
 | `poc results` / `poc processed <slug> --as <what>` | the POC results in `<specs>/pocs` (title, processed, run still there); sets `processed` in one. `specs commit --run poc-<slug>` commits only that result |

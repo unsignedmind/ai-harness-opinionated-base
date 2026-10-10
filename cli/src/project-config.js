@@ -4,8 +4,10 @@ import { FAILED, NosError } from './exit-codes.js';
 import { PROJECT_CONFIG_FILE, slash } from './roots.js';
 
 // nos.config.json: project config, tracked in the project (templates/nos.config.json).
-// specs.* and worktrees.* are read from main's file; quality-tools, project-commands and spec-ui from
+// specs.* and worktrees.* are read from main's file; quality-tools, project-commands, deploy and spec-ui from
 // work's file, because a branch may change its test command.
+// deploy: provider (a name of deploy/index.js PROVIDERS, null = not configured), build (runs first, null = none),
+// options (provider specific, defaults and validation in the provider class).
 // specs.dir null = the default sibling folder ../<main folder name>.specs (roots.js defaultSpecsDir).
 export const DEFAULT_PROJECT_CONFIG = Object.freeze({
   specs: Object.freeze({ dir: null, remote: null }),
@@ -20,6 +22,7 @@ export const DEFAULT_PROJECT_CONFIG = Object.freeze({
     timeout: 30,
   }),
   'project-commands': Object.freeze({ install: null, dev: null, 'deploy-test': null }),
+  deploy: Object.freeze({ provider: null, build: null, options: Object.freeze({}) }),
   'spec-ui': Object.freeze({ 'docs-folder': 'docs' }),
 });
 
@@ -50,6 +53,7 @@ export function readProjectConfig(dir) {
 
 export const qualityTools = (roots) => readProjectConfig(roots.work)['quality-tools'];
 export const projectCommands = (roots) => readProjectConfig(roots.work)['project-commands'];
+export const deployConfig = (roots) => readProjectConfig(roots.work).deploy;
 export const docsFolder = (roots) => readProjectConfig(roots.work)['spec-ui']['docs-folder'];
 export const worktreesConfig = (roots) => readProjectConfig(roots.main).worktrees;
 export const specsConfig = (roots) => readProjectConfig(roots.main).specs;

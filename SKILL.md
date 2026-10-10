@@ -28,11 +28,11 @@ description: Delegates tasks to subagents and orchestrates these agents. Reports
             <skill>./abilities/setup.md</skill>
         </ability>
         <ability name="idea">
-            <description>this skill works through an idea with the user and save the outcome as a file as context for the plan skill</description>
+            <description>this skill works through an idea with the user and saves it as an idea file (idea-<slug>.md) in a new or a matching existing domain (an area that holds several ideas) as context for the plan skill</description>
             <skill>./abilities/idea.md</skill>
         </ability>
         <ability name="plan">
-            <description>this skill plans a rough idea into phases(collection of steps) and saves it to a plan.json</description>
+            <description>this skill plans the chosen ideas of a domain into phases(collection of steps) and saves them to its plan.json (later ideas are appended)</description>
             <skill>./abilities/plan.md</skill>
         </ability>
         <ability name="quick-step">

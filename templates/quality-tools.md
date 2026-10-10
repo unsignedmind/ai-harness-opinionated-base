@@ -22,6 +22,11 @@ Project specific commands live in `nos.config.json` at the project root. It is t
   "dev": "npm run dev",
   "deploy-test": "npm run deploy:test"
 },
+"deploy": {
+  "provider": "firebase-hosting",
+  "build": "npm run build:test",
+  "options": { "cli": "firebase", "project": null, "site": null, "expires": "7d" }
+},
 "spec-ui": {
   "docs-folder": "docs"
 }
@@ -40,7 +45,10 @@ Project specific commands live in `nos.config.json` at the project root. It is t
 | quality-tools    | timeout      | minutes one tool may run before `nos gate` kills it (status fail, "timedOut": true), default 30 |
 | project-commands | install      | installs dependencies, e.g. in a fresh worktree; with a lockfile the variant that never rewrites it (`npm ci`), so the worktree stays clean |
 | project-commands | dev          | starts the local dev server                                        |
-| project-commands | deploy-test  | deploys to a test environment and prints a url                     |
+| project-commands | deploy-test  | legacy: one fixed test deploy; used by `nos deploy` only while `deploy.provider` is null |
+| deploy           | provider     | `firebase-hosting` or `command`; `null` = deploy not configured    |
+| deploy           | build        | runs before the provider command, e.g. a test-mode build; `null` = none |
+| deploy           | options      | provider specific, see `nos deploy`                                |
 | spec-ui          | docs-folder  | docs folder shown in the spec UI (Docs), relative to the repo root |
 | worktrees        | slots        | parallel e2e runs and dev servers (port sets), default 1           |
 | worktrees        | slotWait     | seconds to wait for a free slot, default 600                       |
@@ -72,7 +80,15 @@ Exception while developing: a single unit or integration test file may run direc
 - Runs the checkout's `project-commands` entry with the output inherited. The exit code is the command's. A `null` command → exit 1.
 - `install`: dependencies, e.g. in a fresh worktree (`nos run start` runs it).
 - `dev`: takes a slot and holds it until the server exits. Stop the server when done, so the slot is free again.
-- `deploy-test`: deploys to a test environment.
+- `deploy-test`: legacy, deploys to one fixed test environment. Abilities use `nos deploy`.
+
+## Test environments: `nos deploy`
+
+- Builds (`deploy.build`) and deploys the checkout to a test environment of its own: env id = the run id of the worktree (= its branch), else `main`; `--env <id>` overrides it. One env per run, so parallel runs never deploy over each other. Never production.
+- Providers (`deploy.provider`): `firebase-hosting` = a Hosting preview channel per env (`firebase hosting:channel:deploy <env> --expires 7d`; the `live` channel is refused). `command` = `options.command` deploys the env in `NOS_DEPLOY_ENV` and prints its url. nos has no provider dependency: the project brings the CLI and its login.
+- Output: `{ "action": "deploy", "provider", "env", "url", "expires", "log" }`. Exit `0` ok. `1` build or deploy failed (`details.step`, `tail`, `log`) or bad config. `8` deploy not configured → skip, note "not deployed: deploy not configured".
+- When: develop and review-fixing deploy once the gate passes and check the ACs (and fixed findings) on the url. Deploy during development only for a strong case the final test would not catch.
+- `nos deploy --remove` deletes the env (the orchestrator, at finish and abandon). `nos deploy --check`: the provider CLI is installed and logged in (setup).
 
 ## Slots and `NOS_SLOT`
 

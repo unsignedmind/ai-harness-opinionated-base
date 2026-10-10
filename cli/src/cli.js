@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { CHAT_HELP } from './chat/commands.js';
-import { createDomain } from './domain.js';
+import { runDeploy } from './deploy.js';
+import { addIdea, createDomain, listIdeas } from './domain.js';
 import { EXIT, NosError } from './exit-codes.js';
 import { execCommand } from './exec.js';
 import { runGate } from './gate.js';
@@ -25,7 +26,9 @@ Usage: nos <command> [options]
 Commands:
   init               Set up the nos layout: nos.config.json, the specs root (own git repo), .gitignore entry
   roots              Print the resolved roots: home, work, main, specs, inWorktree, configured
-  create-domain      Reserve a domain id and create <specs>/domain-<id>-<slug>/idea.md
+  create-domain      Reserve a domain id and create <specs>/domain-<id>-<slug>/idea-<idea-slug>.md
+  add-idea           Add another idea to a domain: <specs>/<domain>/idea-<slug>.md
+  ideas              List the domains and their ideas, planned or not
   create-plan        Save a plan.json in a domain and create its phase folders and step files
                      (--hollow: an empty plan.json, promotes the domain unplanned)
   update-plan        Save an updated plan.json and create, move or delete phase folders and step files
@@ -39,7 +42,8 @@ Commands:
   specs find-step    Find the spec file of a step id in any domain
   poc <command>      POC results in <specs>/pocs: results (list), processed <slug> --as <what> (mark one)
   gate               Run the quality tools of nos.config.json (--e2e: also e2e, under a slot lease)
-  exec <name>        Run a project command: install, dev (holds a slot while it runs), deploy-test
+  exec <name>        Run a project command: install, dev (holds a slot while it runs), deploy-test (legacy)
+  deploy             Build and deploy work to its own test environment (deploy.provider; --remove, --check)
   lock <action>      take, release or status of a lock in <specs>/.locks (merge, ids, slot-<n>)
   chat <command>     Local chat with this Claude Code session (nos chat --help)
   help <command>     Show detailed help for a command
@@ -58,7 +62,8 @@ Slugs are never generated: they must be lowercase kebab-case (e.g. user-auth).
 Pass "-" to read an input from stdin. Results are printed as JSON, paths absolute with forward slashes.
 "spec-file" values are relative to the specs root, e.g. domain-1-auth/phases/phase-1-a/step-2-b.md.
 Exit codes: 0 ok, 1 operation failed, 2 usage error / missing input, 3 conflict, 4 held by another
-holder, 5 dirty worktree, 6 domain already running, 7 slot timeout. For 3-7 stdout has
+holder, 5 dirty worktree, 6 domain already running, 7 slot timeout, 8 not configured (deploy). For 3-8
+stdout has
 { "action", "error", "exit", "details" }.`;
 
 const INIT_HELP = `Usage: nos init [--root <dir>]
@@ -143,36 +148,81 @@ Example:
     "configured": true
   }`;
 
-const CREATE_DOMAIN_HELP = `Usage: nos create-domain --idea <file|-> --slug <slug> [--name <name>] [--labels <a,b>] [--root <dir>]
+const CREATE_DOMAIN_HELP = `Usage: nos create-domain --idea <file|-> --slug <slug> [--idea-slug <slug>] [--name <name>] [--labels <a,b>] [--root <dir>]
 
-Create a new domain for an idea.
+Create a new domain for an idea. A domain is an area or topic: its slug and name describe the area.
+It can hold more ideas later (nos add-idea). Each idea is one file idea-<idea-slug>.md, specific to it.
 
   Needs a project set up by nos init (<specs>/config.json).
   1. Takes the next domain id from <specs>/config.json and increases the counter
-  2. Creates <specs>/domain-<id>-<slug>/ and saves the idea as idea.md in it
+  2. Creates <specs>/domain-<id>-<slug>/ and saves the idea as idea-<idea-slug>.md in it
   3. Saves domain.json in it: { "name", "labels", "cross-cutting": false }
 
 Options:
-  --idea <file|->  Idea markdown file, or "-" to read it from stdin   (required)
-  --slug <slug>    Slug for the folder name, lowercase kebab-case     (required)
-  --name <name>    Domain name (default: first "# " heading of the idea without "Idea:")
-  --labels <a,b>   Comma separated labels, lowercase kebab-case (default: none)
-  --root <dir>     Work root (default: see nos --help)
+  --idea <file|->     Idea markdown file, or "-" to read it from stdin    (required)
+  --slug <slug>       Slug of the domain (the area), lowercase kebab-case (required)
+  --idea-slug <slug>  Slug of the idea file (default: --slug)
+  --name <name>       Domain name (default: first "# " heading of the idea without "Idea:")
+  --labels <a,b>      Comma separated labels, lowercase kebab-case (default: none)
+  --root <dir>        Work root (default: see nos --help)
 
 Example:
-  nos create-domain --idea idea.md --slug user-auth --labels auth,ui
+  nos create-domain --idea idea.md --slug user-auth --idea-slug login-form --labels auth,ui
   {
     "action": "create-domain",
     "id": 1,
     "folder": "domain-1-user-auth",
     "path": "D:/repo.specs/domain-1-user-auth",
-    "idea": "D:/repo.specs/domain-1-user-auth/idea.md",
+    "ideaFile": "idea-login-form.md",
+    "idea": "D:/repo.specs/domain-1-user-auth/idea-login-form.md",
     "domain": "D:/repo.specs/domain-1-user-auth/domain.json"
   }`;
 
-const CREATE_PLAN_HELP = `Usage: nos create-plan --domain <domain-<id>-<slug>> (--plan <file|-> | --hollow) [--root <dir>]
+const ADD_IDEA_HELP = `Usage: nos add-idea --domain <domain-<id>-<slug>> --idea <file|-> --slug <slug> [--root <dir>]
 
-Lay out the spec files for a plan in an existing domain.
+Add another idea to an existing domain: saves it as <specs>/<domain>/idea-<slug>.md.
+Refused when that file exists. Each idea is planned on its own (nos create-plan --ideas).
+
+Options:
+  --domain <name>  Domain folder name, e.g. domain-1-user-auth        (required)
+  --idea <file|->  Idea markdown file, or "-" to read it from stdin   (required)
+  --slug <slug>    Slug of the idea, lowercase kebab-case             (required)
+  --root <dir>     Work root (default: see nos --help)
+
+Example:
+  nos add-idea --domain domain-1-user-auth --idea - --slug password-reset
+  {
+    "action": "add-idea",
+    "domain": "domain-1-user-auth",
+    "ideaFile": "idea-password-reset.md",
+    "idea": "D:/repo.specs/domain-1-user-auth/idea-password-reset.md"
+  }`;
+
+const IDEAS_HELP = `Usage: nos ideas [--domain <domain-<id>-<slug>>] [--unplanned] [--root <dir>]
+
+List the domains and their idea files (idea-*.md, legacy idea.md). An idea is planned when its file is in
+"ideas" of the domain's plan.json. A plan with phases but without "ideas" (older plans) covers idea.md.
+
+Options:
+  --domain <name>  Only this domain
+  --unplanned      Only ideas not planned yet, and only domains that have one
+  --root <dir>     Work root (default: see nos --help)
+
+Example:
+  nos ideas --unplanned
+  {
+    "action": "ideas",
+    "domains": [{
+      "domain": "domain-1-user-auth",
+      "name": "User auth",
+      "path": "D:/repo.specs/domain-1-user-auth",
+      "ideas": [{ "file": "idea-password-reset.md", "path": "...", "title": "Password reset", "planned": false }]
+    }]
+  }`;
+
+const CREATE_PLAN_HELP = `Usage: nos create-plan --domain <domain-<id>-<slug>> (--plan <file|-> [--ideas <a,b>] | --hollow) [--root <dir>]
+
+Lay out the spec files for a plan of one or more ideas in an existing domain.
 
   1. For every phase: takes the next phase id and creates
      <specs>/<domain>/phases/phase-<id>-<slug>/
@@ -180,8 +230,14 @@ Lay out the spec files for a plan in an existing domain.
      step-<id>-<slug>.md in its phase folder
   3. Fills each step's "spec-file" (relative to the specs root:
      <domain>/phases/phase-<id>-<slug>/step-<id>-<slug>.md) and saves plan.json in the domain
+  4. Saves the planned idea files in "ideas" of plan.json and of every new phase
 
-Nothing is written when the plan is invalid. A domain can only be planned once.
+Nothing is written when the plan is invalid. --ideas names the idea files the plan covers (idea-<slug>.md,
+the slug alone, or idea.md); each must exist and be unplanned. Default: every unplanned idea of the domain.
+
+A domain that has a plan with phases gets the new phases appended (ideas planned separately): the
+phase slugs must be new, "ideas" grows, the plan status goes back to the first plan status of status.xml
+(open), so a merged or discarded plan runs again. Earlier phases and steps keep their statuses.
 
 --hollow promotes a domain without planning it: it saves only
   { "name": <domain.json name>, "status": "open", "phases": [] }
@@ -191,6 +247,7 @@ by a later create-plan with --plan.
 Options:
   --domain <name>  Domain folder name, e.g. domain-1-user-auth        (required)
   --plan <file|->  plan.json file, or "-" to read it from stdin       (required unless --hollow)
+  --ideas <a,b>    Idea files to plan (default: every unplanned idea)
   --hollow         Save an empty plan.json instead (no --plan)
   --root <dir>     Work root (default: see nos --help)
 
@@ -217,7 +274,7 @@ Every phase and step needs a "slug" (lowercase kebab-case). Other fields are kep
 except "labels": labels belong to the domain (domain.json) and are dropped.
 
 Example:
-  nos create-plan --domain domain-1-user-auth --plan plan.json
+  nos create-plan --domain domain-1-user-auth --ideas login-form --plan plan.json
   -> <specs>/domain-1-user-auth/plan.json
      <specs>/domain-1-user-auth/phases/phase-1-data-model/step-1-user-table.md
      "spec-file": "domain-1-user-auth/phases/phase-1-data-model/step-1-user-table.md"
@@ -559,6 +616,42 @@ Exit: the command's code (130 after SIGINT, 143 after SIGTERM), 1 the command is
 Example:
   nos exec install`;
 
+const DEPLOY_HELP = `Usage: nos deploy [--env <id>] [--remove | --check] [--root <dir>]
+
+Build and deploy work to a test environment of its own, never production. Config: "deploy" of work's
+nos.config.json: provider (firebase-hosting, command), build (shell command run first, null = none) and
+options (provider specific). provider null with project-commands.deploy-test set -> that command
+(provider "command", legacy).
+
+The env id defaults to the run id of this worktree (= its branch), else main; --env overrides it. It is
+lowercased to [a-z0-9-]. One env per run, so parallel runs never deploy over each other.
+
+  firebase-hosting  <cli> hosting:channel:deploy <env> --expires <expires> [--project p] [--only site] --json
+                    options: cli ("firebase"), project (null = .firebaserc default), site (null), expires
+                    ("7d"). The live channel is refused. The firebase CLI and its login belong to the project
+  command           options.command with NOS_DEPLOY_ENV=<env>; url = the last http(s) url it prints.
+                    options.remove / options.check: optional commands for --remove / --check
+
+Every command runs in a shell in the work root with NOS_HOME and NOS_DEPLOY_ENV. Output of build and provider:
+<specs>/.runs/logs/<run>/deploy.log (deploy-remove.log, deploy-check.log).
+
+Exit: 0 ok, 1 build, deploy, remove or check failed ({ action, error, exit, details: { provider, env,
+step, exit, tail, log } }) or bad config, 8 deploy not configured.
+
+Options:
+  --env <id>     Env id (default: the run id, else main)
+  --remove       Delete the env (no remove command: "removed": false)
+  --check        Check the provider CLI is installed and logged in
+  --root <dir>   Work root (default: see nos --help)
+
+Example:
+  nos deploy
+  { "action": "deploy", "provider": "firebase-hosting", "env": "quick-7",
+    "url": "https://my-site--quick-7-a1b2c3d4.web.app", "expires": "2026-10-17T10:00:00Z",
+    "log": "D:/repo.specs/.runs/logs/quick-7/deploy.log" }
+  nos deploy --remove
+  { "action": "deploy-remove", "provider": "firebase-hosting", "env": "quick-7", "removed": true, "log": "..." }`;
+
 const LOCK_HELP = `Usage: nos lock take <name> --token <t> [--run <kind>-<id>] [--wait <sec>] [--root <dir>]
        nos lock release <name> (--token <t> | --break) [--root <dir>]
        nos lock status [<name>] [--root <dir>]
@@ -628,6 +721,7 @@ const COMMANDS = {
     options: {
       idea: { type: 'string' },
       slug: { type: 'string' },
+      'idea-slug': { type: 'string' },
       name: { type: 'string' },
       labels: { type: 'string' },
       root: { type: 'string' },
@@ -637,6 +731,7 @@ const COMMANDS = {
       const result = createDomain(roots, {
         idea: readInput(values.idea, io),
         slug: values.slug,
+        ideaSlug: values['idea-slug'],
         name: values.name,
         labels: values.labels,
       });
@@ -645,8 +740,43 @@ const COMMANDS = {
         id: result.id,
         folder: result.folder,
         path: slash(result.path),
+        ideaFile: result.ideaFile,
         idea: slash(result.ideaPath),
         domain: slash(result.domainFilePath),
+      };
+    },
+  },
+  'add-idea': {
+    help: ADD_IDEA_HELP,
+    options: {
+      domain: { type: 'string' },
+      idea: { type: 'string' },
+      slug: { type: 'string' },
+      root: { type: 'string' },
+    },
+    required: ['domain', 'idea', 'slug'],
+    execute(values, io, roots) {
+      const result = addIdea(roots, { domain: values.domain, idea: readInput(values.idea, io), slug: values.slug });
+      return { action: 'add-idea', domain: result.domain, ideaFile: result.ideaFile, idea: slash(result.ideaPath) };
+    },
+  },
+  ideas: {
+    help: IDEAS_HELP,
+    options: {
+      domain: { type: 'string' },
+      unplanned: { type: 'boolean' },
+      root: { type: 'string' },
+    },
+    required: [],
+    execute(values, io, roots) {
+      const domains = listIdeas(roots, { domain: values.domain, unplanned: values.unplanned ?? false });
+      return {
+        action: 'ideas',
+        domains: domains.map((d) => ({
+          ...d,
+          path: slash(d.path),
+          ideas: d.ideas.map((idea) => ({ ...idea, path: slash(idea.path) })),
+        })),
       };
     },
   },
@@ -655,6 +785,7 @@ const COMMANDS = {
     options: {
       domain: { type: 'string' },
       plan: { type: 'string' },
+      ideas: { type: 'string' },
       hollow: { type: 'boolean' },
       root: { type: 'string' },
     },
@@ -662,18 +793,19 @@ const COMMANDS = {
     execute(values, io, roots) {
       const hollow = values.hollow ?? false;
       if (hollow && values.plan) throw new UsageError('--hollow takes no --plan', 'create-plan');
+      if (hollow && values.ideas) throw new UsageError('--hollow takes no --ideas', 'create-plan');
       if (!hollow && !values.plan) {
         throw new UsageError('Missing input: --plan. Please provide it and retry', 'create-plan');
       }
       const result = createPlan(roots, {
         domain: values.domain,
-        ...(hollow ? { hollow } : { plan: readInput(values.plan, io) }),
+        ...(hollow ? { hollow } : { plan: readInput(values.plan, io), ideas: values.ideas }),
       });
       return {
         action: 'create-plan',
         domain: result.domain,
         plan: slash(result.planPath),
-        ...(result.hollow && { hollow: true }),
+        ...(result.hollow ? { hollow: true } : { ideas: result.ideas, appended: result.appended }),
         phases: result.phases.map((phase) => ({
           id: phase.id,
           folder: phase.folder,
@@ -893,6 +1025,21 @@ const COMMANDS = {
       return execCommand(roots, name);
     },
   },
+  deploy: {
+    help: DEPLOY_HELP,
+    options: {
+      env: { type: 'string' },
+      remove: { type: 'boolean' },
+      check: { type: 'boolean' },
+      root: { type: 'string' },
+    },
+    required: [],
+    execute(values, io, roots) {
+      if (values.remove && values.check) throw new UsageError('Give --remove or --check, not both', 'deploy');
+      const mode = values.remove ? 'remove' : values.check ? 'check' : 'deploy';
+      return runDeploy(roots, { env: values.env, mode });
+    },
+  },
   lock: {
     help: LOCK_HELP,
     options: {
@@ -1035,7 +1182,7 @@ function notSetUp(roots, cwd) {
   return new NosError(EXIT.FAILED, `nos is not set up here: ${where}. Run nos init from the project root`);
 }
 
-// Error -> exit code. Every error gets one stderr line. NosError 3-7 are states the orchestrator reacts to:
+// Error -> exit code. Every error gets one stderr line. NosError 3-8 are states the orchestrator reacts to:
 // { action, error, exit, details } (holder, file lists) also goes to stdout as JSON, as for a NosError marked
 // report (a 1 with details).
 export function reportError(action, err, { stdout, stderr }) {
@@ -1046,7 +1193,7 @@ export function reportError(action, err, { stdout, stderr }) {
   }
   if (!(err instanceof NosError)) return EXIT.FAILED;
   // report: a 1 whose details the orchestrator needs (run finish: gate result, main busy / dirty lists)
-  if ((err.code >= EXIT.CONFLICT && err.code <= EXIT.SLOT_TIMEOUT) || err.report) {
+  if ((err.code >= EXIT.CONFLICT && err.code <= EXIT.NOT_CONFIGURED) || err.report) {
     const report = { action, error: err.message, exit: err.code, details: err.details };
     stdout.write(JSON.stringify(report, printable, 2) + '\n');
     return err.code;

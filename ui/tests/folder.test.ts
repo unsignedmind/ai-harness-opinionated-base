@@ -45,7 +45,7 @@ const specs: Tree = {
       'notes.txt': 'skip',
     },
   },
-  'domain-2-dark': { 'idea.md': '# Idea: dark' },
+  'domain-2-dark': { 'idea.md': '# Idea: dark', 'idea-contrast.md': '# Contrast', 'idea-Bad.md': 'skip', 'ideas.md': 'skip' },
 };
 
 const ALL = {
@@ -55,10 +55,11 @@ const ALL = {
   'domain-1-i18n/phases/phase-1-x/step-1-a.md': '# A',
   'domain-1-i18n/quick-steps/quick-steps.json': '[]',
   'domain-1-i18n/quick-steps/step-2-q.md': '# Q',
+  'domain-2-dark/idea-contrast.md': '# Contrast',
   'domain-2-dark/idea.md': '# Idea: dark',
 };
 
-test('reads idea.md, domain.json, plan.json, phase markdown and quick steps, keyed relative to the specs root', async () => {
+test('reads the idea files (idea.md, idea-<slug>.md), domain.json, plan.json, phase markdown and quick steps, keyed relative to the specs root', async () => {
   expect(await readSpecsFolder(dir('.specs', specs))).toStrictEqual(ALL);
 });
 
@@ -201,4 +202,18 @@ test('docs-folder may not name a hidden folder', async () => {
     expect(d.files).toStrictEqual({});
     expect(d.error).toMatch(/no part starting with "\."/);
   }
+});
+
+test('reads the docs/ folder of each domain, also with the specs root picked on its own', async () => {
+  const withDocs: Tree = {
+    ...specs,
+    'domain-2-ui': { 'idea.md': '# Idea', docs: { 'a.md': '# A', 'pic.png': 'binary', '.x': { 'b.md': '' } } },
+    'domain-3-api': { docs: { 'img.png': 'binary' } },
+  };
+  const expected = { 'domain-2-ui': { 'a.md': '# A' } };
+  expect((await docsOf(dir('p', { '.specs': withDocs, docs: { 'i.md': '# I' } }))).domains).toStrictEqual(expected);
+  const alone = await docsOf(dir('.specs', withDocs));
+  expect(alone.domains).toStrictEqual(expected);
+  expect(alone.error).toMatch(/out of its reach/);
+  expect(await readSpecsFolder(dir('.specs', withDocs))).not.toHaveProperty('domain-2-ui/docs/a.md');
 });

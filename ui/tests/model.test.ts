@@ -237,6 +237,39 @@ test('an idea folder without idea.md takes its title from domain.json, else the 
   expect(buildModel(files).ideas[1].title).toBe('Dark mode');
 });
 
+test('a domain with several idea files: one entry each, planned by "ideas" of plan.json, title from the domain', () => {
+  const files = quickFixtureFiles();
+  delete files['domain-2-dark-mode/idea.md'];
+  files['domain-2-dark-mode/idea-theme.md'] = '# Idea: Theme switch\n\n## Intent\nFollow the system.\n';
+  files['domain-2-dark-mode/idea-contrast.md'] = '# Contrast\n\n## Intent\nHigh contrast.\n';
+  files['domain-2-dark-mode/plan.json'] = JSON.stringify({
+    ...PLAN,
+    ideas: ['idea-theme.md'],
+    phases: PLAN.phases.map((p) => ({ ...p, ideas: ['idea-theme.md'] })),
+  });
+
+  const i = buildModel(files).ideas[1];
+
+  expect(i.ideaFiles.map((f) => [f.file, f.title, f.intent, f.planned])).toStrictEqual([
+    ['idea-contrast.md', 'Contrast', 'High contrast.', false],
+    ['idea-theme.md', 'Theme switch', 'Follow the system.', true],
+  ]);
+  expect(i.title).toBe('Dark mode theme');
+  expect(i.intent).toBe('High contrast. · Follow the system.');
+  expect(i.phases[0].ideas).toStrictEqual(['idea-theme.md']);
+});
+
+test('a plan with phases but without "ideas" covers the legacy idea.md', () => {
+  const files = quickFixtureFiles();
+  files['domain-2-dark-mode/idea-more.md'] = '# More';
+  const i = buildModel(files).ideas[1];
+  expect(i.ideaFiles.map((f) => [f.file, f.planned])).toStrictEqual([
+    ['idea.md', true],
+    ['idea-more.md', false],
+  ]);
+  expect(buildModel(files).ideas[0].ideaFiles.map((f) => f.planned)).toStrictEqual([false]);
+});
+
 test('quick steps belong to their idea without a phase and sort into the steps', () => {
   const m = buildModel(quickFixtureFiles());
   const [i18n, dark] = m.ideas;

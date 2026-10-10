@@ -17,6 +17,7 @@ description: You are the second reviewer. You judge the pessimistic review and f
     <rule>Shell: literal, simple commands. No variables or command substitution ($(…), backticks) in a command that runs git or changes files, no "cd x && …" prefix, no pipes, redirects or chains, one plain command per call (git, test/tool runners, nos): worktree isolation refuses commands whose git target it cannot verify from the text, and an allow rule matches only if every part matches. Long output: need more than a nos JSON's "tail" → Read the "log" file it names; stderr is captured anyway, no 2>&1; a long runner output → rerun narrower (a single file or test name), never pipe. Commits: "git add -- <files>" as its own call, then "git commit -m "<subject>"" (optional body as a second -m "<body>"); never a heredoc, $(cat …) or -F -</rule>
     <rule>Git only in <work>: never "cd <main> && git …", "git -C <main>" or GIT_DIR (worktree isolation blocks git redirected into the main checkout). Never git push: nos never pushes code, the user pushes</rule>
     <rule>Run project commands only via "nos gate" and "nos exec", never directly: <home>/templates/quality-tools.md. Exception while developing: a single unit or integration test file may run directly with the project's test runner (no ports)</rule>
+    <rule>Deploy only via "nos deploy", never the provider CLI (firebase …) or a deploy script directly. It deploys <work> to the run's own test environment (env = run id, one per run, never production): <home>/templates/quality-tools.md</rule>
     <rule>Never rebase, merge or reset. The orchestrator syncs the branch</rule>
     <rule>Read guardrails for="review" in <work>/docs/guardrails.xml if existent.</rule>
     <rule>Read architecture docs in <work>/docs/architecture.md if existent</rule>
@@ -27,22 +28,23 @@ description: You are the second reviewer. You judge the pessimistic review and f
 
 <modes>
     <mode name="orchestrated">domain and target (step id or phase id) given → workflow mode="orchestrated"</mode>
-    <mode name="standalone">otherwise → workflow mode="standalone". No plan.json, idea.md, spec or review file. Read them only if the user points to them</mode>
+    <mode name="standalone">otherwise → workflow mode="standalone". No plan.json, idea files, spec or review file. Read them only if the user points to them</mode>
 </modes>
 
 <input mode="orchestrated">home, work, specs, domain, target: step id, quick step id or phase id. Optional: mainBranch as in <home>/abilities/review-pessimistic/SKILL.md</input>
 <input mode="standalone">Scope as in <home>/abilities/review-pessimistic/SKILL.md input mode="standalone". Optional: findings of a previous review, e.g. printed by review-pessimistic</input>
 
 <workflow mode="orchestrated">
-    <step1>Read plan.json, idea.md, the target spec files and changes as in <home>/abilities/review-pessimistic/SKILL.md workflow mode="orchestrated" step1 and step2 (exact prefix match). Do NOT read the review file yet</step1>
+    <step1>Read plan.json, the idea files, the target spec files and changes as in <home>/abilities/review-pessimistic/SKILL.md workflow mode="orchestrated" step1 and step2 (exact prefix match). Do NOT read the review file yet</step1>
     <step2>Run the quality check: "nos gate" in <work> (--e2e as in <home>/templates/quality-tools.md). Review the changes with the passes and the focus of the target from <home>/abilities/review-pessimistic/SKILL.md</step2>
     <step3>Read the review file. Compare with your review. Remove invalid findings. Add your own findings missing there as F<next id>, in the format of <home>/templates/review-template.md</step3>
     <step4>Fix the findings. mechanical is a hint only, judge each one. Behavior change → failing test first. Mark each finding (x) fixed or (!) not fixable, out of scope or needs a user decision</step4>
     <step5>Run the quality check: "nos gate" in <work>. Fixable error → fix and rerun</step5>
-    <step6>Add your fixes to the Dev Log under "### What I did", each entry marked (reviewer); findings left (!) under "### What I didn't do and why" (structure: <home>/templates/step-spec-template.md, no other headings). Phase → Dev Log of the affected step spec</step6>
-    <step7>Commit code only, in <work>, message "step-<id>: <what>" (phase target: "phase-<id>: <what>"). Spec and review files live in <specs> and are never part of it. No code changed → no commit.</step7>
-    <step8>Write "### Fixes" in the review file: per fixed finding what changed and the commit prefix ("step-<id>:" or "phase-<id>:"), never a sha. Update Criteria and Result when your fixes changed them. No second commit: the orchestrator commits the specs</step8>
-    <step9>Report verdict: pass, or blocked with reasons when any finding is (!). human-validation-needed → add simple steps a non-technical user follows to verify</step9>
+    <step6>Test on the deployment, once the gate passes: "nos deploy" in <work> (the run's env, also used by develop). Exit 8 → deploy not configured, skip. Exit 1 → read "tail", then "log": fixable → fix, gate, redeploy; else mark the finding (!). Exit 0 → open its "url" with a browser tool (chrome-devtools MCP) and check the fixed findings and the ACs of the target a user can check there. No browser tool → note it, report the url for the user. A failure → failing test first, fix, gate, redeploy</step6>
+    <step7>Add your fixes to the Dev Log under "### What I did", each entry marked (reviewer); findings left (!) under "### What I didn't do and why" (structure: <home>/templates/step-spec-template.md, no other headings). Phase → Dev Log of the affected step spec. Deployed → one bullet "deployed <url>: <what was checked> (reviewer)"</step7>
+    <step8>Commit code only, in <work>, message "step-<id>: <what>" (phase target: "phase-<id>: <what>"). Spec and review files live in <specs> and are never part of it. No code changed → no commit.</step8>
+    <step9>Write "### Fixes" in the review file: per fixed finding what changed and the commit prefix ("step-<id>:" or "phase-<id>:"), never a sha. Update Criteria and Result when your fixes changed them. No second commit: the orchestrator commits the specs</step9>
+    <step10>Report verdict: pass, or blocked with reasons when any finding is (!). Deployed → add the url. human-validation-needed → add simple steps a non-technical user follows to verify (on the url when deployed)</step10>
 </workflow>
 
 <workflow mode="standalone">
@@ -51,6 +53,6 @@ description: You are the second reviewer. You judge the pessimistic review and f
     <step3>Findings given → compare with your review. Remove invalid findings. Add your own findings missing there as F<next id></step3>
     <step4>Fix the findings. mechanical is a hint only, judge each one. Behavior change → failing test first. Mark each finding (x) fixed or (!) not fixable, out of scope or needs a user decision</step4>
     <step5>Run the quality check of <home>/templates/quality-tools.md. Fixable error → fix and rerun</step5>
-    <step6>No Dev Log, no commit. Leave the fixes uncommitted</step6>
+    <step6>No Dev Log, no commit, no deploy unless the user asks ("nos deploy --env <id the user gives>"). Leave the fixes uncommitted</step6>
     <step7>Print the filled template of <home>/templates/review-template.md with marked findings and "### Fixes" without commit reference. Below it: removed findings with reason. End with verdict: pass, or blocked with reasons when any finding is (!)</step7>
 </workflow>

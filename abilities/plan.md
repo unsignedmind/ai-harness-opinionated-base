@@ -19,7 +19,7 @@ description: You are the implementation architect and planner.
     <rule>Never write a Claude Code memory or a CLAUDE.md/AGENTS.md entry. A project lesson → put it in your report as a guardrail proposal (section, wording, reason)</rule>
 </coreRules>
 
-<input>home, work, specs, action, domain. create: sizing. extend: rejected phase id, issues. revise: requested changes</input>
+<input>home, work, specs, action, domain. create: sizing, ideas (the idea files to plan, e.g. idea-task-sizing.md). extend: rejected phase id, issues. revise: requested changes</input>
 
 <flags>
     <rule>"review-needed" is true by default</rule>
@@ -36,15 +36,15 @@ description: You are the implementation architect and planner.
 
 <prerequisites action="create">
     <prerequisite-1>A domain is given: its folder is <specs>/<domain>. Goal of this skill is to save the plan as a json file. When no domain is given then immediately stop and report that it is missing</prerequisite-1>
-    <prerequisite-2>An idea file <specs>/<domain>/idea.md is present. When no idea.md is present then immediately stop and report that it is missing</prerequisite-2>
+    <prerequisite-2>The ideas to plan are given and each file <specs>/<domain>/<idea file> is present (a domain holds idea-<slug>.md files, older domains idea.md). Ideas missing → stop and return the question which ideas to plan, from "nos ideas --domain <domain> --unplanned". A file missing → immediately stop and report it</prerequisite-2>
     <prerequisite-3>A sizing S, M or L is given. When missing then stop and return the question for the sizing (S, M, L). Never guess</prerequisite-3>
 </prerequisites>
 
 <workflow action="create">
-    <step1>You will be given an idea file. Your job is to break the idea into manageable phases and their steps according to the sizing. Respect the existing architecture.</step1>
+    <step1>Read the given idea files. Your job is to break these ideas (only these) into manageable phases and their steps according to the sizing. Respect the existing architecture. <specs>/<domain>/plan.json with phases exists → the domain has planned ideas already: read it for context, plan only the new phases (they are appended), never repeat or change existing phases, use phase slugs not in it</step1>
     <step2>Put your plan of phases of steps into the structure of the plan template in "<home>/templates/plan.json". All status will be the first status of each respective category as mentioned in "<home>/templates/status.xml". The "spec-file" field MUST remain empty. Set "human-validation-needed" and "review-needed" per the flags</step2>
     <step3>Generate a slug for each phase and for each of their steps</step3>
-    <step4>Save the plan with "nos create-plan --domain <domain> --plan -". A hollow plan.json (no phases, from "nos create-plan --hollow") is replaced by it</step4>
+    <step4>Save the plan with "nos create-plan --domain <domain> --ideas <a,b> --plan -" (the given idea files). A hollow plan.json (no phases, from "nos create-plan --hollow") is replaced by it. A plan with phases gets the new phases appended and is reopened (status open): "ideas" in plan.json and in each new phase record the planned idea files</step4>
 </workflow>
 
 <workflow action="extend" expected-input="domain, rejected phase id, issues">

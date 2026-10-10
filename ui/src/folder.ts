@@ -21,6 +21,9 @@ export const PROJECT_CONFIG_FILE = 'nos.config.json';
 export const INNER_SPECS_DIR = '.specs';
 export const SPECS_SUFFIX = '.specs';
 export const DEFAULT_DOCS_FOLDER = 'docs';
+// the idea files of a domain: idea-<slug>.md, and the legacy single idea.md
+export const IDEA_FILE = /^idea(-[a-z0-9]+(?:-[a-z0-9]+)*)?\.md$/;
+export const LEGACY_IDEA_FILE = 'idea.md';
 
 async function children(dir: DirLike) {
   const out: (FileLike | DirLike)[] = [];
@@ -138,7 +141,8 @@ export async function readSpecsFolder(picked: DirLike): Promise<Record<string, s
   for (const d of kids.filter(isDomain)) {
     for (const h of await children(d)) {
       const path = `${d.name}/${h.name}`;
-      if (h.kind === 'file' && ['idea.md', 'domain.json', 'plan.json'].includes(h.name)) await read(h, path);
+      if (h.kind === 'file' && (IDEA_FILE.test(h.name) || ['domain.json', 'plan.json'].includes(h.name)))
+        await read(h, path);
       else if (h.kind === 'directory' && h.name === 'phases') await walkPhases(h, path);
       else if (h.kind === 'directory' && h.name === 'quick-steps')
         for (const q of await children(h))
@@ -151,10 +155,13 @@ export async function readSpecsFolder(picked: DirLike): Promise<Record<string, s
 
 // Docs: every text file under the docs folder, `path relative to it -> text`. Other files are
 // skipped. `error` says why there are none (folder missing, the specs root picked without the project).
+// domains: the docs/ folder of each domain that has one, `domain folder -> path relative to its docs/ -> text`;
+// only set when there is at least one such file.
 export type DocsData = {
   folder: string;
   files: Record<string, string>;
   error?: string;
+  domains?: Record<string, Record<string, string>>;
 };
 
 const TEXT_EXT = new Set(
@@ -169,8 +176,37 @@ export async function docsFolderOf(root: DirLike): Promise<string> {
   return setting(await projectConfig(root), 'spec-ui', 'docs-folder') ?? DEFAULT_DOCS_FOLDER;
 }
 
+// every text file below the folder, `path relative to it -> text`; hidden folders and node_modules skipped
+async function readTextTree(dir: DirLike): Promise<Record<string, string>> {
+  const files: Record<string, string> = {};
+  const walk = async (d: DirLike, prefix: string) => {
+    for (const h of await children(d)) {
+      if (h.name.startsWith('.') || h.name === 'node_modules') continue;
+      const path = prefix + h.name;
+      if (h.kind === 'directory') await walk(h, path + '/');
+      else if (isTextFile(h.name)) files[path] = await (await h.getFile()).text();
+    }
+  };
+  await walk(dir, '');
+  return files;
+}
+
+async function readDomainDocs(specs: DirLike): Promise<Pick<DocsData, 'domains'>> {
+  const domains: Record<string, Record<string, string>> = {};
+  for (const d of (await children(specs)).filter(isDomain)) {
+    const docs = (await children(d)).find((h): h is DirLike => h.kind === 'directory' && h.name === 'docs');
+    const files = docs && (await readTextTree(docs));
+    if (files && Object.keys(files).length) domains[d.name] = files;
+  }
+  return Object.keys(domains).length ? { domains } : {};
+}
+
 // root: the project folder (null when only the specs root was picked)
 export async function readDocs(specs: DirLike, root: DirLike | null): Promise<DocsData> {
+  return { ...(await readProjectDocs(specs, root)), ...(await readDomainDocs(specs)) };
+}
+
+async function readProjectDocs(specs: DirLike, root: DirLike | null): Promise<DocsData> {
   if (!root)
     return {
       folder: DEFAULT_DOCS_FOLDER,
@@ -193,16 +229,5 @@ export async function readDocs(specs: DirLike, root: DirLike | null): Promise<Do
       files: {},
       error: `No ${folder}/ folder in ${root.name}/. Set "spec-ui" → "docs-folder" in ${PROJECT_CONFIG_FILE}.`,
     };
-
-  const files: Record<string, string> = {};
-  const walk = async (d: DirLike, prefix: string) => {
-    for (const h of await children(d)) {
-      if (h.name.startsWith('.') || h.name === 'node_modules') continue;
-      const path = prefix + h.name;
-      if (h.kind === 'directory') await walk(h, path + '/');
-      else if (isTextFile(h.name)) files[path] = await (await h.getFile()).text();
-    }
-  };
-  await walk(dir, '');
-  return { folder, files };
+  return { folder, files: await readTextTree(dir) };
 }

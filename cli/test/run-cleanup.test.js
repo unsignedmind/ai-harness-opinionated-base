@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { addIdea } from '../src/domain.js';
 import { git } from '../src/git.js';
 import { takeLock } from '../src/lock.js';
 import { createPlan } from '../src/plan.js';
@@ -135,6 +136,26 @@ test('abandon of a plan run: plan and steps discarded; a merged run cannot be ab
   const merged = await nos(['run', 'abandon', '--token', b.token], root);
   assert.equal(merged.code, 1);
   assert.match(merged.err, /merged: nos run cleanup/);
+});
+
+test('a discarded plan reopened by the phases of another idea starts a new run', noGit, async (t) => {
+  const { root, roots, quick } = setup(t);
+  createPlan(roots, { domain: quick.a.domain, plan: { name: 'A', phases: [{ slug: 'p', steps: [{ slug: 's1' }] }] } });
+  const first = (await nos(['run', 'start', '--domain', quick.a.domain, '--plan'], root)).json;
+  assert.equal((await nos(['run', 'abandon', '--token', first.token], root)).code, 0);
+
+  addIdea(roots, { domain: quick.a.domain, idea: '# Next', slug: 'next' });
+  const appended = createPlan(roots, {
+    domain: quick.a.domain,
+    ideas: 'next',
+    plan: { phases: [{ slug: 'q', steps: [{ slug: 's2' }] }] },
+  });
+  assert.equal(appended.appended, true);
+  assert.equal(readJson(roots.specs, `${quick.a.domain}/plan.json`).status, 'open');
+
+  const again = await nos(['run', 'start', '--domain', quick.a.domain, '--plan'], root);
+  assert.equal(again.code, 0, again.err);
+  assert.equal(again.json.run.phase, 'develop');
 });
 
 test('abandon releases a merge lock its crashed finish left', noGit, async (t) => {

@@ -21,7 +21,17 @@ description: "You will wrap you head around the idea/intent of the user"
     <step1>No idea or starting context given → ask the user for the idea</step1>
     <step2>Understand the users intent and the given context. A POC result → read it, ask only about its open questions and gaps</step2>
     <step3>Improve the idea by asking focused questions. Goal is to reach a state where the idea can be handed to the architect and planner</step3>
-    <step4>Generate a slug based on the contents of the idea</step4>
-    <step5>Choose 1-5 labels for the areas the idea touches, lowercase kebab-case (e.g. ui, persistence). Save the idea with "nos create-domain --idea - --slug <slug> --name <name> --labels <a,b>" (short domain name, the labels). From a POC result → the idea links it: a line "> From POC result <specs-relative path, e.g. pocs/poc-<slug>-result.md>" and a section "## Hints from POC" with its technical details in short, each marked "from POC"</step5>
-    <step6>Print the full domain folder name in your final report</step6>
+    <step4>Generate an idea slug based on the contents of the idea: specific to this idea (e.g. task-sizing), not the area</step4>
+    <step5>Find the domain. A domain is an area or topic (e.g. plan-mode) and holds one idea file per idea (idea-<slug>.md, older domains idea.md). "nos ideas" lists every domain with its ideas. Read the idea files of the candidates (Read with their path). Rank the domains by fit of their area to the idea
+        <question>Which domain does the idea belong to?
+            <choice key="domain id">One choice per fitting domain, best first (at most 4): domain name, its idea titles</choice>
+            <choice key="NEW">A new domain for this area</choice>
+        </question>
+        No fitting domain → NEW without asking
+    </step5>
+    <step6>Save the idea. From a POC result → the idea links it: a line "> From POC result <specs-relative path, e.g. pocs/poc-<slug>-result.md>" and a section "## Hints from POC" with its technical details in short, each marked "from POC"
+        <do>Existing domain → "nos add-idea --domain <domain> --idea - --slug <idea slug>"</do>
+        <do>NEW → choose a domain slug and a short domain name for the area or topic, not for this idea (e.g. slug plan-mode for the idea task-sizing). Choose 1-5 labels for the areas, lowercase kebab-case (e.g. ui, persistence). "nos create-domain --idea - --slug <domain slug> --idea-slug <idea slug> --name <name> --labels <a,b>"</do>
+    </step6>
+    <step7>Print the full domain folder name and the idea file name in your final report</step7>
 </workflow>

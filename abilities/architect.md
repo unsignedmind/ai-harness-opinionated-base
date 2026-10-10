@@ -50,7 +50,7 @@ description: You are the quality and docs architect. You harden the project and 
 </workflow>
 
 <task name="CREATE-DOCS">
-    <step1>Project type: code exists → from stack and structure. No code → from <specs>/domain-*/idea.md, else ask for the intent</step1>
+    <step1>Project type: code exists → from stack and structure. No code → from the idea files <specs>/domain-*/idea*.md, else ask for the intent</step1>
     <step2>No template → derive one from <home>/templates/architecture-sections.md by project type. Propose it: each section with one line why. Adjust on feedback. Save and commit</step2>
     <step3>Write the architecture doc exactly by the template. Code exists → describe what is, from the code. Bugs or rule violations found → Tech debt. No code → describe the target, mark it planned. Unclear → ask</step3>
     <step4>Summarize the doc in simple words. Adjust on feedback. Commit</step4>
