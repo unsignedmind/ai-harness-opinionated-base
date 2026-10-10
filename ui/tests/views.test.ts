@@ -554,3 +554,12 @@ test('a POC run belongs to no idea or step: model.otherRuns, its badge reads poc
   expect(mount(runBadge(poc)).querySelector('.run .mono')?.textContent).toBe('poc-dark-mode');
   expect(buildModel(quickFixtureFiles()).otherRuns).toStrictEqual([]);
 });
+
+test('step detail and step cards show what a step waits on', () => {
+  const d = explore('#domains/dark-mode/switch/toggle-button').querySelector('.detail')!;
+  expect(d.querySelector('.deps')?.textContent).toBe('⇠ waits on media-query');
+  const cards = explore('#domains/dark-mode/switch').querySelector('.detail')!;
+  expect([...cards.querySelectorAll('.deps')].map((e) => e.textContent)).toStrictEqual(['⇠ waits on media-query']);
+  const independent = explore('#domains/dark-mode/switch/media-query').querySelector('.detail')!;
+  expect(independent.querySelector('.deps')).toBeNull();
+});

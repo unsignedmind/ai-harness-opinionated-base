@@ -194,14 +194,8 @@
         </question>
         Only one unplanned idea → take it without asking
     </step1>
-    <step2>
-        <question>How big should phases and steps be?
-            <choice key="S">Small. Many phases, small focused steps</choice>
-            <choice key="M">Medium. Balanced</choice>
-            <choice key="L">Large. Few phases (maybe one), few big steps (maybe one)</choice>
-        </question>
-    </step2>
-    <step3>Run ability "plan" (action create) with the domain, the ideas (file names) and the sizing. nos specs commit --domain <domain> -m "plan: <domain>"</step3>
+    <step2>No sizing question: the plan ability decides the granularity per step (its rules "granularity" and "dependencies"). The user said how big the steps should be → pass it as the sizing hint</step2>
+    <step3>Run ability "plan" (action create) with the domain and the ideas (file names). It reports when it appended to an existing plan and ran the dependency pass. nos specs commit --domain <domain> -m "plan: <domain>"</step3>
     <step4>Report the phases. Pending guardrail proposals → block "proposals" first
         <question>Run it now?
             <choice key="YES">Run the plan → option "run" with this domain</choice>

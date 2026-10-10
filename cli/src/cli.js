@@ -11,6 +11,7 @@ import { initProject } from './init.js';
 import { listLocks, lockStatus, publicHolder, releaseLock, takeLock } from './lock.js';
 import { createPlan } from './plan.js';
 import { createQuickStep } from './quick-step.js';
+import { planReady } from './ready.js';
 import { homeGuard, NOS_HOME, resolveRoots, slash, specsGuard } from './roots.js';
 import { abandonRun, cleanupRun, finishRun, startRun, syncRun } from './run.js';
 import { readRun, requireToken } from './runs.js';
@@ -32,6 +33,7 @@ Commands:
   create-plan        Save a plan.json in a domain and create its phase folders and step files
                      (--hollow: an empty plan.json, promotes the domain unplanned)
   update-plan        Save an updated plan.json and create, move or delete phase folders and step files
+  ready              Which steps of a plan may start now (by depends-on, or the next step in order)
   create-quick-step  Add a quick step (no plan) to <specs>/<domain>/quick-steps/
   set-status         Change the status of a plan, phase, step or quick step
                      (--run <kind>-<id> merged|discarded: a whole run, only run finish / abandon)
@@ -219,6 +221,39 @@ Example:
       "ideas": [{ "file": "idea-password-reset.md", "path": "...", "title": "Password reset", "planned": false }]
     }]
   }`;
+
+const READY_HELP = `Usage: nos ready --domain <domain-<id>-<slug>> [--root <dir>]
+
+Which steps of the domain's plan may start now. The orchestrator schedules only from this answer.
+
+plan.json "dependencies-checked" true: every step carries "depends-on", a list of step refs it needs done
+first ("<step slug>" in its phase, "<phase slug>/<step slug>" in an earlier phase; [] = independent). A step
+without a cross-phase ref waits for every earlier phase (the phase barrier); a cross-phase ref lifts that
+barrier for the step. "dependencies-checked" false or missing: "depends-on" is ignored, mode "sequential",
+the first unfinished step in order is the only one ready (as before).
+
+Output (each entry { id, slug, phase, phaseSlug, status }):
+  specify           open steps whose dependencies are done
+  develop           specified steps whose dependencies are done
+  running           an ability works on them (in-specification, in-progress, in-review)
+  continue          between abilities (implemented, reviewed): the orchestrator's transition is next
+  blocked           waiting: waitsOn (step ids), waitsOnPhases (phase ids of the barrier)
+  phasesReviewable  all steps done, phase review not started
+  phasesContinuing  phases mid-review (implemented, in-review, reviewed)
+  done              true when every phase and step is finished
+
+Options:
+  --domain <name>  The domain (required)
+  --root <dir>     Work root (default: see nos --help)
+
+Example:
+  nos ready --domain domain-1-user-auth
+  { "action": "ready", "domain": "domain-1-user-auth", "dependenciesChecked": true, "mode": "dependencies",
+    "done": false, "specify": [], "develop": [{ "id": 4, "slug": "login-form", "phase": 2, ... }],
+    "running": [{ "id": 3, ... }], "continue": [], "blocked": [{ "id": 5, "waitsOn": [4], "waitsOnPhases": [] }],
+    "phasesReviewable": [], "phasesContinuing": [] }
+
+Exit codes: 0 ok, 1 no plan.json or a plan whose dependencies are invalid, 2 usage.`;
 
 const CREATE_PLAN_HELP = `Usage: nos create-plan --domain <domain-<id>-<slug>> (--plan <file|-> [--ideas <a,b>] | --hollow) [--root <dir>]
 
@@ -690,6 +725,8 @@ Example:
     "pidAlive": false }
   pidAlive: the holder's process still exists (false is normal for a lock taken by "nos lock take").`;
 
+const withoutPaths = ({ domain, planPath, ...rest }) => rest;
+
 const COMMANDS = {
   init: {
     help: INIT_HELP,
@@ -825,6 +862,15 @@ const COMMANDS = {
           steps: phase.steps.map((step) => ({ id: step.id, file: step.file, path: slash(step.path) })),
         })),
       };
+    },
+  },
+  ready: {
+    help: READY_HELP,
+    options: { domain: { type: 'string' }, root: { type: 'string' } },
+    required: ['domain'],
+    execute(values, io, roots) {
+      const result = planReady(roots, { domain: values.domain });
+      return { action: 'ready', domain: result.domain, plan: slash(result.planPath), ...withoutPaths(result) };
     },
   },
   'update-plan': {

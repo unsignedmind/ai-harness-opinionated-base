@@ -12,6 +12,7 @@ import {
   crumbs,
   dots,
   hvnBadge,
+  depsBadge,
   itemId,
   labelChips,
   pill,
@@ -285,7 +286,7 @@ const stepCards = (steps: Step[]) =>
     .map(
       (s) => `<div class="card" data-href="${esc(hrefOf(s))}">
           <h3><span class="id mono">${itemId(s)}</span>${esc(s.title)}</h3>
-          <div class="row">${pill(s.status)}${progressText('AC', s.ac, 'ac')}${hvnBadge(s.hvn)}</div>
+          <div class="row">${pill(s.status)}${progressText('AC', s.ac, 'ac')}${hvnBadge(s.hvn)}${depsBadge(s.dependsOn)}</div>
           <p>${esc(s.intent)}</p></div>`,
     )
     .join('')}</div>`;
@@ -317,6 +318,7 @@ function stepDetail(s: Step, ui: ExploreUi, root: Crumb) {
     <dl class="meta">
       <dt>Progress</dt><dd>${progressText('AC', s.ac, 'ac') || '<span class="muted">no AC</span>'} ${progressText('Tasks', s.tasks, 'tasks')}</dd>
       <dt>Human check</dt><dd>${s.hvn ? hvnBadge(true) : 'no'}</dd>
+      ${s.dependsOn.length ? `<dt>Depends on</dt><dd>${depsBadge(s.dependsOn)}</dd>` : ''}
       <dt>Spec file</dt><dd class="mono">${s.specPath ? esc(specsPath(ui, s.specPath)) : '—'}</dd>
       ${s.branch ? `<dt>Branch</dt><dd>${branchBadge(s.branch)}</dd>` : ''}
       ${runRows(s.run)}

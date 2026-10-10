@@ -430,10 +430,15 @@ Not part of the plan flow. Started from the menu (QUICK). Gets your intent (a ro
 
 ### abilities/plan.md: implementation architect and planner 🏗️
 
-Reads `docs/architecture.md` if it exists and respects its structure and rules. Reads the `plan` guardrails in `docs/guardrails.xml` in every action: they add constraints to splitting and flags, but never override your sizing or the `review-needed` rules unless they say so. It never plans a phase or step that updates docs the architect maintains or an architect guardrail assigns to a helper (`docs/architecture*`, the template, docs a helper writes from the code): those updates happen at run end from develop's `(architecture)` notes; requested anyway, it leaves them out and says so. Other documentation the idea asks for (API reference, README, CHANGELOG, user guides) is a deliverable and stays allowed. Three actions:
+Reads `docs/architecture.md` if it exists and respects its structure and rules. Reads the `plan` guardrails in `docs/guardrails.xml` in every action: they add constraints to splitting, dependencies and flags, but never override the `review-needed` rules unless they say so. It never plans a phase or step that updates docs the architect maintains or an architect guardrail assigns to a helper (`docs/architecture*`, the template, docs a helper writes from the code): those updates happen at run end from develop's `(architecture)` notes; requested anyway, it leaves them out and says so. Other documentation the idea asks for (API reference, README, CHANGELOG, user guides) is a deliverable and stays allowed.
+
+There is no sizing question any more. The planner decides the granularity per step from a cost model (every step costs five agent runs, two gates and a deploy, whatever its size): a step gets its own step only when the split buys something — parallelism (an independent write-set), reviewer attention (uncertain, new, security or data sensitive), a human validation gate, or a hard dependency; otherwise the work is merged into a bigger step. It writes its reason at the start of every step description, so you can push back with `CHANGE`. A sizing hint you give (S, M, L) shifts the balance, never replaces the decision.
+
+Every step carries `depends-on`: the steps it needs done first (`<step slug>` in its phase, `<phase slug>/<step slug>` in an earlier phase; `[]` = independent). The plan's `dependencies-checked: true` says the lists are complete; `nos create-plan` / `update-plan` validate them (refs exist, no cycles, no later phase). A step without a cross-phase ref waits for every earlier phase to finish (the phase barrier); a cross-phase ref lifts that for the step. When a plan has independent steps, its first phase is the **contracts phase**: shared types, store shapes, component props, routes and stubs that pass the gate, so the independent steps build against fixed interfaces and own disjoint modules. `nos ready --domain <d>` answers which steps may start now. Four actions:
 - **create**: needs the domain and the idea files to plan (the orchestrator asks which unplanned ideas). Splits them into phases and steps that respect the existing architecture, following `templates/plan.json`. All statuses are `open`, and every phase and step gets a slug. Pure documentation steps, and phases that are only documentation and human verification (with all their steps), get `review-needed: false`. A phase with exactly one step always gets `review-needed: false` on the phase only. Saves with `nos create-plan --ideas`, which creates phase folders and empty step spec files, fills `spec-file` and records the ideas in `"ideas"` of the plan and of each new phase. A domain with a plan already gets the new phases appended and the plan reopened.
 - **extend**: used after a phase is rejected. Inserts a fix phase directly after the rejected one, with the issues split into steps and `human-validation-needed: true`, and `review-needed` set by the same rules as create. Saves with `nos update-plan`.
-- **revise**: used when you pick `CHANGE` after the split is shown. Applies your changes (move, merge, split, add or remove phases and steps), reapplies the `review-needed` rules and saves with `nos update-plan`.
+- **revise**: used when you pick `CHANGE` after the split is shown. Applies your changes (move, merge, split, add or remove phases and steps), reapplies the `review-needed` and dependency rules (a renamed slug updates every `depends-on` naming it) and saves with `nos update-plan`.
+- **dependencies**: the dependency pass for a plan from before `depends-on` existed, or after phases were appended (`dependencies-checked` is false then). Adds `depends-on` to every step and sets the flag, changes nothing else; a missing contracts phase is only recommended. Until the pass ran, `nos ready` lists the steps in array order, exactly as before.
 
 ### abilities/develop.md: developer 🪛
 
@@ -569,7 +574,8 @@ Used in ACs, the Task List and review findings:
 | `nos add-idea --domain <d> --idea <file> --slug <i>` | idea | `idea-<i>.md` in an existing domain |
 | `nos ideas [--unplanned]` | idea, plan option | domains and their ideas, planned or not |
 | `nos create-plan --domain <d> --plan <file>` | plan (create) | saves `plan.json`, creates phase folders and step files |
-| `nos update-plan --domain <d> --plan <file>` | plan (extend, revise) | saves the changed plan, creates/moves/deletes phases and steps |
+| `nos update-plan --domain <d> --plan <file>` | plan (extend, revise, dependencies) | saves the changed plan, creates/moves/deletes phases and steps; statuses in the file win over the submitted ones |
+| `nos ready --domain <d>` | orchestrator | which steps may start now: `specify`, `develop`, `running`, `continue`, `blocked` (with `waitsOn`), `phasesReviewable`; by `depends-on`, or the next step in order when `dependencies-checked` is false |
 | `nos create-quick-step --domain <d> --step <file>` | quick-step | new step id, quick step file, entry in `quick-steps/quick-steps.json` |
 | `nos set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | orchestrator | changes one status, checked against the matching `status.xml` section. A step id not in `plan.json` is looked up in the quick steps |
 | `nos run start\|sync\|finish\|cleanup\|abandon` | orchestrator | run lifecycle (branch, worktree, rebase, gate, ff-only merge, removal); `run start --poc <slug>`: a throwaway POC branch |
@@ -680,7 +686,7 @@ Each idea is worth stealing on its own:
 - A different state store: GitHub issues or a ticket system instead of `plan.json`.
 - Notifications: send a message when a run parks.
 - Cost control: cheaper models for simple roles through `effort` or model settings in the frontmatter.
-- Parallel steps: independent steps in separate git worktrees.
+- Parallel steps: independent steps (`depends-on`) specified and developed side by side in separate git worktrees, folded back by a merge queue (see `docs/runs-and-worktrees.md`).
 - Metrics: count how often reviews find bugs, to see which roles earn their cost.
 
 ---
@@ -702,6 +708,7 @@ Most changes touch more than one file. Before you finish a change, check these c
 | commit prefix (`step-<id>: `, with colon) | develop, review-fixing, integrate, review-pessimistic (it matches the prefix exactly), `workflow.md` (specs commit messages, exit code 5). `architect: ` prefix: architect (MEASURE searches by it) |
 | a `nos` command or its output | `workflow.md` (exit code table), the abilities that call it, `templates/quality-tools.md` (gate, exec), `cli/README.md` |
 | markers | specify, spec-review, develop, both reviewers, the template, `ui/src/model.ts` |
+| plan.json fields (`depends-on`, `dependencies-checked`) | `templates/plan.json`, `cli/src/dependencies.js` (validation), `cli/src/ready.js` (`nos ready`), `update-plan.js` (what it keeps), `abilities/plan.md` (dependencies, granularity, dependency pass), spec-review (contracts check), `ui/src/model.ts` + views (deps badge), `cli/README.md` |
 | doc paths (`<work>/docs/architecture.md`, `<work>/docs/architecture-template.md`, `<work>/docs/guardrails.xml`) | architect `<files>` and every ability that reads them: plan, develop, integrate, specify, spec-review, both reviewers; `workflow.md` (orchestrator guardrails) |
 | Spec Log markers `(specify)`, `(spec-review)` | specify, spec-review, develop (must not change it), the template |
 | Test Strategy section | the template, specify, spec-review, develop, review-pessimistic (tests pass) |

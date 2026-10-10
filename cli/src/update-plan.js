@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { peekIds, reserveIds } from './config.js';
-import { asList, parsePlan, resolveDomain, validatePlan, PHASES_DIR, PLAN_FILE } from './plan.js';
+import { peekIds, reserveIds, writeJsonFile } from './config.js';
+import { DEPS_CHECKED } from './dependencies.js';
+import { asList, parsePlan, resolveDomain, validatePlan, validateStructure, PHASES_DIR, PLAN_FILE } from './plan.js';
 import { slash, specFileOf, specPath } from './roots.js';
 
 const PHASE_FOLDER = /^phase-(\d+)-([a-z0-9-]+)$/;
@@ -78,9 +79,11 @@ function matchPlan(phases, domain, { phasesBySlug, stepsBySpec }) {
   });
 }
 
-// The statuses (and the plan's branch) survive an update that leaves them out: the orchestrator and nos run
-// own them, not the plan ability. Plan: branch (the current value always wins: run start writes it), status,
-// ideas; kept phases (by slug): status, ideas; kept steps (by spec-file): status. Every other field follows the
+// The statuses (and the plan's branch) survive an update: the orchestrator and nos run own them, not the plan
+// ability. Plan: branch and status (the current value always wins: run start and set-status write them), ideas,
+// dependencies-checked (kept when left out; a dependency pass sets it on purpose); kept phases (by slug): status
+// (current wins), ideas; kept steps (by spec-file): status (current wins: a step may have moved on while the plan
+// ability worked). New phases and steps keep the status they were submitted with. Every other field follows the
 // update as given.
 function keepUnmanaged(parsed, planPath, matched) {
   let current;
@@ -93,10 +96,13 @@ function keepUnmanaged(parsed, planPath, matched) {
   const keep = (field) => (target, source) => {
     if (source && Object.hasOwn(source, field) && !Object.hasOwn(target, field)) target[field] = source[field];
   };
-  const keepStatus = keep('status');
+  const keepStatus = (target, source) => {
+    if (source && Object.hasOwn(source, 'status')) target.status = source.status;
+  };
   const keepIdeas = keep('ideas');
   keepStatus(parsed, current);
   keepIdeas(parsed, current);
+  keep(DEPS_CHECKED)(parsed, current);
   if (Object.hasOwn(current, 'branch')) parsed.branch = current.branch;
   const phasesBySlug = new Map(asList(current.phases).map((phase) => [phase?.slug, phase]));
   const stepsBySpec = new Map();
@@ -123,7 +129,7 @@ function keepUnmanaged(parsed, planPath, matched) {
 export function updatePlan(roots, { domain, plan, force = false, dryRun = false } = {}) {
   const domainDir = resolveDomain(roots, domain, 'update-plan');
   const parsed = parsePlan(plan, 'update-plan');
-  const phases = validatePlan(parsed);
+  const phases = validateStructure(parsed);
   const planPath = path.join(domainDir, PLAN_FILE);
   if (!existsSync(planPath)) {
     throw new Error(`Domain ${domain} has no plan.json. Run create-plan first`);
@@ -132,7 +138,9 @@ export function updatePlan(roots, { domain, plan, force = false, dryRun = false 
   const phasesDir = path.join(domainDir, PHASES_DIR);
   const existing = scanPhases(domain, phasesDir);
   const matched = matchPlan(phases, domain, indexExisting(existing));
+  // restore first, validate the result: a kept dependencies-checked true demands depends-on on every step
   keepUnmanaged(parsed, planPath, matched);
+  validatePlan(parsed);
 
   const keptPhases = new Set(matched.map((m) => m.existing).filter(Boolean));
   const keptSteps = new Set(matched.flatMap((m) => m.steps.map((s) => s.source)).filter(Boolean));
@@ -194,7 +202,7 @@ export function updatePlan(roots, { domain, plan, force = false, dryRun = false 
   if (!dryRun) {
     // Order matters: new folders exist before steps move into them; steps leave a phase before it is deleted.
     operations.forEach((operation) => operation());
-    writeFileSync(planPath, JSON.stringify(parsed, null, 2) + '\n');
+    writeJsonFile(planPath, parsed);
   }
   return { domain, planPath, dryRun, ...changes };
 }

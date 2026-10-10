@@ -3,7 +3,7 @@ import { sortItems, titleOf, type Item } from '../filter';
 import { esc } from '../markdown';
 import { hrefOf } from '../route';
 import { PHASE_BOARD_STATUSES, STATUS_ORDER, STEP_BOARD_STATUSES, type StatusKey } from '../status';
-import { dots, hvnBadge, itemId, quickBadge, keyPill, labelChips, pill, progressText, runDot } from './parts';
+import { depsBadge, dots, hvnBadge, itemId, quickBadge, keyPill, labelChips, pill, progressText, runDot } from './parts';
 
 // `level` picks the always-shown columns; without it, phases get the phase lifecycle.
 export type KanbanOptions = {
@@ -29,6 +29,7 @@ function card(it: Item, o: KanbanOptions) {
     it.status.flagged ? pill(it.status) : '',
     it.kind === 'step' ? progressText('AC', it.ac, 'ac') : dots(it.steps),
     hvnBadge(it.hvn),
+    it.kind === 'step' ? depsBadge(it.dependsOn) : '',
     o.labels ? labelChips(it.labels) : '',
   ].join('');
   return `<div class="card kcard" data-href="${esc(hrefOf(it))}">

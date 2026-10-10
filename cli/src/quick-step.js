@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { reserveIds } from './config.js';
+import { reserveIds, writeJsonFile } from './config.js';
 import { resolveDomain } from './plan.js';
 import { specFileOf } from './roots.js';
 import { assertSlug } from './slug.js';
@@ -27,7 +27,7 @@ export function readQuickSteps(domainDir) {
 }
 
 export function writeQuickSteps(domainDir, steps) {
-  writeFileSync(quickStepsPath(domainDir), JSON.stringify(steps, null, 2) + '\n');
+  writeJsonFile(quickStepsPath(domainDir), steps);
 }
 
 // The id is read from the spec-file (relative to the specs root): <domain>/quick-steps/step-<id>-<slug>.md

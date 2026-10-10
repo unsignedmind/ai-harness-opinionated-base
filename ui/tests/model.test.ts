@@ -315,3 +315,25 @@ test('specsRel defaults to .specs and is carried as given', () => {
   expect(buildModel({}).specsRel).toBe('.specs');
   expect(buildModel({}, [], 'plans/specs').specsRel).toBe('plans/specs');
 });
+
+test('a plan with checked dependencies gives every step its depends-on; quick steps have none', () => {
+  const i = dark();
+  expect(i.dependenciesChecked).toBe(true);
+  expect(i.steps.map((s) => [s.slug, s.dependsOn])).toStrictEqual([
+    ['extract-tokens', []],
+    ['media-query', []],
+    ['toggle-button', ['media-query']],
+  ]);
+  const q = buildModel(quickFixtureFiles()).ideas.find((x) => x.slug === 'dark-mode')!;
+  expect(q.quickSteps[0].dependsOn).toStrictEqual([]);
+});
+
+test('depends-on is ignored while the plan has no dependencies-checked', () => {
+  const files = fixtureFiles();
+  const plan = JSON.parse(files['domain-2-dark-mode/plan.json']);
+  delete plan['dependencies-checked'];
+  files['domain-2-dark-mode/plan.json'] = JSON.stringify(plan);
+  const i = buildModel(files).ideas.find((x) => x.slug === 'dark-mode')!;
+  expect(i.dependenciesChecked).toBe(false);
+  expect(i.steps.map((s) => s.dependsOn)).toStrictEqual([[], [], []]);
+});

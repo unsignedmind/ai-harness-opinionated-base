@@ -29,6 +29,7 @@ nos <command> --help
 | `ideas`             | List the domains and their ideas, planned or not                            |
 | `create-plan`       | Save a `plan.json` in a domain and create its phase folders and step files (`--hollow`: empty plan, promotes unplanned) |
 | `update-plan`       | Save an updated `plan.json` and create, move or delete phases and steps     |
+| `ready`             | Which steps of a plan may start now (by `depends-on`, or the next in order) |
 | `create-quick-step` | Add a quick step (one step outside any plan) to a domain                    |
 | `set-status`        | Change the status of a plan, phase, step or quick step (`--run`: merged/discarded for a whole run) |
 | `run start\|sync\|finish\|cleanup\|abandon` | Run lifecycle: branch + worktree, rebase onto main, gate + ff-only merge, removal (`run start --poc <slug>`: a throwaway POC, never merged) |
@@ -547,7 +548,9 @@ Example `plan.json` (`phases` and `steps` can be arrays or single objects):
 }
 ```
 
-Every phase and step needs a `slug`. All other fields are kept unchanged.
+Every phase and step needs a `slug`, unique among the phases and among the steps of a phase. All other fields are kept unchanged.
+
+Dependencies: a plan with `"dependencies-checked": true` carries `"depends-on"` on every step, the list of step refs it needs done first: `"<step slug>"` (same phase) or `"<phase slug>/<step slug>"` (an earlier phase). `[]` = independent. `create-plan` and `update-plan` refuse a missing list, an unknown ref, a ref to a later phase or to the step itself, and a cycle. Without the flag (false or missing: older plans) `depends-on` is ignored and the steps run in order. Appending phases to a plan resets the flag to false. See [`ready`](#ready).
 
 ```sh
 $ nos create-plan --domain domain-1-user-auth --ideas login-form --plan plan.json
@@ -573,13 +576,32 @@ and creates no folders. The name falls back to the first `# ` heading of the fir
 
 A hollow plan (no phases and no `phase-*` folders) does not count as "planned": a later `create-plan --plan …` replaces it with the real plan. The orchestrator's RUN option skips plans without phases; its PLAN option still offers the domain.
 
+### `ready`
+
+```sh
+nos ready --domain <domain-<id>-<slug>> [--root <dir>]
+```
+
+Which steps of the domain's plan may start now; the orchestrator schedules only from this answer. With `"dependencies-checked": true` a step is ready when every step in its `depends-on` is done (`done`, `merged` or `discarded`) and, unless it names a step of an earlier phase, every earlier phase is done (the phase barrier; it gates only `open` steps, a step already specified is not re-gated when a fix phase is inserted in front of it). Without the flag, mode `sequential`: the first unfinished step in array order is the only one ready, every later one is `blocked` on it.
+
+```json
+{ "action": "ready", "domain": "domain-1-user-auth", "plan": "D:/repo.specs/domain-1-user-auth/plan.json",
+  "dependenciesChecked": true, "mode": "dependencies", "done": false,
+  "specify": [], "develop": [{ "id": 4, "slug": "login-form", "phase": 2, "phaseSlug": "features", "status": "specified" }],
+  "running": [{ "id": 3, "...": "..." }], "continue": [],
+  "blocked": [{ "id": 5, "slug": "logout", "phase": 2, "phaseSlug": "features", "status": "open", "waitsOn": [4], "waitsOnPhases": [] }],
+  "phasesReviewable": [{ "id": 1, "slug": "contracts", "status": "in-progress" }], "phasesContinuing": [] }
+```
+
+`specify`: open steps whose dependencies are done. `develop`: specified steps whose dependencies are done. `running`: in-specification, in-progress, in-review. `continue`: implemented or reviewed, the orchestrator's own transition is next. `blocked`: `waitsOn` step ids not done, `waitsOnPhases` phase ids of the barrier. `phasesReviewable`: all steps done, review not started. `phasesContinuing`: implemented, in-review, reviewed. `done`: everything finished. Exit 1: no `plan.json`, or invalid dependencies in it.
+
 ### `update-plan`
 
 ```sh
 nos update-plan --domain <domain-<id>-<slug>> --plan <file|-> [--dry-run] [--force] [--root <dir>]
 ```
 
-Start from the current `<specs>/<domain>/plan.json`, edit it, and pass it back. `nos` compares it with the folders on disk:
+Start from the current `<specs>/<domain>/plan.json`, edit it, and pass it back. The statuses on disk always win for kept phases and steps (a step may have moved on while the plan ability worked); a left-out `dependencies-checked` is restored before the result is validated. `nos` compares it with the folders on disk:
 
 | In the updated plan                                | Result                                                        |
 | -------------------------------------------------- | ------------------------------------------------------------- |

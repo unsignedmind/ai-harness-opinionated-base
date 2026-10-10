@@ -134,7 +134,7 @@ export function setStatus(roots, { domain, phase, step, status } = {}) {
 
   const previous = item.status;
   item.status = status;
-  writeFileSync(planPath, JSON.stringify(plan, null, 2) + '\n');
+  writeJsonFile(planPath, plan);
 
   return {
     domain,

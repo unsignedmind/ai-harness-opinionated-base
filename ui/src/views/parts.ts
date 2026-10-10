@@ -39,6 +39,10 @@ export const progressText = (label: string, p: Progress, cls: string) =>
 export const hvnBadge = (on: boolean) =>
   on ? '<span class="hvn" title="human validation needed">👁 human check</span>' : '';
 
+// the steps a plan step waits for (depends-on); nothing for an independent step
+export const depsBadge = (deps: string[]) =>
+  deps.length ? `<span class="deps" title="depends on ${esc(deps.join(', '))}">⇠ waits on ${esc(deps.join(', '))}</span>` : '';
+
 export const quickBadge = (on: boolean) =>
   on ? '<span class="quick" title="quick step: a single step outside the plan">⚡ quick</span>' : '';
 

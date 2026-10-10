@@ -34,6 +34,8 @@ export type Idea = {
   quickSteps: Step[];
   // branch of the plan (plan.json "branch", set by nos run start), null when it never ran
   branch: string | null;
+  // plan.json "dependencies-checked": every step carries depends-on, independent steps may run in parallel
+  dependenciesChecked: boolean;
   // the running plan run of this domain
   run: Run | null;
 };
@@ -85,6 +87,8 @@ export type Step = {
   branch: string | null;
   // quick step: its quick run; plan step: the plan run of its domain
   run: Run | null;
+  // the steps this one waits for (plan.json depends-on, only when the plan's dependencies are checked)
+  dependsOn: string[];
 };
 
 export type Model = {
@@ -117,6 +121,8 @@ type RawStep = Partial<{
   'human-validation-needed': boolean;
   description: string;
   'spec-file': string;
+  // step refs this step needs done first: "<step slug>" (same phase) or "<phase slug>/<step slug>"
+  'depends-on': string[];
 }>;
 type RawQuickStep = RawStep & Partial<{ labels: string[]; branch: string }>;
 type RawPhase = Partial<{
@@ -134,6 +140,8 @@ type RawPlan = Partial<{
   status: string;
   branch: string;
   ideas: string[];
+  // true: every step carries depends-on and independent steps may run in parallel
+  'dependencies-checked': boolean;
   phases: RawPhase[];
 }>;
 type RawDomain = Partial<{
@@ -297,6 +305,7 @@ function buildIdea(folder: string, files: Map<string, string>, runs: Run[]): Ide
     steps: [],
     quickSteps: [],
     branch: str(raw?.branch),
+    dependenciesChecked: raw?.['dependencies-checked'] === true,
     // a plan run's id is the domain id
     run: runs.find((r) => r.kind === 'plan' && (r.domain === folder || (!!m && r.id === Number(m[1])))) ?? null,
   };
@@ -382,5 +391,6 @@ function buildStep(rs: RawStep, files: Map<string, string>, idea: Idea, phase: P
     labels: idea.labels,
     branch: phase ? idea.branch : null,
     run: phase ? idea.run : null,
+    dependsOn: phase && idea.dependenciesChecked && Array.isArray(rs['depends-on']) ? rs['depends-on'].filter((d) => typeof d === 'string') : [],
   };
 }

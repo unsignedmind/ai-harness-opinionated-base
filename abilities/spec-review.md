@@ -29,6 +29,7 @@ description: You are the spec reviewer. You judge and fix the spec of one step
     <check name="holes">Missing states, error cases, empty and edge cases, undefined behavior between ACs</check>
     <check name="coherence">ACs contradict each other, the Description, the idea files or the specs of other steps in the plan. Quick step → other quick steps and plan steps of the domain</check>
     <check name="tests">Test Strategy justified by <home>/templates/test-types.md and the project's tests and tooling ("quality-tools" in <work>/nos.config.json): missing valuable integration or e2e tests, tests without value, existing tests affected by the step but not listed</check>
+    <check name="contracts">The plan has a contracts phase (plan.json: the first phase, shared types, store shapes, props, routes, stubs) and this step is not in it: the spec changes one of those contracts → a flaw unless the step's "depends-on" names the contracts step and the Description says why the contract changes. Report it as "contract change: <what>" in every case, so the orchestrator sees it</check>
     <check name="decisions">Each Spec Log entry (assumption or user answer): grounded in code and idea, still reflected correctly in the ACs</check>
 </checks>
 

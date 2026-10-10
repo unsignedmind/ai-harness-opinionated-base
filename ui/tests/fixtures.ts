@@ -18,6 +18,7 @@ export const DOMAIN = {
 export const PLAN = {
   name: 'Dark mode',
   status: 'in-progress',
+  'dependencies-checked': true,
   phases: [
     {
       slug: 'tokens',
@@ -34,6 +35,7 @@ export const PLAN = {
           'human-validation-needed': false,
           description: '- grep colours',
           'spec-file': 'domain-2-dark-mode/phases/phase-1-tokens/step-1-extract-tokens.md',
+          'depends-on': [],
         },
       ],
     },
@@ -52,9 +54,11 @@ export const PLAN = {
           'human-validation-needed': false,
           description: '',
           'spec-file': 'domain-2-dark-mode/phases/phase-2-switch/step-2-media-query.md',
+          'depends-on': [],
         },
         {
           slug: 'toggle-button',
+          'depends-on': ['media-query'],
           intent: 'Manual toggle.',
           status: 'weird',
           'human-validation-needed': true,

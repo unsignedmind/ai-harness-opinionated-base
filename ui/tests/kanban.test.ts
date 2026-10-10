@@ -116,3 +116,8 @@ test('quick step cards carry a quick badge and a Quick path', () => {
   expect(contrast.dataset.href).toBe('#domains/dark-mode/quick-steps/fix-contrast');
   expect(cards.length - quick.length).toBe(3);
 });
+
+test('a step card shows what it waits on', () => {
+  const root = mount(kanban(model().steps));
+  expect([...root.querySelectorAll('.kcard .deps')].map((e) => e.textContent)).toStrictEqual(['⇠ waits on media-query']);
+});

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { reserveIds, specsDir } from './config.js';
+import { reserveIds, specsDir, writeJsonFile } from './config.js';
+import { DEPS_CHECKED, validateDependencies } from './dependencies.js';
 import { defaultName, DOMAIN_FILE, listIdeaFiles, normalizeIdeaFile, plannedIdeas } from './domain.js';
 import { assertSlug } from './slug.js';
 import { readValidStatuses, statusFilePath } from './status.js';
@@ -43,7 +44,9 @@ export function resolveDomain(roots, domain, command = 'create-plan') {
   return domainDir;
 }
 
-export function validatePlan(plan) {
+// Shape only: phases with steps, valid slugs. update-plan matches on this before it restores the fields the plan
+// ability does not own (keepUnmanaged), then validates the whole plan.
+export function validateStructure(plan) {
   const phases = asList(plan?.phases);
   if (phases.length === 0) {
     throw new Error('Plan must contain at least one phase');
@@ -54,6 +57,13 @@ export function validatePlan(plan) {
     if (steps.length === 0) throw new Error(`Phase "${phase.slug}" has no steps`);
     steps.forEach((step, j) => assertSlug(step?.slug, `slug of step ${j + 1} in phase "${phase.slug}"`));
   });
+  return phases;
+}
+
+// Structure, unique phase slugs, and the step dependencies when "dependencies-checked" is true (dependencies.js).
+export function validatePlan(plan) {
+  const phases = validateStructure(plan);
+  validateDependencies(plan, phases);
   return phases;
 }
 
@@ -114,7 +124,7 @@ export function createPlan(roots, { domain, plan, ideas, hollow = false } = {}) 
     if (plan != null) throw new Error('create-plan --hollow takes no plan');
     if (ideas != null) throw new Error('create-plan --hollow takes no ideas');
     if (existsSync(planPath)) throw new Error(`Domain ${domain} already has a plan.json`);
-    writeFileSync(planPath, JSON.stringify(hollowPlan(roots, domainDir, domain), null, 2) + '\n');
+    writeJsonFile(planPath, hollowPlan(roots, domainDir, domain));
     return { domain, planPath, phases: [], hollow: true };
   }
   const parsed = parsePlan(plan);
@@ -156,14 +166,16 @@ export function createPlan(roots, { domain, plan, ideas, hollow = false } = {}) 
     return { id: phaseId, folder: phaseFolder, path: phaseDir, steps: createdSteps };
   });
 
+  // appended phases have no checked dependencies yet: the next AUTO run's dependency pass adds them
   const result = current
     ? {
         ...current,
         status: firstPlanStatus(roots),
         ideas: [...planned, ...planIdeas],
         phases: [...asList(current.phases), ...phases],
+        ...(Object.hasOwn(current, DEPS_CHECKED) && { [DEPS_CHECKED]: false }),
       }
     : { ...parsed, ideas: planIdeas, phases: parsed.phases };
-  writeFileSync(planPath, JSON.stringify(result, null, 2) + '\n');
+  writeJsonFile(planPath, result);
   return { domain, planPath, ideas: planIdeas, appended: Boolean(current), phases: created };
 }
