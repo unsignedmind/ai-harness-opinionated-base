@@ -43,7 +43,7 @@ In short: the words used everywhere below.
 | **slot** | A lease on a port set: lock `slot-<n>`, `n` in `1..worktrees.slots`. Held only while e2e or a dev server runs. Child gets `NOS_SLOT=n`. |
 | **gate** | `nos gate`: runs the configured quality tools (test, lint, format-check, typecheck, additional, e2e) and reports JSON. |
 | **orchestrator** | The Claude Code session running `SKILL.md` + `workflow.md`. Delegates, never implements. One per run. |
-| **ability / subagent** | A role file in `abilities/` (specify, develop, integrate, …). Runs in a fresh subagent (Agent tool), except `chat`. Inherits the session's cwd. |
+| **ability / subagent** | A role file in `abilities/` (specify, develop, integrate, …). Runs in a fresh background subagent (Agent tool, `run_in_background`), except `chat`. Inherits the session's cwd. |
 | **quick step vs plan** | Quick step: single step, no phases, in `quick-steps/quick-steps.json`; finish is automatic after `done`. Plan: phases → steps in `plan.json`; finish only after the user says YES. |
 | **integrate** | The merge-agent ability. Resolves a stopped rebase by the intent of both specs, then runs the gate. |
 | **park** | The orchestrator stops and asks the user (GO / mode switch / REJECT / PAUSE / ABANDON). |

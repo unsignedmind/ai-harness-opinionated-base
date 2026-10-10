@@ -2,7 +2,7 @@
 
 nos turns Claude Code into a small development team. You describe an idea. nos turns it into a plan, implements that plan step by step with TDD, reviews every step twice and every phase once more, and all of this happens in a loop that only stops when you want it to.
 
-The main session is the **orchestrator**. It never writes code itself. It starts a fresh subagent for every job (idea, plan, develop, review, architect), keeps track of progress in `<specs>/` (the specs' own git repo, by default the folder `<project>.specs` next to the project checkout), and reports to you in simple language. Every plan and quick step runs in its own git branch and worktree, so several can run in parallel.
+The main session is the **orchestrator**. It never writes code itself. It starts a fresh subagent for every job (idea, plan, develop, review, architect), keeps track of progress in `<specs>/` (the specs' own git repo, by default the folder `<project>.specs` next to the project checkout), and reports to you in simple language. Subagents run in the background, so you can ask the orchestrator something while one works; it answers first, then goes on. Every plan and quick step runs in its own git branch and worktree, so several can run in parallel.
 
 > **This is a blueprint, not a finished product for every type of project.** It shows one way to build a harness. Use it as is, take pieces from it, or rebuild it for your own team and project. Part 3 explains the ideas behind it, and Part 4 shows how to change it.
 
@@ -593,7 +593,7 @@ Used in ACs, the Task List and review findings:
 
 | Block | Purpose |
 | --- | --- |
-| `<rules>` | Invocation and roots. Runs, token, specs commits after every ability, code commit prefixes. Orchestrator guardrails; lessons become guardrail proposals, never memories. Every ability runs in a new subagent. Statuses change only via `nos set-status`. Questions from subagents are relayed to you and the answers sent back to the same subagent (in AUTO an orchestrator guardrail may hold a standing answer). Reports use simple language. Every question uses the `A - text [KEY]` format |
+| `<rules>` | Invocation and roots. Runs, token, specs commits after every ability, code commit prefixes. Orchestrator guardrails; lessons become guardrail proposals, never memories. Every ability runs in a new background subagent; a user message mid-run is answered first. Statuses change only via `nos set-status`. Questions from subagents are relayed to you and the answers sent back to the same subagent (in AUTO an orchestrator guardrail may hold a standing answer). Reports use simple language. Every question uses the `A - text [KEY]` format |
 | `<exitCodes>` | What to do on each nos exit code: 3 integrate (blocked → DECIDE), 4 take over or stop (merge lock: wait and retry), 6 switch, wait or stop, 5 commit the step's leftover files or park, 7 and 1 park |
 | `<start>` | `nos roots`, the setup check, resume of a run when the session sits in its worktree, and the IDEA / PLAN / RUN / QUICK / ARCHITECT / SETUP / CHAT menu |
 | `<option name="idea">` | Runs idea, then offers PLAN |
