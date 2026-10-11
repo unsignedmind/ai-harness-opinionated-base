@@ -39,8 +39,9 @@ async function runLogged(cmd, { roots, fd, env, signals }) {
 // check -> NosError FAILED marked report, details { provider, env, step, exit, tail, log }.
 export async function runDeploy(roots, { env: rawEnv, mode = 'deploy', signals = process } = {}) {
   const { provider, build } = deployProvider(roots);
-  const { runId, logDir } = logDirOf(roots);
-  const env = provider.envId(rawEnv ?? runId);
+  // a parallel step's worktree deploys to its own env <run>-step-<id> (logDirOf key)
+  const { key, logDir } = logDirOf(roots);
+  const env = provider.envId(rawEnv ?? key);
   const action = mode === 'deploy' ? 'deploy' : `deploy-${mode}`;
   const base = { action, provider: provider.id, env };
 

@@ -18,6 +18,7 @@ import { readRun, requireToken } from './runs.js';
 import { listResults, markProcessed } from './poc.js';
 import { commitSpecs, commitTargetOf, findStep } from './specs-git.js';
 import { setRunStatus, setStatus } from './status.js';
+import { mergeQueue, runStatus, stepAbandon, stepMerge, stepStart } from './steps.js';
 import { updatePlan } from './update-plan.js';
 
 export const USAGE = `nos - file manager for the nos harness
@@ -38,7 +39,8 @@ Commands:
   set-status         Change the status of a plan, phase, step or quick step
                      (--run <kind>-<id> merged|discarded: a whole run, only run finish / abandon)
   run <command>      Run lifecycle: start, sync, finish, cleanup, abandon (branch + worktree per run;
-                     --poc <slug>: a throwaway POC branch, never merged)
+                     --poc <slug>: a throwaway POC branch, never merged); parallel steps of a plan run:
+                     step-start, step-merge, merge-queue, step-abandon, status
   specs commit       Commit config.json + one domain folder of the specs repo (--run, --domain or --config;
                      --run poc-<slug>: only that POC's result file)
   specs find-step    Find the spec file of a step id in any domain
@@ -455,6 +457,9 @@ Example:
 const RUN_HELP = `Usage: nos run start --domain <domain> (--plan | --quick <stepId>) [--token <t>] [--take-over] [--root <dir>]
        nos run start --poc <slug> [--token <t>] [--take-over] [--root <dir>]
        nos run sync|finish|cleanup|abandon --token <t> [--run <kind>-<id>] [--root <dir>]
+       nos run step-start|step-merge|step-abandon --step <id> --token <t> [--run plan-<id>] [--root <dir>]
+       nos run merge-queue --token <t> [--hold <reason> | --release] [--run plan-<id>] [--root <dir>]
+       nos run status --token <t> [--run plan-<id>] [--root <dir>]
 
 A run is one plan (run id plan-<domain id>), one quick step (quick-<step id>) or one POC (poc-<slug>) in
 branch <kind>-<id> and worktree <main>/.claude/worktrees/<kind>-<id>. Run file: <specs>/.runs/<kind>-<id>.json.
@@ -495,6 +500,30 @@ cleanup  Not from inside the worktree. Phase merged or abandoned. git worktree r
 abandon  Not for a merged run, not from inside the worktree. set-status --run discarded, specs commit
          "<run>: discarded", phase abandoned, then the cleanup with --force / -D.
          POC: no statuses, no specs commit ("statuses" and "specs" null), phase abandoned, then the cleanup.
+
+Parallel steps of a plan run (workflow.md block "scheduler", AUTO; step files <specs>/.runs/<run>.steps/step-<id>.json):
+step-start    From inside a step agent's own git worktree (Claude Code Agent isolation "worktree"): adopts it for
+              --step: resets its branch to the step's tip (first agent: the run branch tip; base recorded), moves
+              node_modules over from the step's previous agent worktree and removes that one, runs
+              project-commands.install when node_modules are missing, replays a stopped rebase (phase conflict) so
+              the integrate ability finds it here. Refused (1) in the run worktree, on the run or main branch,
+              for a step the merge queue owns (queued..merging); dirty agent worktree -> 5. Idempotent for the
+              same worktree. Output: step { worktree, branch, base, phase }, env <run>-step-<id>, previous, install.
+step-merge    Enqueues --step (phase queued): its worktree must be clean (5) and no rebase open (3).
+merge-queue   Processes the queue head by head: rebase --onto <run branch> <base> in the step worktree (stopped ->
+              phase conflict, exit 3 with details for integrate: worktree, branch, mainBranch = the run branch,
+              base, files), gate in the step worktree (parallel.mergeGate quick: no e2e; full: e2e when
+              configured; failed -> phase blocked, attempts+1, exit 1 with the gate JSON and "exhausted" after 2),
+              merge --ff-only into the run branch in the run worktree (refused -> once more from the rebase; the run
+              worktree must be clean, 5), the step's cached gate passes handed to the run's gate-cache.json, then
+              deploy --remove of the step env, worktree and branch removed, step file deleted. A blocked or
+              conflict step is skipped by the next call; a merged step is cleaned up first. Stops at the first
+              step that needs an agent. --hold <reason>: nothing merges until --release (a phase review works in
+              the run worktree); a held queue -> 4 with the hold.
+step-abandon  Removes --step's env, worktree, branch and step file (an open rebase is aborted). Not for a step in
+              merging/merged.
+status        Run file, step files, the queue order, blocked steps and the hold.
+sync, finish, cleanup and abandon refuse (1) while step files exist or the run holds its worktree.
 
 Exit: 0 ok, 1 failed (finish: gate fail, main busy/dirty/on another branch, ff refused twice print
 { action, error, exit, details }), 2 usage, 3 rebase conflict, 4 held by another token (run or merge
@@ -979,6 +1008,9 @@ const COMMANDS = {
       token: { type: 'string' },
       'take-over': { type: 'boolean' },
       run: { type: 'string' },
+      step: { type: 'string' },
+      hold: { type: 'string' },
+      release: { type: 'boolean' },
       root: { type: 'string' },
     },
     required: [],
@@ -1005,9 +1037,21 @@ const COMMANDS = {
           env: io.env,
         });
       }
+      const stepCommands = { 'step-start': stepStart, 'step-merge': stepMerge, 'step-abandon': stepAbandon };
+      if (stepCommands[sub]) {
+        if (values.step === undefined) throw new UsageError(`Missing input: --step <id>. Please provide it and retry`, 'run');
+        return stepCommands[sub](roots, { step: values.step, run: values.run, token: values.token, env: io.env, cwd: io.cwd });
+      }
+      if (sub === 'merge-queue') {
+        return mergeQueue(roots, { run: values.run, token: values.token, env: io.env, hold: values.hold, release: values.release ?? false });
+      }
+      if (sub === 'status') return runStatus(roots, { run: values.run, token: values.token, env: io.env });
       const commands = { sync: syncRun, finish: finishRun, cleanup: cleanupRun, abandon: abandonRun };
       if (!commands[sub]) {
-        throw new UsageError(`Unknown run command "${sub}". Use start, sync, finish, cleanup or abandon`, 'run');
+        throw new UsageError(
+          `Unknown run command "${sub}". Use start, sync, finish, cleanup, abandon, step-start, step-merge, step-abandon, merge-queue or status`,
+          'run',
+        );
       }
       const startOnly = ['domain', 'plan', 'quick', 'poc', 'take-over'].find((name) => values[name] !== undefined);
       if (startOnly) throw new UsageError(`run ${sub} takes no --${startOnly}`, 'run');

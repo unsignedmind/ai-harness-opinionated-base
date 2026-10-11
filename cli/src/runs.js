@@ -20,6 +20,75 @@ const isRunId = (runId) => RUN_ID.test(runId) || POC_RUN_ID.test(runId);
 
 export const runsDir = (roots) => path.join(roots.specs, RUNS_DIR);
 
+// Step files of a plan run's parallel steps: <specs>/.runs/<run>.steps/step-<id>.json, one writer each (the
+// step's agent via step-start, the merge queue), never the run file (touchSeen rewrites that one whole).
+// { run, step, worktree, branch, base, phase, attempts, queuedAt?, gateTree?, created, updated }
+//   phase: develop (an agent works in the worktree) | queued | rebasing | conflict (a stopped rebase: integrate)
+//   | gating | blocked (a failed gate or merge: review-fixing) | merging | merged (cleanup pending)
+export const STEP_PHASES = Object.freeze(['develop', 'queued', 'rebasing', 'conflict', 'gating', 'blocked', 'merging', 'merged']);
+const STEP_FILE = /^step-([1-9]\d*)\.json$/;
+
+export const stepsDir = (roots, runId) => path.join(runsDir(roots), `${parseRunId(runId).runId}.steps`);
+
+export const stepPath = (roots, runId, step) => path.join(stepsDir(roots, runId), `step-${step}.json`);
+
+export function readStep(roots, runId, step) {
+  const file = stepPath(roots, runId, step);
+  let text;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw new NosError(FAILED, `Cannot read ${slash(file)}: ${err.message}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new NosError(FAILED, `Cannot read ${slash(file)}: ${err.message}`);
+  }
+}
+
+export function writeStep(roots, file) {
+  if (!STEP_PHASES.includes(file?.phase)) {
+    throw new NosError(FAILED, `Invalid step phase "${file?.phase}". Valid: ${STEP_PHASES.join(', ')}`);
+  }
+  const target = stepPath(roots, file.run, file.step);
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileAtomic(target, JSON.stringify(file, null, 2) + '\n');
+  return target;
+}
+
+export function deleteStep(roots, runId, step) {
+  rmSync(stepPath(roots, runId, step), { force: true });
+  try {
+    if (!readdirSync(stepsDir(roots, runId)).length) rmSync(stepsDir(roots, runId), { recursive: true, force: true });
+  } catch {
+    // already gone
+  }
+}
+
+// Every step file of a run, sorted by step id. Unreadable files are skipped.
+export function listSteps(roots, runId) {
+  let names;
+  try {
+    names = readdirSync(stepsDir(roots, runId));
+  } catch {
+    return [];
+  }
+  const steps = [];
+  for (const name of names) {
+    const match = STEP_FILE.exec(name);
+    if (!match) continue;
+    try {
+      const file = readStep(roots, runId, Number(match[1]));
+      if (file) steps.push(file);
+    } catch {
+      // half-written: not a step anyone can act on
+    }
+  }
+  return steps.sort((a, b) => a.step - b.step);
+}
+
 // '<kind>-<id>' -> { runId, kind, id }: id a number for plan/quick, the slug for poc; anything else is a usage
 // error
 export function parseRunId(runId) {
@@ -138,15 +207,23 @@ function real(p) {
 
 const samePath = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
 
-// The run whose worktree roots.work is (or lies in), null in main or outside any run.
+const inFolder = (work, folder) => {
+  if (!folder || !existsSync(folder)) return false;
+  const wt = real(folder);
+  return samePath(wt, work) || isInside(work, wt);
+};
+
+// The run whose worktree roots.work is (or lies in), null in main or outside any run. In the worktree of a
+// parallel step (step file) the run comes with "step": its id (log folder logs/<run>/step-<id>, env <run>-step-<id>).
 export function runOfWorktree(roots) {
   if (!roots.inWorktree) return null;
   const work = real(roots.work);
-  return (
-    listRuns(roots).find((run) => {
-      if (!run.worktree || !existsSync(run.worktree)) return false;
-      const wt = real(run.worktree);
-      return samePath(wt, work) || isInside(work, wt);
-    }) ?? null
-  );
+  const runs = listRuns(roots);
+  const own = runs.find((run) => inFolder(work, run.worktree));
+  if (own) return own;
+  for (const run of runs) {
+    const step = listSteps(roots, runIdOf(run)).find((s) => inFolder(work, s.worktree));
+    if (step) return { ...run, step: step.step };
+  }
+  return null;
 }

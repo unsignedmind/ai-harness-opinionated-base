@@ -46,13 +46,38 @@ export function gateTools(tools, { e2e = false } = {}) {
 }
 
 // The log folder of a gate or exec: <specs>/.runs/logs/<run>, run = the given one, else the run of this
-// worktree, else 'main'. Returns { runId, logDir } (logDir created unless create is false).
+// worktree (a parallel step's worktree: logs/<run>/step-<id>, key <run>-step-<id>), else 'main'.
+// Returns { runId, step, key, logDir } (logDir created unless create is false). key names the deploy env.
 export function logDirOf(roots, run, { create = true } = {}) {
   const own = run ? null : runOfWorktree(roots);
   const runId = run ? parseRunId(run).runId : own ? runIdOf(own) : 'main';
-  const logDir = path.join(runsDir(roots), LOGS_DIR, runId);
+  const step = own?.step ?? null;
+  const key = step ? `${runId}-step-${step}` : runId;
+  const logDir = path.join(runsDir(roots), LOGS_DIR, runId, ...(step ? [`step-${step}`] : []));
   if (create) mkdirSync(logDir, { recursive: true });
-  return { runId, logDir };
+  return { runId, step, key, logDir };
+}
+
+// The cached passes of one tree in a log folder's gate-cache.json, null when none
+export function readCacheEntry(logDir, tree) {
+  return readCache(logDir).trees[tree] ?? null;
+}
+
+// Stores a tree's cached passes in another log folder's gate-cache.json (the merge queue hands a step's passes
+// to the run: the phase and finish gates on the same content skip those tools). Best effort.
+export function saveCacheEntry(logDir, tree, entry) {
+  const cache = readCache(logDir);
+  const trees = { ...cache.trees, [tree]: { ...entry, at: entry.at ?? new Date().toISOString() } };
+  const newest = Object.keys(trees)
+    .sort((a, b) => String(trees[b].at).localeCompare(String(trees[a].at)))
+    .slice(0, CACHE_TREES);
+  try {
+    mkdirSync(logDir, { recursive: true });
+    const kept = Object.fromEntries(newest.map((key) => [key, trees[key]]));
+    writeFileAtomic(path.join(logDir, CACHE_FILE), `${JSON.stringify({ version: 1, trees: kept }, null, 2)}\n`);
+  } catch {
+    // the next gate runs the tools again
+  }
 }
 
 const lastLines = (text, n) => {

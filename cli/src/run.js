@@ -14,6 +14,7 @@ import { isInside, resolveRoots, slash, worktreeProjectDir } from './roots.js';
 import {
   deleteRun,
   listRuns,
+  listSteps,
   mintToken,
   notesPath,
   readRun,
@@ -45,7 +46,7 @@ const TERMINAL_STATUSES = Object.freeze(['merged', 'discarded']);
 const BUSY_REFS = Object.freeze(['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']);
 const REBASE_DIRS = Object.freeze(['rebase-merge', 'rebase-apply']);
 // git never opens an editor for a rebase (GIT_EDITOR beats core.editor)
-const NO_EDITOR_ENV = Object.freeze({ GIT_EDITOR: 'true' });
+export const NO_EDITOR_ENV = Object.freeze({ GIT_EDITOR: 'true' });
 // Windows: a process sits in the folder or holds a file in it
 const FOLDER_BUSY =
   /Permission denied|Device or resource busy|being used by another process|Invalid argument|EBUSY|EPERM/i;
@@ -57,7 +58,7 @@ function failed(message, details) {
   return err;
 }
 
-function mustGit(args, cwd, env) {
+export function mustGit(args, cwd, env) {
   const res = git(args, { cwd, env });
   if (res.code !== 0) {
     throw new NosError(FAILED, `git -C ${slash(cwd)} ${args.join(' ')} failed: ${(res.stderr || res.stdout).trim()}`);
@@ -96,7 +97,7 @@ function requireGit(roots) {
 }
 
 // The top of main's git checkout (main itself unless the project is a subfolder of its repo)
-const mainTopOf = (roots) => path.resolve(mustGit(['rev-parse', '--show-toplevel'], roots.main));
+export const mainTopOf = (roots) => path.resolve(mustGit(['rev-parse', '--show-toplevel'], roots.main));
 
 // <main>/.claude/worktrees/<run>: the only place EnterWorktree accepts without a prompt
 export const worktreeOf = (roots, runId) => path.join(roots.main, ...WORKTREES_DIR, runId);
@@ -111,7 +112,7 @@ const worktreeRoots = (roots, run) => resolveRoots({ root: enterOf(roots, run), 
 const zList = (out) => out.split('\0').filter(Boolean);
 
 // git status --porcelain -z --untracked-files=all of a checkout: paths relative to its top (renames: both names)
-function changedFiles(top) {
+export function changedFiles(top) {
   const res = git(['status', '--porcelain', '-z', '--untracked-files=all'], { cwd: top });
   if (res.code !== 0) throw new NosError(FAILED, `git status failed in ${slash(top)}: ${res.stderr.trim()}`);
   const parts = res.stdout.split('\0');
@@ -126,27 +127,27 @@ function changedFiles(top) {
 }
 
 // { files (relative to top), paths (absolute) } of a file list
-const fileList = (top, files) => ({ files, paths: files.map((file) => slash(path.join(top, file))) });
+export const fileList = (top, files) => ({ files, paths: files.map((file) => slash(path.join(top, file))) });
 
 // The unmerged files of a stopped rebase
-const unmergedFiles = (top) => zList(git(['diff', '--name-only', '-z', '--diff-filter=U'], { cwd: top }).stdout);
+export const unmergedFiles = (top) => zList(git(['diff', '--name-only', '-z', '--diff-filter=U'], { cwd: top }).stdout);
 
 // A rebase is stopped in this checkout: a rebase-merge / rebase-apply folder in its git dir (a worktree has its
 // own git dir under <common>/worktrees/<name>). Not REBASE_HEAD: git leaves it behind after a finished rebase.
-function rebaseInProgress(top) {
+export function rebaseInProgress(top) {
   const gitDir = git(['rev-parse', '--absolute-git-dir'], { cwd: top }).stdout.trim();
   return Boolean(gitDir) && REBASE_DIRS.some((dir) => existsSync(path.join(gitDir, dir)));
 }
 
-const currentBranch = (top) => {
+export const currentBranch = (top) => {
   const res = git(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd: top });
   return res.code === 0 ? res.stdout.trim() : null;
 };
 
-const branchExists = (top, branch) => ok(['rev-parse', '-q', '--verify', `refs/heads/${branch}`], top);
+export const branchExists = (top, branch) => ok(['rev-parse', '-q', '--verify', `refs/heads/${branch}`], top);
 
 // The entry of `git worktree list` for this folder, null when git does not know it
-function registeredWorktree(mainTop, wt) {
+export function registeredWorktree(mainTop, wt) {
   const out = git(['worktree', 'list', '--porcelain'], { cwd: mainTop }).stdout;
   const paths = out
     .split(/\r?\n/)
@@ -193,15 +194,19 @@ function writeBranch(target, branch) {
 // Which run a token-bearing command acts on
 
 // --run, else the run of the worktree the caller sits in, else the run holding the token. The token must match
-// (requireToken: missing -> 1, another -> 4). Updates seen. Returns the run.
-export function resolveRun(roots, { run: runId, token, env = process.env } = {}) {
+// (requireToken: missing -> 1, another -> 4). Updates seen (touch false: a step agent's call never rewrites the
+// run file). Returns the run.
+export function resolveRun(roots, { run: runId, token, env = process.env, touch = true } = {}) {
   const given = token || env.NOS_RUN_TOKEN;
   let run;
   if (runId) {
     run = readRun(roots, runId);
     if (!run) throw new NosError(FAILED, `No run ${runId} in ${slash(path.join(roots.specs, '.runs'))}`);
   } else {
-    run = runOfWorktree(roots) ?? (given ? listRuns(roots).find((r) => r.token === given) : null);
+    const own = runOfWorktree(roots);
+    // in a step worktree the run is the step's run (the "step" marker is not part of the run file)
+    if (own?.step) delete own.step;
+    run = own ?? (given ? listRuns(roots).find((r) => r.token === given) : null);
     if (!run) {
       throw new NosError(
         FAILED,
@@ -212,7 +217,26 @@ export function resolveRun(roots, { run: runId, token, env = process.env } = {})
     }
   }
   requireToken(run, token, env);
-  return touchSeen(roots, run);
+  return touch ? touchSeen(roots, run) : run;
+}
+
+// Parallel steps still open (step files) or a hold on the run worktree: sync, finish, abandon and cleanup wait
+export function requireNoSteps(roots, run, command) {
+  const steps = listSteps(roots, runIdOf(run));
+  if (steps.length) {
+    throw new NosError(
+      FAILED,
+      `Run ${runIdOf(run)} has ${steps.length} parallel step worktree(s) (${steps.map((s) => `step ${s.step}: ${s.phase}`).join(', ')}): ` +
+        `${command} waits until they are merged (nos run merge-queue) or abandoned (nos run step-abandon)`,
+      { run: runIdOf(run), steps: steps.map(({ step, phase, worktree, branch }) => ({ step, phase, worktree, branch })) },
+    );
+  }
+  if (run.hold) {
+    throw new NosError(FAILED, `Run ${runIdOf(run)} holds its worktree: ${run.hold.reason}. nos run merge-queue --release first`, {
+      run: runIdOf(run),
+      hold: run.hold,
+    });
+  }
 }
 
 function heldBy(run) {
@@ -596,7 +620,7 @@ function syncWorktree(run) {
   return { base, ahead, behind, rebased: before !== after };
 }
 
-function requireActive(run, command) {
+export function requireActive(run, command) {
   if (TERMINAL.includes(run.phase)) {
     throw new NosError(FAILED, `Run ${runIdOf(run)} is ${run.phase}: no ${command}. nos run cleanup removes it`);
   }
@@ -606,6 +630,7 @@ function requireActive(run, command) {
 export function syncRun(roots, options = {}) {
   let run = resolveRun(roots, options);
   requireActive(run, 'sync');
+  requireNoSteps(roots, run, 'sync');
   const sync = syncWorktree(run);
   run = { ...run, base: sync.base };
   writeRun(roots, run);
@@ -661,7 +686,7 @@ function checkMainClean(mainTop, run) {
 
 const isAncestor = (top, a, b) => ok(['merge-base', '--is-ancestor', a, b], top);
 
-const hasE2e = (roots) => {
+export const hasE2e = (roots) => {
   const e2e = qualityTools(roots).e2e;
   return typeof e2e === 'string' && e2e.trim() !== '';
 };
@@ -680,6 +705,7 @@ export async function finishRun(roots, { gate: gateOptions = {}, ...options } = 
     releaseOwnMergeLock(roots, run.token);
     return { action: 'run-finish', run: publicRun(run), merged: true, already: true };
   }
+  requireNoSteps(roots, run, 'finish');
   const target = targetOf(roots, run);
   const status = target.item.status;
   if (!(status === 'done' || (status === 'merged' && run.phase === 'merge'))) {
@@ -765,21 +791,27 @@ function busyError(wt, message) {
   );
 }
 
+// Modified tracked files of a checkout (untracked ones are build output, no reason to refuse)
+export const modifiedTracked = (top) =>
+  zList(git(['status', '--porcelain', '-z', '--untracked-files=no'], { cwd: top }).stdout).map((entry) => entry.slice(3));
+
 // git worktree remove. Merged: untracked files (gate output, build artefacts) are no reason to keep it -> --force,
-// but modified tracked files are -> DIRTY with the list. Abandoned: always --force.
-function removeWorktree(mainTop, run, wt, force) {
+// but modified tracked files are -> DIRTY with the list. Abandoned: always --force. run: { run id, step? } for the
+// messages (a step worktree names its step).
+export function removeWorktreeDir(mainTop, who, wt, force) {
+  const label = who.step ? `step ${who.step} of ${who.run}` : who.run;
   const remove = (withForce) => git(['worktree', 'remove', ...(withForce ? ['--force'] : []), wt], { cwd: mainTop });
   let res = remove(force);
   let message = (res.stderr || res.stdout).trim();
   if (res.code !== 0 && /contains modified or untracked files/i.test(message)) {
-    const tracked = git(['status', '--porcelain', '-z', '--untracked-files=no'], { cwd: wt });
-    const modified = zList(tracked.stdout).map((entry) => entry.slice(3));
-    if (tracked.code === 0 && !modified.length) {
+    const modified = modifiedTracked(wt);
+    if (!modified.length) {
       res = remove(true);
       message = (res.stderr || res.stdout).trim();
     } else {
-      throw new NosError(DIRTY, `The worktree of ${runIdOf(run)} has modified files: commit or revert them first`, {
-        run: runIdOf(run),
+      throw new NosError(DIRTY, `The worktree of ${label} has modified files: commit or revert them first`, {
+        run: who.run,
+        ...(who.step && { step: who.step }),
         worktree: slash(wt),
         ...fileList(wt, modified),
       });
@@ -788,6 +820,10 @@ function removeWorktree(mainTop, run, wt, force) {
   if (res.code === 0) return;
   if (FOLDER_BUSY.test(message)) throw busyError(wt, message);
   throw new NosError(FAILED, `git worktree remove ${slash(wt)} failed: ${message}`, { worktree: slash(wt) });
+}
+
+function removeWorktree(mainTop, run, wt, force) {
+  return removeWorktreeDir(mainTop, { run: runIdOf(run) }, wt, force);
 }
 
 // Removes worktree, branch (-D: merged into mainBranch, or abandoned), run file and notes (<specs>/.runs/<run>.md,
@@ -837,6 +873,7 @@ function removeRun(roots, run) {
 // nos run cleanup --token t: from main, phase merged or abandoned
 export function cleanupRun(roots, { cwd = process.cwd(), ...options } = {}) {
   const run = resolveRun(roots, options);
+  requireNoSteps(roots, run, 'cleanup');
   if (!TERMINAL.includes(run.phase)) {
     throw new NosError(
       FAILED,
@@ -853,6 +890,7 @@ export function cleanupRun(roots, { cwd = process.cwd(), ...options } = {}) {
 export function abandonRun(roots, { cwd = process.cwd(), ...options } = {}) {
   let run = resolveRun(roots, options);
   const runId = runIdOf(run);
+  requireNoSteps(roots, run, 'abandon');
   if (run.phase === 'merged') throw new NosError(FAILED, `Run ${runId} is merged: nos run cleanup removes it`);
   // a finish crashed after the ff merge: the code is in main, discarding the specs would lie
   if (run.phase === 'merge' && isAncestor(mainTopOf(roots), run.branch, run.mainBranch)) {
