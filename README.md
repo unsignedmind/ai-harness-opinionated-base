@@ -397,7 +397,7 @@ open ──► in-progress ──► implemented ──► in-review ──► r
 - Phase: `in-progress` runs the step cycle for every step that is not done. The phase review starts only after all steps are done.
 - There is no review of the whole plan. The phase reviews already cover how steps fit together.
 - Plan statuses: `open`/`on-hold` → `in-progress` → `done` → `merged` (by `nos run finish`). `discarded` by `nos run abandon`.
-- Run: `nos run sync` before every develop. Plan done → you decide on integrating; quick step done → integrated automatically.
+- Run: `nos run sync` before every develop (not for parallel steps: their worktrees start at the run branch tip and the merge queue folds them back). Plan done → you decide on integrating; quick step done → integrated automatically.
 
 #### Resume
 
@@ -579,6 +579,8 @@ Used in ACs, the Task List and review findings:
 | `nos create-quick-step --domain <d> --step <file>` | quick-step | new step id, quick step file, entry in `quick-steps/quick-steps.json` |
 | `nos set-status --domain <d> [--phase <id>] [--step <id>] --status <s>` | orchestrator | changes one status, checked against the matching `status.xml` section. A step id not in `plan.json` is looked up in the quick steps |
 | `nos run start\|sync\|finish\|cleanup\|abandon` | orchestrator | run lifecycle (branch, worktree, rebase, gate, ff-only merge, removal); `run start --poc <slug>`: a throwaway POC branch |
+| `nos run step-start --step <id>` | develop, reviewers, integrate (parallel steps) | adopts the agent's own worktree for the step: branch at the step's tip, node_modules moved, previous worktree removed, a stopped rebase replayed |
+| `nos run step-merge\|merge-queue\|step-abandon\|status` | orchestrator | enqueue a reviewed parallel step; rebase + gate + ff-only into the run branch, stops at a conflict (3) or failed gate (1) for an agent, `--hold`/`--release` around phase reviews; throw a step away; run, steps, queue and hold |
 | `nos specs commit (--run <r>\|--domain <d>\|--config) -m <msg>` | orchestrator | commits one domain's specs (or only `config.json`) in `<specs>`; `--run poc-<slug>`: only that POC's result file |
 | `nos poc results`, `nos poc processed <slug> --as <what>` | orchestrator | lists the POC results in `<specs>/pocs`; marks one processed |
 | `nos specs find-step <id>` | integrate | spec file of a step id in any domain |
@@ -605,7 +607,8 @@ Used in ACs, the Task List and review findings:
 
 - Questions from subagents (idea, architect, and specify and spec-review in MANUAL) are relayed through the orchestrator session. They only work while that session is open.
 - spec-review can ask specify only while the orchestrator session that ran specify is open. After a resume it decides alone.
-- Parallel specifications (AUTO) multiply the live subagents: up to two per step in specification. Lower `parallel.specify` in `nos.config.json` when the orchestrator session gets slow or its context compacts often.
+- Parallel specifications and developments (AUTO) multiply the live subagents: up to two per step in specification, one per step in development. Lower `parallel.specify` / `parallel.develop` in `nos.config.json` when the orchestrator session gets slow or its context compacts often.
+- A parallel step's agent worktree is created by Claude Code (`agent-<id>`, from the remote default branch); `nos run step-start` moves it to the step's tip, so the base never depends on `worktree.baseRef`. Each ability of the step gets a fresh one (`node_modules` are moved, not reinstalled). Claude Code's periodic worktree sweep keeps worktrees with unmerged commits; an unchanged one may disappear — `step-start` then reports it and the step is started again.
 - Reviewers find changes only through the commit prefix. A commit without the prefix is invisible to them.
 - The run token lives in the session's transcript. A fresh session must take a running run over on purpose.
 - Stale locks and run files after a crash are never broken automatically; nos shows holder and age, you decide (`nos lock release <name> --break`).
@@ -624,7 +627,7 @@ Used in ACs, the Task List and review findings:
 | `<option name="quick">` | Continues an unfinished quick step or runs quick-step for a new one, then runs the step cycle for it |
 | `<modes>` | Defines AUTO and MANUAL through the `mode` attribute on each `<park>` (AUTO only on human-validation parks) and on a `do` element that runs in one mode only (`mode="auto"` or `mode="manual"`) |
 | `<option name="run">` | Picks a plan or quick step, starts or resumes its run (`nos run start`, enter the worktree) and a mode. Quick step → step cycle, then finish. Plan → sets the plan `in-progress`, runs every unfinished phase (MANUAL: in order; AUTO: block `scheduler`), sets the plan `done`, asks to integrate |
-| `<scheduler>` | AUTO plan runs: `nos ready` answers which steps may start by their `depends-on` (dependency pass first when the plan has none); specifications of independent steps run in parallel (`parallel.specify` of `nos.config.json`), development one step at a time in the run worktree; each step keeps its own cycle position; parks name their step and let the others continue |
+| `<scheduler>` | AUTO plan runs: `nos ready` answers which steps may start by their `depends-on` (dependency pass first when the plan has none); specifications of independent steps run in parallel (`parallel.specify`), developments too (`parallel.develop`), each in its own agent worktree (Agent isolation, `nos run step-start` adopts it); the merge queue (`nos run merge-queue`) folds the step branches into the run branch, phase reviews hold the run worktree; each step keeps its own cycle position; parks name their step and let the others continue |
 | `<cycle name="finish">` | Proposals (AUTO: after cleanup), docs update, `nos run finish` (AUTO: up to 2 gate fix rounds), leave the worktree, `nos run cleanup` |
 | `<cycle name="phase">` | Runs all steps (MANUAL; in AUTO the scheduler does), then reviews the phase as a whole |
 | `<cycle name="step">` | specify → spec-review → develop → review-pessimistic → review-fixing |

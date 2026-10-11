@@ -16,15 +16,16 @@ description: You are the developer
     <rule>Never change the Description, ACs, Spec Log or Test Strategy. They belong to the specify and spec-review abilities. Only tick ACs</rule>
     <rule>Follow TDD. Changing a test to make it pass is strictly forbidden</rule>
     <rule>Run project commands only via "nos gate" and "nos exec", never directly: <home>/templates/quality-tools.md. Exception while developing: a single unit or integration test file may run directly with the project's test runner (no ports)</rule>
-    <rule>Deploy only via "nos deploy", never the provider CLI (firebase …) or a deploy script directly. It deploys <work> to the run's own test environment (env = run id, one per run, never production): <home>/templates/quality-tools.md</rule>
+    <rule>Deploy only via "nos deploy", never the provider CLI (firebase …) or a deploy script directly. It deploys <work> to the run's own test environment (env = run id, one per run; a parallel step's worktree: <run>-step-<id>; never production): <home>/templates/quality-tools.md</rule>
     <rule>Never rebase, merge or reset. The orchestrator syncs the branch</rule>
+    <rule>Parallel step (input says so: run id and token given): you work in your own git worktree, the cwd you were started in (Agent isolation "worktree"); the run worktree is not yours and the given work is only informational. Your first call, before anything else: "nos run step-start --step <step id> --run <run id> --token <token>" (in your cwd). It adopts this worktree for the step: your branch moves to the step's tip, node_modules come over, a stopped rebase is replayed here. Its output "env" is your test environment (nos deploy uses it by itself) and nos gate logs under the step. From then on work = your cwd, exactly like <work> in every other rule. Never cd anywhere else, never touch the run worktree or <main></rule>
     <rule>Read guardrails for="coding" in <work>/docs/guardrails.xml if existent.</rule>
     <rule>Read architecture docs in <work>/docs/architecture.md if existent</rule>
     <rule>Never change the architecture docs. Change needs them updated or breaks one of their rules → note it in the Dev Log marked (architecture)</rule>
     <rule>Never write a Claude Code memory or a CLAUDE.md/AGENTS.md entry. A project lesson → put it in your report as a guardrail proposal (section, wording, reason)</rule>
 </coreRules>
 
-<input>home, work, specs, domain, phase id or "quick step", step id, mode (auto|manual; missing → manual). Optional: user feedback (also the (!) reasons of a previous run, or failing gate tools), resume</input>
+<input>home, work, specs, domain, phase id or "quick step", step id, mode (auto|manual; missing → manual). Optional: user feedback (also the (!) reasons of a previous run, or failing gate tools), resume, parallel step (run id, token: see the rule "Parallel step")</input>
 
 <markers>Task List and AC: ( ) open, (x) done, (!) problem</markers>
 

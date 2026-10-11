@@ -86,11 +86,12 @@ Exception while developing: a single unit or integration test file may run direc
 
 ## Test environments: `nos deploy`
 
-- Builds (`deploy.build`) and deploys the checkout to a test environment of its own: env id = the run id of the worktree (= its branch), else `main`; `--env <id>` overrides it. One env per run, so parallel runs never deploy over each other. Never production.
+- Builds (`deploy.build`) and deploys the checkout to a test environment of its own: env id = the run id of the worktree (= its branch), in a parallel step's worktree `<run>-step-<id>` (e.g. `plan-3-step-12`), else `main`; `--env <id>` overrides it. One env per run and per parallel step, so nothing deploys over anything else. Never production.
 - Providers (`deploy.provider`): `firebase-hosting` = a Hosting preview channel per env (`firebase hosting:channel:deploy <env> --expires 7d`; the `live` channel is refused). `command` = `options.command` deploys the env in `NOS_DEPLOY_ENV` and prints its url. nos has no provider dependency: the project brings the CLI and its login.
 - Output: `{ "action": "deploy", "provider", "env", "url", "expires", "log" }`. Exit `0` ok. `1` build or deploy failed (`details.step`, `tail`, `log`) or bad config. `8` deploy not configured → skip, note "not deployed: deploy not configured".
 - When: develop and review-fixing deploy once the gate passes and check the ACs (and fixed findings) on the url. Deploy during development only for a strong case the final test would not catch.
-- `nos deploy --remove` deletes the env (the orchestrator, at finish and abandon). `nos deploy --check`: the provider CLI is installed and logged in (setup).
+- `nos deploy --remove` deletes the env (the orchestrator, at finish and abandon; `nos run merge-queue` and `step-abandon` for a parallel step's env). `nos deploy --check`: the provider CLI is installed and logged in (setup).
+- Merge gate of a parallel step (`nos run merge-queue`, `parallel.mergeGate` in `nos.config.json`): `quick` (default) runs the gate without e2e in the step's worktree before it merges into the run branch, the phase and finish gates run e2e; `full` runs e2e per step too. A step whose rebase changed nothing hits its reviewers' cached passes (`cached: true`), and its passes are handed to the run's cache.
 
 ## Slots and `NOS_SLOT`
 

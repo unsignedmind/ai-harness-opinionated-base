@@ -33,6 +33,7 @@ nos <command> --help
 | `create-quick-step` | Add a quick step (one step outside any plan) to a domain                    |
 | `set-status`        | Change the status of a plan, phase, step or quick step (`--run`: merged/discarded for a whole run) |
 | `run start\|sync\|finish\|cleanup\|abandon` | Run lifecycle: branch + worktree, rebase onto main, gate + ff-only merge, removal (`run start --poc <slug>`: a throwaway POC, never merged) |
+| `run step-start\|step-merge\|merge-queue\|step-abandon\|status` | Parallel steps of a plan run: adopt an agent worktree, enqueue, merge the queue into the run branch (`--hold`/`--release`), drop a step, show steps + queue |
 | `specs commit`      | Commit `config.json` + one domain folder of the specs repo (`--run`, `--domain` or `--config`; `--run poc-<slug>`: only its result file) |
 | `specs find-step`   | Find the spec file of a step id in any domain                               |
 | `poc results\|processed` | List the POC results in `<specs>/pocs`; mark one processed (`--as`)     |
@@ -243,6 +244,31 @@ A POC run has no statuses and no specs commit: `phase=abandoned`, then the clean
   "statuses": { "action": "set-status", "...": "..." }, "specs": { "committed": true, "sha": "<sha>" } }
 { "action": "run-abandon", "run": { "kind": "poc", "id": "dark-mode", "domain": null, "...": "...", "phase": "abandoned" },
   "removed": { "worktree": true, "branch": true, "runFile": true, "notes": true }, "statuses": null, "specs": null }
+```
+
+### Parallel steps: `run step-start`, `run step-merge`, `run merge-queue`, `run step-abandon`, `run status`
+
+A plan run in AUTO (workflow `scheduler`) develops independent steps side by side. Each step's abilities run in a worktree of their own, created by Claude Code's Agent isolation (`<main>/.claude/worktrees/agent-<id>`, branch `worktree-agent-<id>`, from the remote default branch). nos adopts it:
+
+```sh
+nos run step-start --step <id> --run plan-<n> --token <t>     # the agent's first call, from its worktree
+```
+
+Refused (1) outside a registered worktree, inside the run worktree, on the run or main branch, for a step id not in the plan, or for a step the merge queue owns (`queued`…`merging`); a dirty agent worktree → 5. First adoption: the agent's branch is reset to the run branch tip (`base` = that sha). Later adoptions (the step's next ability): the branch is reset to the step's tip (the previous agent branch), `node_modules` are moved over from the previous worktree, a stopped rebase there is aborted and replayed here (`replay`), the previous worktree and branch are removed. `project-commands.install` runs when `node_modules` are missing (log under the step). Idempotent for the same worktree (`adopted: false`). Output: `{ "action": "run-step-start", "run", "step": { worktree, branch, base, phase, attempts }, "env": "plan-3-step-12", "adopted", "previous", "nodeModules": "moved|installed|present|none", "install", "replay"? }`.
+
+Step file `<specs>/.runs/<run>.steps/step-<id>.json` (`runs.js`): `{ run, step, worktree, branch, base, phase, attempts, queuedAt?, gateTree?, created, updated }`; phases `develop | queued | rebasing | conflict | gating | blocked | merging | merged`. Inside a step worktree `nos gate` logs to `<specs>/.runs/logs/<run>/step-<id>/` and `nos deploy` uses env `<run>-step-<id>`.
+
+```sh
+nos run step-merge --step <id> --token <t>        # enqueue (phase queued); worktree must be clean (5), no open rebase (3)
+nos run merge-queue --token <t>                   # process the queue, from the run worktree
+nos run merge-queue --hold "phase-2 review" --token <t>   /   --release
+```
+
+`merge-queue` works the queue head by head (merged steps first, then by `queuedAt`): `rebasing` — `git rebase --onto <run branch> <base>` in the step worktree; stopped → phase `conflict`, exit 3 with `details` `{ run, step, worktree, branch, mainBranch: <run branch>, base, rebaseInProgress, files, paths }` for the integrate ability (which adopts a new worktree; `step-start` replays the rebase there). `gating` — the gate in the step worktree (`parallel.mergeGate` `quick`: no e2e, `full`: e2e when configured; log + cache under the step); failed → phase `blocked`, `attempts` + 1, exit 1 with `details.gate`, `details.attempts`, `details.exhausted` (true after 2). `merging` — `git merge --ff-only <step branch>` in the run worktree (modified tracked files there → 5; refused → once more from the rebase, then 1), the step's cached passes handed to `logs/<run>/gate-cache.json`. `merged` — `nos deploy --remove` of the step env (not configured → skipped), worktree unlocked and removed, branch deleted, step file deleted last (a busy folder → 1, the rerun finishes it). A `blocked` or `conflict` step is skipped until `step-merge` queues it again. Stops at the first step that needs an agent; the next call carries on with the rest. Output: `{ "action": "run-merge-queue", "run", "held", "merged": [{ step, env, worktree, branch }], "head", "hold", "queue", "blocked", "developing", "steps" }`. `--hold <reason>` / `--release` set and clear `hold` in the run file; a held queue → 4 with the hold. `sync`, `finish`, `cleanup` and `abandon` → 1 while step files exist or the run is held.
+
+```sh
+nos run step-abandon --step <id> --token <t>      # env, worktree (an open rebase aborted), branch, step file
+nos run status --token <t>                        # { run, hold, queue, blocked, developing, steps, phases }
 ```
 
 ### `set-status --run`
