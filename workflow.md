@@ -241,6 +241,7 @@
         <do mode="manual">For each phase not done, in order: cycle "phase"</do>
         <do mode="auto">Block "scheduler": the steps by their dependencies, specifications in parallel</do>
         <status target="plan" from="in-progress" to="done"/>
+        <do>nos specs commit --run <run> -m "<run>: plan done" (no ability runs for the last status changes, so no other commit would carry them; also before INTEGRATE = NO)</do>
     </step5>
     <step6 resume-at="done">
         <do>Report (with the auto decisions report line, block "auto-decisions"). Pending guardrail proposals → block "proposals" (still in the worktree; also in AUTO: the INTEGRATE question waits for the user anyway). Then
@@ -363,7 +364,7 @@
     <rule>Specs commits stay per step and per ability (rule "Specs commits"); the domain-scoped commit may include another step's half-written spec: harmless, that step's own commit follows</rule>
     <rule>Status changes stay per step via nos set-status; never set a status for a step whose notification has not arrived</rule>
     <rule>A step that happens to run alone (the only step of its phase, or the only one ready) is still a parallel step: same worktree rules, same merge queue. Only MANUAL runs develop in this worktree</rule>
-    <rule>Plan done (nos ready "done": true: every phase done, no step files, no hold) → option "run" step5's status change, then nos specs commit --run <run> -m "<run>: plan done" (no ability runs for it, so no other commit would carry the status), then step6 as usual. ABANDON with step files → "nos run step-abandon --step <id> --token <token>" for each ("nos run status --token <token>" lists them), then the park's ABANDON</rule>
+    <rule>Plan done (nos ready "done": true: every phase done, no step files, no hold) → option "run" step5's status change and specs commit, then step6 as usual. ABANDON with step files → "nos run step-abandon --step <id> --token <token>" for each ("nos run status --token <token>" lists them), then the park's ABANDON</rule>
 </scheduler>
 
 <poc-results>
