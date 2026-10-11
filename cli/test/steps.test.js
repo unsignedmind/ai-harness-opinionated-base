@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createDomain } from '../src/domain.js';
 import { createPlan } from '../src/plan.js';
-import { listSteps, readStep } from '../src/runs.js';
+import { listSteps, readStep, writeStep } from '../src/runs.js';
 import { gitOk, makeProject, initRepo, writeFile } from './helpers.js';
 import { branchExists, commitIn, FAIL_IF, head, noGit, nos } from './run-helpers.js';
 
@@ -264,4 +264,64 @@ test('hold, status, step-abandon and the refusals', noGit, async (t) => {
   // with no steps open, sync works again
   const sync = await nos(['run', 'sync', '--token', run.token], run.enter);
   assert.equal(sync.code, 0, sync.err);
+});
+
+test('merge-queue resumes from the persisted phase after a crash; a merged step is cleaned up first', noGit, async (t) => {
+  const { root, roots, domain } = setup(t);
+  const run = await startPlan(root, domain);
+  const wt = agentWorktree(root);
+  assert.equal((await stepStart(wt, 1, run.token)).code, 0);
+  commitIn(wt, 'src/x.txt', 'x\n', 'step-1: x');
+  assert.equal((await stepMerge(wt, 1, run.token)).code, 0);
+
+  // crash after the ff merge, before the cleanup: the step file says merged, the worktree still exists
+  gitOk(['merge', '--ff-only', readStep(roots, 'plan-1', 1).branch], run.enter);
+  writeStep(roots, { ...readStep(roots, 'plan-1', 1), phase: 'merged' });
+  const rerun = await queue(run.enter, run.token);
+  assert.equal(rerun.code, 0, rerun.err);
+  assert.deepEqual(rerun.json.merged.map((m) => [m.step, m.worktree, m.branch]), [[1, true, true]]);
+  assert.equal(existsSync(wt), false);
+  assert.equal(listSteps(roots, 'plan-1').length, 0);
+
+  // crash in the gate: phase gating is picked up again (the rebase is not repeated)
+  const wt2 = agentWorktree(root);
+  assert.equal((await stepStart(wt2, 2, run.token)).code, 0);
+  commitIn(wt2, 'src/y.txt', 'y\n', 'step-2: y');
+  assert.equal((await stepMerge(wt2, 2, run.token)).code, 0);
+  writeStep(roots, { ...readStep(roots, 'plan-1', 2), phase: 'gating', base: head(run.enter) });
+  const resumed = await queue(run.enter, run.token);
+  assert.equal(resumed.code, 0, resumed.err);
+  assert.deepEqual(resumed.json.merged.map((m) => m.step), [2]);
+  assert.ok(existsSync(path.join(run.enter, 'src', 'y.txt')));
+
+  // nos run status after everything merged: empty queue, no hold
+  const status = await nos(['run', 'status', '--token', run.token], run.enter);
+  assert.equal(status.code, 0, status.err);
+  assert.deepEqual([status.json.queue, status.json.blocked, status.json.developing, status.json.hold], [[], [], [], null]);
+});
+
+test('a step hops across agent worktrees: the next ability adopts the step with its commits and node_modules', noGit, async (t) => {
+  const { root, roots, domain } = setup(t);
+  const run = await startPlan(root, domain);
+  const dev = agentWorktree(root);
+  assert.equal((await stepStart(dev, 1, run.token)).code, 0);
+  writeFile(dev, 'node_modules/.marker', 'installed');
+  const tip = commitIn(dev, 'src/x.txt', 'x\n', 'step-1: x');
+
+  const reviewer = agentWorktree(root);
+  const hop = await stepStart(reviewer, 1, run.token);
+  assert.equal(hop.code, 0, hop.err);
+  assert.equal(hop.json.nodeModules, 'moved');
+  assert.equal(head(reviewer), tip, 'the reviewer starts at the developer\'s tip');
+  assert.ok(existsSync(path.join(reviewer, 'node_modules', '.marker')));
+  assert.equal(existsSync(dev), false);
+  assert.equal(branchExists(root, `worktree-${path.basename(dev)}`), false);
+  assert.equal(readStep(roots, 'plan-1', 1).base, hop.json.step.base, 'the base is kept across hops');
+
+  // a dirty previous worktree is refused (uncommitted work would be lost)
+  const third = agentWorktree(root);
+  writeFile(reviewer, 'src/x.txt', 'changed');
+  const refused = await stepStart(third, 1, run.token);
+  assert.equal(refused.code, 5);
+  assert.match(refused.err, /previous worktree/);
 });
