@@ -49,7 +49,8 @@ const phaseEntry = (phase) => ({
 });
 
 const stepDone = (step) => STEP_DONE.includes(step.status);
-const phaseDone = (phase) => PHASE_DONE.includes(phase.status) || (asList(phase.steps).length > 0 && asList(phase.steps).every(stepDone));
+// a phase is done by its status only: its review is the barrier, not its last step
+const phaseDone = (phase) => PHASE_DONE.includes(phase.status);
 
 function emptyResult() {
   return { specify: [], develop: [], running: [], continue: [], blocked: [], phasesReviewable: [], phasesContinuing: [] };
@@ -112,7 +113,7 @@ export function computeReady(plan) {
   const phases = asList(plan?.phases);
   const checked = dependenciesChecked(plan);
   const sets = checked ? readyByDependencies(phases) : readySequential(phases);
-  const done = phases.length > 0 && phases.every(phaseDone) && phases.every((p) => asList(p.steps).every(stepDone));
+  const done = phases.length > 0 && phases.every(phaseDone);
   return { dependenciesChecked: checked, mode: checked ? 'dependencies' : 'sequential', done, ...sets };
 }
 

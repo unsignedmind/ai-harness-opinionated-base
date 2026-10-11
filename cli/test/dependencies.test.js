@@ -113,12 +113,23 @@ test('ready: after the contracts phase, independent steps are ready together; th
 test('ready: a started step is not re-gated when a phase is inserted in front of it', () => {
   const p = sample();
   p.phases[0].steps[0].status = 'done';
+  p.phases[0].status = 'done';
   p.phases[1].steps[0].status = 'specified';
   p.phases.splice(1, 0, phase('fix', [step('fix1', [], 'open', spec(9, 9, 'fix1'))]));
   const r = computeReady(p);
   assert.deepEqual(ids(r.develop), [2]);
   assert.deepEqual(ids(r.specify), [9]);
   assert.deepEqual(r.blocked.map((b) => b.id), [3, 4, 5]);
+});
+
+test('ready: a phase counts as done by its status only (its review is the barrier)', () => {
+  const p = sample();
+  p.phases[0].steps[0].status = 'done';
+  p.phases[0].status = 'in-review';
+  const r = computeReady(p);
+  assert.deepEqual(ids(r.specify), []);
+  assert.deepEqual(r.blocked.map((b) => [b.id, b.waitsOnPhases]).slice(0, 2), [[2, [1]], [3, [1]]]);
+  assert.equal(r.done, false);
 });
 
 test('ready: running, continue, phasesReviewable and phasesContinuing', () => {
