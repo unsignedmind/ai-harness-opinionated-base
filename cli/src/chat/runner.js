@@ -65,6 +65,30 @@ export function relTo(root = '') {
     );
 }
 
+// Claude Code's usage limit message ("You've hit your session limit · resets 3:45pm", "…weekly limit · resets
+// Mon 12:00am", model variants). parseLimit(text) -> { kind, resetAt } (local time, the next such moment), or
+// null when the text is no limit message. The chat server waits for resetAt and resumes the tab (server.js).
+const LIMIT =
+  /(?:hit|reached) (?:your|the) ([\w ]*?)\s*limit[\s\S]*?resets?\s+(?:at\s+)?(?:(sun|mon|tue|wed|thu|fri|sat)\w*\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i;
+const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+export function parseLimit(text, now = new Date()) {
+  const m = LIMIT.exec(String(text ?? ''));
+  if (!m) return null;
+  const what = m[1].trim().toLowerCase();
+  const kind = /weekly/.test(what) ? 'weekly' : /session/.test(what) ? 'session' : what.split(' ').pop() || 'usage';
+  let hours = Number(m[3]) % 12;
+  if (m[5].toLowerCase() === 'pm') hours += 12;
+  const at = new Date(now);
+  at.setHours(hours, Number(m[4] ?? 0), 0, 0);
+  if (m[2]) {
+    const diff = (WEEKDAYS.indexOf(m[2].toLowerCase()) - now.getDay() + 7) % 7;
+    at.setDate(at.getDate() + diff);
+    if (at <= now) at.setDate(at.getDate() + 7);
+  } else if (at <= now) at.setDate(at.getDate() + 1);
+  return { kind, resetAt: at };
+}
+
 const AGENT_TOOLS = new Set(['Agent', 'Task']);
 const TASK_END = { completed: 'done', failed: 'failed', stopped: 'stopped', killed: 'stopped' };
 
@@ -281,8 +305,9 @@ export function createRunner({
     // One long-lived Claude Code process for a tab: user messages go in on stdin as stream-json,
     // so they reach Claude at once (also while it works) and background agents keep running after
     // a turn ends. Each top-level text block is a reply as soon as it comes; a turn ends with a
-    // `result`. Callbacks: onStarted (the session exists), onBusy(bool), onText, onError,
-    // onActivity, onAgents, onRun(run or null: a nos run started or ended, see runOf), onExit({ stopped, error }).
+    // `result`. Callbacks: onStarted (the session exists), onBusy(bool), onText, onError, onLimit({ kind,
+    // resetAt, text }: the usage limit ended the turn, see parseLimit; no onError then), onActivity, onAgents,
+    // onRun(run or null: a nos run started or ended, see runOf), onExit({ stopped, error, limit }).
     open({
       sessionId,
       resume,
@@ -291,6 +316,7 @@ export function createRunner({
       onBusy = () => {},
       onText = () => {},
       onError = () => {},
+      onLimit = () => {},
       onActivity = () => {},
       onAgents = () => {},
       onRun = () => {},
@@ -365,7 +391,9 @@ export function createRunner({
           }
         } else if (j.type === 'result') {
           const text = String(j.result ?? '').trim();
-          if (j.is_error) onError(text || String(j.subtype ?? 'error'));
+          const limit = j.is_error ? parseLimit(text) : null;
+          if (limit) onLimit({ ...limit, text });
+          else if (j.is_error) onError(text || String(j.subtype ?? 'error'));
           else if (!said && text) onText(text);
           said = false;
           setBusy(false);
@@ -394,7 +422,13 @@ export function createRunner({
       child.on('close', (code) => {
         if (buf.trim()) onLine(buf);
         const quiet = stopped || closed || (!busy && code === 0);
-        exit({ stopped, error: quiet ? null : short(errText, 400) || `claude exited with code ${code}` });
+        // the limit may also end the process with its message on stderr
+        const limit = quiet ? null : parseLimit(errText);
+        exit({
+          stopped,
+          error: quiet || limit ? null : short(errText, 400) || `claude exited with code ${code}`,
+          ...(limit && { limit: { ...limit, text: short(errText, 400) } }),
+        });
       });
       child.stdin.on('error', () => {});
 

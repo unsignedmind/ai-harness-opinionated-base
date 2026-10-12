@@ -58,6 +58,16 @@ function checkText(text) {
 
 const CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:";
 
+// Usage limit of the account (runner.js parseLimit): the tab waits for the reset and continues by itself
+const RESUME_PROMPT =
+  'The usage limit reset. Continue where you stopped: follow the <resume> block of workflow.md (read the ' +
+  'target status, never reset it; a step in progress is re-entered by its status).';
+const RESUME_BACKOFF_MS = 15 * 60 * 1000;
+const RESUME_SOON_MS = 15 * 60 * 1000;
+const RESUME_MAX_TRIES = 5;
+const RESUME_MAX_WAIT_MS = 24 * 60 * 60 * 1000;
+const hhmm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
 export function createChatServer({
   store,
   version,
@@ -71,6 +81,8 @@ export function createChatServer({
   idleMs = 1800000,
   // a tab's Claude Code process with nothing to do (no turn, no subagent) ends after this
   procIdleMs = 600000,
+  // wait this much (random in the range) past the limit's reset time before resuming a tab
+  resumeJitterMs = [30000, 90000],
   runner = null,
   // where the transcripts of Claude Code are (CLAUDE_CONFIG_DIR), see transcript.js
   claudeEnv = process.env,
@@ -92,6 +104,8 @@ export function createChatServer({
   const agents = new Map(); // key -> subagents of the last run (runner.js agentTracker)
   const allStreams = new Set(); // project-wide streams (spec-ui tabs)
   const tailStreams = new Set(); // details views: a followed transcript each
+  const resumes = new Map(); // key -> timer: the tab waits for the usage limit to reset (store: pendingResume)
+  const lastResume = new Map(); // key -> { at, tries }: the last resume fired, for the backoff
   let lastActive = Date.now();
   let stopping = false;
 
@@ -99,6 +113,7 @@ export function createChatServer({
     const s = store.get(key);
     if (!s || s.status === 'ended') return 'ended';
     if (procs.get(key)?.busy) return 'thinking';
+    if (resumes.has(key)) return 'waiting-for-limit';
     if (runner) return s.pending.length > 0 ? 'queued' : 'ready';
     if (typingAt.has(key) && now - typingAt.get(key) < typingMs) return 'typing';
     if (workingAt.has(key) && now - workingAt.get(key) < thinkingMs) return 'thinking';
@@ -143,6 +158,7 @@ export function createChatServer({
         messages: s.messages,
         claudeSession: s.claudeSession,
         run: s.run,
+        pendingResume: s.pendingResume ?? null,
         updatedAt: s.updatedAt,
       }));
   }
@@ -172,6 +188,53 @@ export function createChatServer({
     store.addAgentReply(key, text);
     broadcastChat(key);
   };
+  // ---- usage limit: wait for the reset, then resume the tab by itself (runner mode) ----
+  const jitter = () => {
+    const [lo, hi] = resumeJitterMs;
+    return lo + Math.floor(Math.random() * Math.max(0, hi - lo + 1));
+  };
+  function scheduleResume(key, limit) {
+    const s = store.get(key);
+    if (!runner || stopping || !s || s.status === 'ended' || resumes.has(key)) return;
+    const now = Date.now();
+    const last = lastResume.get(key);
+    const tries = last && now - last.at < RESUME_SOON_MS ? last.tries + 1 : 1;
+    const reset = limit.resetAt instanceof Date ? limit.resetAt.getTime() : Date.parse(limit.resetAt);
+    const at = Math.max(Number.isFinite(reset) ? reset : now, now + (tries - 1) * RESUME_BACKOFF_MS) + jitter();
+    if (tries > RESUME_MAX_TRIES || at - now > RESUME_MAX_WAIT_MS) {
+      lastResume.delete(key);
+      reply(key, `⚠ Usage limit (${limit.kind}): gave up after ${tries - 1} resumes. Send a message to continue.`);
+      broadcastPresence(key);
+      return;
+    }
+    store.update(key, { pendingResume: { at: new Date(at).toISOString(), reason: limit.kind, tries } });
+    armResume(key);
+    reply(key, `⏸ Usage limit (${limit.kind}) hit. Waiting until ${hhmm(new Date(at))} to continue.`);
+    broadcastPresence(key);
+  }
+  function armResume(key) {
+    const pending = store.get(key)?.pendingResume;
+    if (!pending || resumes.has(key)) return;
+    const at = Date.parse(pending.at);
+    const delay = Number.isFinite(at) ? Math.max(0, at - Date.now()) : jitter();
+    resumes.set(key, setTimeout(() => fireResume(key), delay));
+  }
+  function cancelResume(key) {
+    const timer = resumes.get(key);
+    if (timer) clearTimeout(timer);
+    resumes.delete(key);
+    if (store.get(key)?.pendingResume) store.update(key, { pendingResume: null });
+  }
+  function fireResume(key) {
+    const pending = store.get(key)?.pendingResume;
+    resumes.delete(key);
+    if (stopping || !store.get(key) || store.get(key).status === 'ended') return;
+    store.update(key, { pendingResume: null });
+    lastResume.set(key, { at: Date.now(), tries: pending?.tries ?? 1 });
+    reply(key, '▶ Resumed after the usage limit reset.');
+    deliver(key, RESUME_PROMPT);
+  }
+
   // runner mode: the tab's own long-lived Claude Code process (runner.js), started on its first
   // message; it ends when the user stops it or after procIdleMs with nothing to do
   function openProc(key) {
@@ -190,6 +253,11 @@ export function createChatServer({
       },
       onText: (text) => reply(key, text),
       onError: (text) => reply(key, `⚠ ${text}`),
+      // the usage limit ended the turn: wait for the reset, the process has nothing to do until then
+      onLimit: (limit) => {
+        scheduleResume(key, limit);
+        proc.close();
+      },
       onActivity: (text) => {
         activity.set(key, text);
         each(key, 'activity', { text });
@@ -210,6 +278,7 @@ export function createChatServer({
         if (procs.get(key) === proc) procs.delete(key);
         activity.delete(key);
         if (r.stopped) reply(key, '_Stopped._');
+        else if (r.limit) scheduleResume(key, r.limit);
         else if (r.error) reply(key, `⚠ ${r.error}`);
         broadcastPresence(key);
         pump(key);
@@ -233,6 +302,14 @@ export function createChatServer({
         .trim();
       store.update(key, { title: first.length > 40 ? first.slice(0, 39) + '…' : first });
     }
+    // a message of the user while the tab waits for the usage limit: try now, the wait is over
+    cancelResume(key);
+    deliver(key, prompt);
+  }
+  // the prompt goes to the tab's process (started when needed, resumed by session id)
+  function deliver(key, prompt) {
+    const s = store.get(key);
+    if (!s || s.status === 'ended') return;
     if (!s.claudeSession) store.update(key, { claudeSession: randomUUID(), claudeStarted: false });
     try {
       (procs.get(key) ?? openProc(key)).send(prompt);
@@ -241,6 +318,8 @@ export function createChatServer({
     }
     broadcastPresence(key);
   }
+  // tabs that waited for a usage limit when the server last stopped wait on (a past time fires now)
+  if (runner) for (const s of store.list()) if (s.pendingResume && s.status !== 'ended') armResume(s.key);
   const stopRun = (key) => procs.get(key)?.stop();
   const working = (p) => !!p && (p.busy || p.agentsRunning);
   const clear = (key) => {
@@ -266,6 +345,7 @@ export function createChatServer({
       allStreams.size > 0 ||
       parked.size > 0 ||
       procs.size > 0 ||
+      resumes.size > 0 ||
       tailStreams.size > 0;
     for (const p of procs.values()) if (!working(p) && now - p.lastUse > procIdleMs) p.close();
     if (busy) lastActive = now;
@@ -516,6 +596,7 @@ export function createChatServer({
       case 'end':
       case 'agent-end': {
         const by = k[2] === 'end' ? 'user' : 'agent';
+        cancelResume(key);
         stopRun(key);
         store.end(key, by);
         clear(key);
@@ -526,6 +607,7 @@ export function createChatServer({
       }
       case 'stop': {
         const was = working(procs.get(key));
+        cancelResume(key);
         stopRun(key);
         return json(res, 200, { status: was ? 'stopping' : 'idle' });
       }
@@ -570,6 +652,9 @@ export function createChatServer({
     stopping = true;
     clearInterval(sweep);
     clearInterval(ping);
+    // the pending resumes stay in the store: the next server start arms them again
+    for (const timer of resumes.values()) clearTimeout(timer);
+    resumes.clear();
     for (const entry of [...parked]) entry.finish({ status: 'waiting', note: 'server stopping, run await again' });
     for (const p of procs.values()) p.stop();
     for (const set of streams.values()) for (const res of set) res.end();

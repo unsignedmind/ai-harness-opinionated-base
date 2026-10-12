@@ -257,6 +257,8 @@ Pending guardrail proposals are asked first (see "Lessons become guardrails").
 
 Usage limit, closed terminal, shutdown: nothing is lost. Start `/nos` → `RUN` and pick the plan. nos reads the statuses in `plan.json` and continues exactly where it stopped. It never resets a status. Interrupted work is simply redone. For example, a step stuck at `in-review` gets both reviews run again.
 
+Usage limit without you: a terminal session waits and continues by itself when Claude Code's "Continue automatically at usage limit" (`/config`, v2.1.234+, a user setting; `nos setup` checks it) is on. A chat tab is resumed by the chat server: it reads the reset time from the limit message, shows "⏸ Usage limit hit. Waiting until 15:45", keeps running, and at that time resumes the tab's session with "The usage limit reset. Continue where you stopped" (a message from you resumes it at once; a limit right after a resume backs off 15 minutes, five tries, then it asks you). Subagents that died at the limit come back as failed notifications; the orchestrator runs them again as a resume (workflow rule "Usage limit").
+
 A resumed session (`claude --resume`, a restarted chat) is back in the run's worktree and still knows the run token. A new session that picks a running run is refused (another holder); nos asks whether to take it over (`TAKEOVER`). A rebase that stopped with conflicts is resolved by the integrate ability first.
 
 ### Runs: branches and worktrees

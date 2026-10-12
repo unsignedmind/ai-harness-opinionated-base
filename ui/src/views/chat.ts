@@ -15,6 +15,8 @@ export type Presence =
   | 'waiting'
   // the chat server runs its own Claude Code session for the tab and is idle
   | 'ready'
+  // the usage limit ended the tab's turn; the server resumes it after the reset
+  | 'waiting-for-limit'
   // spec-ui only: no chat yet, server unreachable, device not paired
   | 'off'
   | 'offline'
@@ -28,6 +30,7 @@ export const PRESENCE_LABEL: Record<Presence, string> = {
   queued: 'queued for Claude',
   waiting: 'Claude is not connected',
   ready: 'Claude is ready',
+  'waiting-for-limit': 'waiting for the usage limit to reset',
   off: 'chat not started',
   offline: 'chat server offline',
   unpaired: 'device not paired',
@@ -48,6 +51,8 @@ export type ChatTab = {
   agents?: SubAgent[];
   // the nos run the tab's session works in (nos run start … nos run cleanup), null in main
   run?: TabRun | null;
+  // set while the tab waits for the usage limit to reset (cli/src/chat/server.js)
+  pendingResume?: { at: string; reason: string; tries: number } | null;
 };
 
 // cli/src/chat/runner.js runOf: what a tab knows about its run (a POC: id = slug, domain null)

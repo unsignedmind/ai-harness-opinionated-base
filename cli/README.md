@@ -730,6 +730,7 @@ Async, so `bin/nos.js` hands it to `src/chat/commands.js`. Full help: `nos chat 
   every command reaches the chat of the main checkout, same state dir, same session key (sha256 of main's real path).
   Without `nos.config.json` in main every command fails with "nos is not set up in <main> …: run nos init" (the hook
   prints nothing). `status` and the server log print main with forward slashes.
+- Usage limit (runner mode): a tab whose turn ended with "You've hit your … limit · resets …" waits for the reset (`pendingResume { at, reason, tries }` in `sessions.json`, presence `waiting-for-limit`, "⏸ … Waiting until HH:MM" in the chat), then its Claude Code session is resumed with a continue prompt ("▶ Resumed …"). A user message resumes at once; a limit right after a resume backs off 15 min, 5 tries. `nos chat status` shows `pendingResume`.
 - State: `<specs>/.chat/` (`sessions.json`, `server.json`, `server.log`, `devices.json`, `audit.log`, `tls/`, and a
   `.gitignore` of `*`; `<specs>/.gitignore` of `nos init` ignores `.chat/` too). `src/chat/devices.js` and
   `src/chat/paths.js` (with `devices.d.ts` / `paths.d.ts`) are shared with the spec-ui dev server.

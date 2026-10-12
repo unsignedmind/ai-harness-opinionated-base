@@ -9,6 +9,7 @@ import {
   createRunner,
   describeTool,
   isRunCall,
+  parseLimit,
   runOf,
 } from '../../src/chat/runner.js';
 
@@ -518,4 +519,55 @@ test('open: only the results of the session own nos run calls count; cleanup cle
     result('t6', [{ type: 'text', text: JSON.stringify({ action: 'run-cleanup', run: 'quick-7' }) }]),
   );
   assert.deepEqual(runs, [RUN, null]);
+});
+
+// ---- usage limit ----
+
+test('parseLimit: the next reset moment in local time, kind from the message, null otherwise', () => {
+  const now = new Date(2026, 9, 11, 14, 0, 0); // Sunday 2026-10-11 14:00
+  const s = parseLimit("You've hit your session limit · resets 3:45pm", now);
+  assert.deepEqual([s.kind, s.resetAt.toString()], ['session', new Date(2026, 9, 11, 15, 45).toString()]);
+  // already past today -> tomorrow
+  assert.equal(parseLimit("You've hit your session limit · resets 1:30pm", now).resetAt.toString(), new Date(2026, 9, 12, 13, 30).toString());
+  const w = parseLimit("You've hit your weekly limit · resets Mon 12:00am", now);
+  assert.deepEqual([w.kind, w.resetAt.toString()], ['weekly', new Date(2026, 9, 12, 0, 0).toString()]);
+  // the same weekday, time already past -> next week
+  assert.equal(parseLimit('You have reached your weekly limit. Resets Sun 1pm', now).resetAt.toString(), new Date(2026, 9, 18, 13, 0).toString());
+  assert.equal(parseLimit("You've hit your Opus limit · resets 5pm", now).kind, 'opus');
+  assert.equal(parseLimit('Error: something else broke'), null);
+  assert.equal(parseLimit(''), null);
+});
+
+test('a result that is the usage limit goes to onLimit, not onError; the same on a non-zero exit with it on stderr', async () => {
+  const { fn, emit, exit } = fakeProc();
+  const limits = [];
+  const errors = [];
+  const exits = [];
+  const proc = createRunner({ root: '/proj', spawnFn: fn }).open({
+    sessionId: ID,
+    onLimit: (l) => limits.push(l),
+    onError: (e) => errors.push(e),
+    onExit: (r) => exits.push(r),
+  });
+  proc.send('go');
+  await emit(init, result("You've hit your session limit · resets 3:45pm", true));
+  assert.equal(limits.length, 1);
+  assert.deepEqual([limits[0].kind, limits[0].resetAt instanceof Date, limits[0].text], ['session', true, "You've hit your session limit · resets 3:45pm"]);
+  assert.deepEqual(errors, []);
+  assert.equal(proc.busy, false);
+
+  const other = fakeProc();
+  const seen = { limits: [], errors: [], exits: [] };
+  const p2 = createRunner({ root: '/proj', spawnFn: other.fn }).open({
+    sessionId: ID,
+    onLimit: (l) => seen.limits.push(l),
+    onError: (e) => seen.errors.push(e),
+    onExit: (r) => seen.exits.push(r),
+  });
+  p2.send('go');
+  await other.emit(init);
+  await other.exit(1, "You've hit your weekly limit · resets Mon 12:00am\n");
+  assert.equal(seen.exits[0].error, null);
+  assert.equal(seen.exits[0].limit.kind, 'weekly');
+  assert.deepEqual(seen.errors, []);
 });

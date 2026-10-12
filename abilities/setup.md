@@ -65,6 +65,7 @@ description: You set up nos for the project. Creates or checks nos.config.json a
         Both: the nos allow rules are in <main>/.claude/settings.local.json since step4 (missing → merge them as there)
         RELAY only: set "chat": { "runner": false } in <specs>/config.json and merge the Stop hook into <main>/.claude/settings.local.json:
         hooks.Stop: { "matcher": ".*", "hooks": [{ "type": "command", "command": "node <home>/cli/bin/nos.js chat hook", "timeout": 30 }] }
+        Both: Claude Code's user setting "Continue automatically at usage limit" (autoContinueAtUsageLimit in the user's settings.json, Claude Code ≥ 2.1.234) lets a terminal session go on by itself after the account's usage limit resets; the chat server resumes its own tabs anyway. Read the user settings file (Read, path from "claude config" docs: ~/.claude/settings.json) only to report: missing or false → tell the user to turn it on with /config ("Continue automatically at usage limit"); never edit user settings
         Optional in <specs>/config.json "chat": "port" (default 4611), "permissionMode" (default "auto"; acceptEdits, dontAsk, plan, …), "model", "claude" (path of the claude executable). Only what the user asks for. <specs>/config.json changed → tell the orchestrator: nos specs commit --config -m "setup: chat"
         .claude/settings.json has nos entries with relative paths → list them and tell the user to remove them by hand
     </step7>

@@ -190,7 +190,13 @@ function fakeRunner() {
         },
         exit(r = {}) {
           p.busy = false;
-          opts.onExit({ stopped: p.stopped, error: null, ...r });
+          opts.onExit({ stopped: p.stopped, error: null, limit: null, ...r });
+        },
+        // the usage limit ended the turn (runner.js parseLimit)
+        limit(l) {
+          p.busy = false;
+          opts.onBusy(false);
+          opts.onLimit(l);
         },
       };
       Object.assign(p, {
@@ -507,4 +513,87 @@ test('runFileExists: the run file of a tab run decides; unknown run ids are left
   assert.equal(runFileExists(roots, { kind: 'quick', id: 3 }), false);
   assert.equal(runFileExists(roots, { kind: 'odd', id: 'Y' }), true);
   assert.equal(runFileExists(roots, { kind: null, id: null }), true);
+});
+
+// ---- usage limit: the server waits for the reset and resumes the tab ----
+
+const limitAt = (ms, kind = 'session') => ({ kind, resetAt: new Date(Date.now() + ms), text: 'limit' });
+
+test('usage limit: the tab waits, then the session is resumed with a continue prompt', async (t) => {
+  const runner = fakeRunner();
+  const { call, key, chat, store } = await start(t, { runner, resumeJitterMs: [0, 0] });
+  await call('POST', `/api/session/${key}/messages`, { text: 'Run the plan' });
+  const proc = runner.procs[0];
+  proc.opts.onStarted(); // the session exists: later processes resume it
+  proc.limit(limitAt(60));
+  assert.equal(chat.presenceFor(key), 'waiting-for-limit');
+  assert.equal(proc.closed, true, 'the process has nothing to do until the reset');
+  const pending = store.get(key).pendingResume;
+  assert.equal(pending.reason, 'session');
+  assert.equal(pending.tries, 1);
+  assert.ok(Date.parse(pending.at) >= Date.now() + 40);
+  const chatLog = store.get(key).chat;
+  assert.match(chatLog.at(-1).text, /^⏸ Usage limit \(session\) hit\. Waiting until \d\d:\d\d/);
+  proc.exit();
+  await sleep(150);
+  assert.equal(runner.procs.length, 2, 'a new process after the reset');
+  assert.equal(runner.procs[1].opts.resume, true);
+  assert.equal(runner.procs[1].opts.sessionId, proc.opts.sessionId);
+  assert.match(runner.procs[1].sent[0], /usage limit reset/);
+  assert.equal(store.get(key).pendingResume, null);
+  assert.ok(store.get(key).chat.some((m) => m.text.startsWith('▶ Resumed')));
+  assert.equal(chat.presenceFor(key), 'thinking');
+});
+
+test('usage limit: a user message while waiting resumes at once; end cancels the wait', async (t) => {
+  const runner = fakeRunner();
+  const { call, key, chat, store } = await start(t, { runner, resumeJitterMs: [0, 0] });
+  await call('POST', `/api/session/${key}/messages`, { text: 'Run the plan' });
+  runner.procs[0].limit(limitAt(60 * 60 * 1000));
+  runner.procs[0].exit();
+  assert.equal(chat.presenceFor(key), 'waiting-for-limit');
+  await call('POST', `/api/session/${key}/messages`, { text: 'try again now' });
+  assert.equal(runner.procs.length, 2);
+  assert.deepEqual(runner.procs[1].sent, ['try again now']);
+  assert.equal(store.get(key).pendingResume, null);
+  assert.ok(!store.get(key).chat.some((m) => m.text.startsWith('▶')));
+  runner.procs[1].limit(limitAt(60 * 60 * 1000));
+  runner.procs[1].exit();
+  assert.equal(chat.presenceFor(key), 'waiting-for-limit');
+  await call('POST', `/api/session/${key}/end`, {});
+  assert.equal(store.get(key).pendingResume, null);
+  assert.equal(chat.presenceFor(key), 'ended');
+});
+
+test('usage limit: a pending resume survives a server restart and keeps the server alive', async (t) => {
+  const dir = makeTempRoot(t);
+  const store = createSessionStore({ file: path.join(dir, 'sessions.json') });
+  const { key } = store.open(dir);
+  store.update(key, { claudeSession: '3664881e-fbdd-4b6d-942d-14b1ee5ac8be', claudeStarted: true });
+  store.update(key, { pendingResume: { at: new Date(Date.now() + 80).toISOString(), reason: 'weekly', tries: 1 } });
+  const runner = fakeRunner();
+  const chat = createChatServer({ store, version: 'test', root: dir, sweepMs: 10, idleMs: 30, runner, resumeJitterMs: [0, 0] });
+  const port = await chat.listen(0);
+  t.after(() => chat.stop());
+  assert.equal(chat.presenceFor(key), 'waiting-for-limit');
+  await sleep(60);
+  assert.equal((await request(port, 'GET', '/health')).body.ok, true, 'not idle-stopped while waiting');
+  await sleep(80);
+  assert.equal(runner.procs.length, 1, 'resumed after the restart');
+  assert.equal(runner.procs[0].opts.resume, true);
+  assert.match(runner.procs[0].sent[0], /usage limit reset/);
+});
+
+test('usage limit: a limit right after a resume backs off by 15 minutes', async (t) => {
+  const runner = fakeRunner();
+  const { call, key, store } = await start(t, { runner, resumeJitterMs: [0, 0] });
+  await call('POST', `/api/session/${key}/messages`, { text: 'Run the plan' });
+  runner.procs[0].limit(limitAt(10));
+  runner.procs[0].exit();
+  await sleep(60);
+  assert.equal(runner.procs.length, 2);
+  runner.procs[1].limit(limitAt(10));
+  const pending = store.get(key).pendingResume;
+  assert.equal(pending.tries, 2);
+  assert.ok(Date.parse(pending.at) >= Date.now() + 14 * 60 * 1000, 'second try waits at least 15 minutes');
 });

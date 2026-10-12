@@ -152,3 +152,13 @@ test('pending messages survive a reload from disk; a corrupt file gives an empty
   writeFileSync(path.join(dir, 'sessions.json'), '{nope');
   assert.deepEqual(storeIn(dir).list(), []);
 });
+
+test('pendingResume is kept by update and shown by list', (t) => {
+  const store = storeIn(makeTempRoot(t));
+  const { key } = store.open('D:/p');
+  assert.equal(store.list()[0].pendingResume, null);
+  store.update(key, { pendingResume: { at: '2026-10-11T15:45:00.000Z', reason: 'session', tries: 1 } });
+  assert.deepEqual(store.list()[0].pendingResume, { at: '2026-10-11T15:45:00.000Z', reason: 'session', tries: 1 });
+  store.update(key, { pendingResume: null });
+  assert.equal(store.get(key).pendingResume, null);
+});

@@ -1125,7 +1125,8 @@ table.list td .label {
   background: var(--accent);
   animation: chat-pulse 1.2s ease-in-out infinite;
 }
-[data-presence='queued'] .dot {
+[data-presence='queued'] .dot,
+[data-presence='waiting-for-limit'] .dot {
   background: var(--on-hold);
 }
 [data-presence='offline'] .dot,
